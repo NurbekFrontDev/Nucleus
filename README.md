@@ -1,73 +1,58 @@
-# React + TypeScript + Vite
+# FinLit — личные финансы
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+Простое веб-приложение для учёта личных финансов: доходы, расходы, бюджет по категориям и наглядное сравнение «план против факта».
 
-Currently, two official plugins are available:
+🔗 **Живой сайт:** https://fin-lit-xi.vercel.app/
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+## Возможности
 
-## React Compiler
+- 🔐 Регистрация и вход (Supabase Auth)
+- 🏠 Дашборд: план против факта по категориям, прогресс-бары, «уже отложено»
+- 💼 Доходы за месяц
+- 🧾 Расходы по категориям
+- 📊 Бюджет/План: плановый доход и редактируемые проценты категорий
+- 🗓️ История по месяцам (доход / расход / баланс)
+- ⚙️ Настройки и выход
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+Валюта — узбекский сум, формат сумм: `5 000 000 сум`.
 
-## Expanding the ESLint configuration
+## Как считается бюджет
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+- **План категории** = `плановый доход × процент / 100`
+- **Факт категории** = сумма расходов по этой категории за месяц
+- **Статус:** 🟢 ≤ 80% · 🟡 ≤ 100% · 🔴 > 100% от плана
+- **«Уже отложено»** = факт по категориям «Сбережения» + «Инвестиции»
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
+Проценты категорий по умолчанию: Сбережения 10, Инвестиции 10, Долги 20, Обязательные 30, Цели/Хотелки 20, Свободные 10 (редактируются на экране «Бюджет»).
 
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
+## Технологии
 
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+- React + Vite + TypeScript
+- Tailwind CSS v4
+- Supabase (PostgreSQL + Auth + RLS)
+- Хостинг: Vercel
+
+## Локальный запуск
+
+```bash
+npm install
+npm run dev
 ```
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+Создай файл `.env` по образцу `.env.example`:
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
-
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
 ```
+VITE_SUPABASE_URL=твой-supabase-url
+VITE_SUPABASE_ANON_KEY=твой-publishable-ключ
+```
+
+Схема базы данных — в `supabase/schema.sql` (таблицы `categories`, `months`, `incomes`, `expenses`, RLS-политики и триггер автозаполнения категорий для нового пользователя).
+
+## Сборка
+
+```bash
+npm run build
+npm run preview
+```
+
+Деплой происходит автоматически: при пуше в ветку `main` Vercel пересобирает и публикует сайт.
