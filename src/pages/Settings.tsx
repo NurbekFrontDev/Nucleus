@@ -7,7 +7,7 @@ export default function Settings() {
       <h1 className="text-2xl font-semibold">⚙️ Настройки</h1>
       <div className="rounded-2xl border border-neutral-800 bg-neutral-900/50 p-6">
         <p className="text-sm text-neutral-400">Вошёл как</p>
-        <p className="font-medium">{user?.email}</p>
+        <p className="mt-1 font-medium break-all">{user?.email}</p>
       </div>
       <button
         onClick={() => signOut()}

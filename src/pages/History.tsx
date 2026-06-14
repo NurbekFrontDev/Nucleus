@@ -97,10 +97,19 @@ export default function History() {
                     {formatSum(balance)}
                   </span>
                 </div>
-                <div className="grid grid-cols-3 gap-2 text-xs text-neutral-400">
-                  <span>План: {formatSum(Number(m.planned_income))}</span>
-                  <span className="text-emerald-400/80">Доход: {formatSum(s.income)}</span>
-                  <span className="text-red-400/80">Расход: {formatSum(s.expense)}</span>
+                <div className="grid grid-cols-1 gap-1 text-xs text-neutral-400 sm:grid-cols-3 sm:gap-3">
+                  <span className="flex justify-between gap-2 sm:flex-col sm:justify-start sm:gap-0.5">
+                    <span className="text-neutral-500">План</span>
+                    <span className="font-medium text-neutral-300">{formatSum(Number(m.planned_income))}</span>
+                  </span>
+                  <span className="flex justify-between gap-2 sm:flex-col sm:justify-start sm:gap-0.5">
+                    <span className="text-neutral-500">Доход</span>
+                    <span className="font-medium text-emerald-400">{formatSum(s.income)}</span>
+                  </span>
+                  <span className="flex justify-between gap-2 sm:flex-col sm:justify-start sm:gap-0.5">
+                    <span className="text-neutral-500">Расход</span>
+                    <span className="font-medium text-red-400">{formatSum(s.expense)}</span>
+                  </span>
                 </div>
               </div>
             )
