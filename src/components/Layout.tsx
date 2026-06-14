@@ -13,7 +13,7 @@ export default function Layout() {
   return (
     <div className="min-h-screen md:flex">
       {/* Боковое меню (десктоп) */}
-      <aside className="hidden md:flex md:w-60 md:flex-col md:border-r md:border-neutral-800 md:p-4">
+      <aside className="hidden md:flex md:w-60 md:flex-col md:border-r md:border-neutral-200 md:p-4 dark:md:border-neutral-800">
         <div className="mb-8 flex items-center gap-2 px-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500 text-lg">
             💰
@@ -29,8 +29,8 @@ export default function Layout() {
               className={({ isActive }) =>
                 `flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition ${
                   isActive
-                    ? 'bg-emerald-500/15 text-emerald-400'
-                    : 'text-neutral-400 hover:bg-neutral-800/60 hover:text-neutral-100'
+                    ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
+                    : 'text-neutral-500 hover:bg-neutral-200/70 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800/60 dark:hover:text-neutral-100'
                 }`
               }
             >
@@ -49,7 +49,7 @@ export default function Layout() {
       </main>
 
       {/* Нижняя навигация (мобильный) */}
-      <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t border-neutral-800 bg-neutral-950/95 backdrop-blur md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t border-neutral-200 bg-white/95 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:hidden">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
@@ -57,7 +57,7 @@ export default function Layout() {
             end={item.to === '/'}
             className={({ isActive }) =>
               `flex flex-1 flex-col items-center gap-0.5 py-2 text-[10px] transition ${
-                isActive ? 'text-emerald-400' : 'text-neutral-400'
+                isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-500 dark:text-neutral-400'
               }`
             }
           >

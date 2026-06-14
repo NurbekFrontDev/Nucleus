@@ -6,7 +6,7 @@ import { getOrCreateMonth, formatSum, MONTH_NAMES } from '../lib/db'
 type Category = { id: string; name: string; percent: number; sort_order: number }
 
 const inputCls =
-  'rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm outline-none focus:border-emerald-500'
+  'rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
 
 export default function Budget() {
   const { user } = useAuth()
@@ -99,11 +99,11 @@ export default function Budget() {
       <h1 className="text-2xl font-semibold">📊 Бюджет / План · {MONTH_NAMES[month - 1]}</h1>
 
       {loading ? (
-        <p className="text-neutral-400">Загрузка…</p>
+        <p className="text-neutral-500 dark:text-neutral-400">Загрузка…</p>
       ) : (
         <form onSubmit={save} className="flex flex-col gap-5">
-          <div className="flex flex-col gap-2 rounded-2xl border border-neutral-800 bg-neutral-900/50 p-4">
-            <label className="text-sm text-neutral-400">Плановый доход на месяц</label>
+          <div className="flex flex-col gap-2 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50">
+            <label className="text-sm text-neutral-500 dark:text-neutral-400">Плановый доход на месяц</label>
             <input
               inputMode="numeric"
               value={plannedIncome}
@@ -118,10 +118,10 @@ export default function Budget() {
 
           <div className="flex flex-col gap-2">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-neutral-400">Категории и проценты</span>
+              <span className="text-sm text-neutral-500 dark:text-neutral-400">Категории и проценты</span>
               <span
                 className={`text-sm ${
-                  totalPercent === 100 ? 'text-emerald-400' : 'text-amber-400'
+                  totalPercent === 100 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'
                 }`}
               >
                 Сумма: {totalPercent}%
@@ -131,17 +131,17 @@ export default function Budget() {
             {categories.map((c) => (
               <div
                 key={c.id}
-                className="flex items-center gap-3 rounded-xl border border-neutral-800 bg-neutral-900/40 px-4 py-3"
+                className="flex items-center gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/40"
               >
                 <span className="flex-1 font-medium">{c.name}</span>
                 <input
                   inputMode="numeric"
                   value={String(c.percent)}
                   onChange={(e) => setPercent(c.id, e.target.value)}
-                  className="w-16 rounded-lg border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-center text-sm outline-none focus:border-emerald-500"
+                  className="w-16 rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-center text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
                 />
                 <span className="text-neutral-500">%</span>
-                <span className="w-36 text-right text-sm text-emerald-400">
+                <span className="w-36 text-right text-sm text-emerald-600 dark:text-emerald-400">
                   {formatSum((income * Number(c.percent)) / 100)}
                 </span>
               </div>
@@ -149,12 +149,12 @@ export default function Budget() {
           </div>
 
           {totalPercent !== 100 && (
-            <p className="text-sm text-amber-400">
+            <p className="text-sm text-amber-600 dark:text-amber-400">
               ⚠️ Сумма процентов = {totalPercent}%. Рекомендуется ровно 100%.
             </p>
           )}
-          {error && <p className="text-sm text-red-400">{error}</p>}
-          {saved && <p className="text-sm text-emerald-400">✅ Сохранено!</p>}
+          {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
+          {saved && <p className="text-sm text-emerald-600 dark:text-emerald-400">✅ Сохранено!</p>}
 
           <button
             type="submit"

@@ -69,9 +69,9 @@ export default function History() {
       <h1 className="text-2xl font-semibold">🗓️ История</h1>
 
       {loading ? (
-        <p className="text-neutral-400">Загрузка…</p>
+        <p className="text-neutral-500 dark:text-neutral-400">Загрузка…</p>
       ) : error ? (
-        <p className="text-sm text-red-400">{error}</p>
+        <p className="text-sm text-red-500 dark:text-red-400">{error}</p>
       ) : months.length === 0 ? (
         <p className="text-sm text-neutral-500">Пока нет данных. Добавь доходы и расходы — месяцы появятся здесь.</p>
       ) : (
@@ -82,7 +82,7 @@ export default function History() {
             return (
               <div
                 key={m.id}
-                className="flex flex-col gap-2 rounded-xl border border-neutral-800 bg-neutral-900/40 px-4 py-3"
+                className="flex flex-col gap-2 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/40"
               >
                 <div className="flex items-center justify-between">
                   <span className="font-medium">
@@ -90,25 +90,25 @@ export default function History() {
                   </span>
                   <span
                     className={`text-sm ${
-                      balance >= 0 ? 'text-emerald-400' : 'text-red-400'
+                      balance >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'
                     }`}
                   >
                     {balance >= 0 ? '+' : ''}
                     {formatSum(balance)}
                   </span>
                 </div>
-                <div className="grid grid-cols-1 gap-1 text-xs text-neutral-400 sm:grid-cols-3 sm:gap-3">
+                <div className="grid grid-cols-1 gap-1 text-xs text-neutral-500 dark:text-neutral-400 sm:grid-cols-3 sm:gap-3">
                   <span className="flex justify-between gap-2 sm:flex-col sm:justify-start sm:gap-0.5">
                     <span className="text-neutral-500">План</span>
-                    <span className="font-medium text-neutral-300">{formatSum(Number(m.planned_income))}</span>
+                    <span className="font-medium text-neutral-700 dark:text-neutral-300">{formatSum(Number(m.planned_income))}</span>
                   </span>
                   <span className="flex justify-between gap-2 sm:flex-col sm:justify-start sm:gap-0.5">
                     <span className="text-neutral-500">Доход</span>
-                    <span className="font-medium text-emerald-400">{formatSum(s.income)}</span>
+                    <span className="font-medium text-emerald-600 dark:text-emerald-400">{formatSum(s.income)}</span>
                   </span>
                   <span className="flex justify-between gap-2 sm:flex-col sm:justify-start sm:gap-0.5">
                     <span className="text-neutral-500">Расход</span>
-                    <span className="font-medium text-red-400">{formatSum(s.expense)}</span>
+                    <span className="font-medium text-red-500 dark:text-red-400">{formatSum(s.expense)}</span>
                   </span>
                 </div>
               </div>

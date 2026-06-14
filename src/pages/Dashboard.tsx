@@ -7,7 +7,7 @@ type Category = { id: string; name: string; percent: number; sort_order: number 
 type Row = { id: string; name: string; percent: number; plan: number; fact: number }
 
 function statusFor(plan: number, fact: number) {
-  if (plan <= 0) return { bar: 'bg-neutral-600', emoji: '⚪', pct: 0 }
+  if (plan <= 0) return { bar: 'bg-neutral-400 dark:bg-neutral-600', emoji: '⚪', pct: 0 }
   const pct = (fact / plan) * 100
   if (pct <= 80) return { bar: 'bg-emerald-500', emoji: '🟢', pct }
   if (pct <= 100) return { bar: 'bg-amber-500', emoji: '🟡', pct }
@@ -16,8 +16,8 @@ function statusFor(plan: number, fact: number) {
 
 function Card({ label, value, accent }: { label: string; value: string; accent?: string }) {
   return (
-    <div className="rounded-2xl border border-neutral-800 bg-neutral-900/50 p-4">
-      <p className="text-xs text-neutral-400">{label}</p>
+    <div className="rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50">
+      <p className="text-xs text-neutral-500 dark:text-neutral-400">{label}</p>
       <p className={`mt-1 text-lg font-semibold ${accent ?? ''}`}>{value}</p>
     </div>
   )
@@ -99,47 +99,47 @@ export default function Dashboard() {
       <h1 className="text-2xl font-semibold">🏠 Дашборд · {MONTH_NAMES[month - 1]}</h1>
 
       {loading ? (
-        <p className="text-neutral-400">Загрузка…</p>
+        <p className="text-neutral-500 dark:text-neutral-400">Загрузка…</p>
       ) : error ? (
-        <p className="text-sm text-red-400">{error}</p>
+        <p className="text-sm text-red-500 dark:text-red-400">{error}</p>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3">
             <Card label="Плановый доход" value={formatSum(plannedIncome)} />
-            <Card label="Доход (факт)" value={formatSum(actualIncome)} accent="text-emerald-400" />
-            <Card label="Расходы (факт)" value={formatSum(totalExpense)} accent="text-red-400" />
-            <Card label="Уже отложено" value={formatSum(saved)} accent="text-emerald-400" />
+            <Card label="Доход (факт)" value={formatSum(actualIncome)} accent="text-emerald-600 dark:text-emerald-400" />
+            <Card label="Расходы (факт)" value={formatSum(totalExpense)} accent="text-red-500 dark:text-red-400" />
+            <Card label="Уже отложено" value={formatSum(saved)} accent="text-emerald-600 dark:text-emerald-400" />
           </div>
 
           {plannedIncome <= 0 && (
-            <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+            <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
               ⚠️ Задай плановый доход и проценты в разделе «Бюджет», чтобы увидеть план против факта.
             </p>
           )}
 
           <div className="flex flex-col gap-3">
-            <span className="text-sm text-neutral-400">План против факта по категориям</span>
+            <span className="text-sm text-neutral-500 dark:text-neutral-400">План против факта по категориям</span>
             {rows.map((r) => {
               const st = statusFor(r.plan, r.fact)
               const remainder = r.plan - r.fact
               return (
                 <div
                   key={r.id}
-                  className="flex flex-col gap-2 rounded-xl border border-neutral-800 bg-neutral-900/40 px-4 py-3"
+                  className="flex flex-col gap-2 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/40"
                 >
                   <div className="flex items-center justify-between text-sm">
                     <span className="font-medium">
                       {st.emoji} {r.name}{' '}
                       <span className="text-neutral-500">{r.percent}%</span>
                     </span>
-                    <span className="text-neutral-400">
+                    <span className="text-neutral-500 dark:text-neutral-400">
                       {formatSum(r.fact)} / {formatSum(r.plan)}
                     </span>
                   </div>
-                  <div className="h-2 w-full overflow-hidden rounded-full bg-neutral-800">
+                  <div className="h-2 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
                     <div
                       className={`h-full rounded-full ${st.bar}`}
-                      style={{ width: `${Math.min(st.pct, 100)}%` }}
+                      style={ { width: `${Math.min(st.pct, 100)}%` } }
                     />
                   </div>
                   <div className="text-right text-xs text-neutral-500">
