@@ -66,7 +66,7 @@ export default function Budget() {
   //  · active=false пока палец не сдвинулся больше порога — такой «down» считается тапом и открывает меню.
   //  · active=true — это реальное перетаскивание: соседи плавно расступаются.
   //  · settling=true — карточка плавно «доезжает» в свой слот при отпускании (анимация опускания).
-  const [drag, setDrag] = useState<{
+  type DragState = {
     id: string
     fromIndex: number
     overIndex: number
@@ -75,7 +75,11 @@ export default function Budget() {
     slot: number
     active: boolean
     settling: boolean
-  } | null>(null)
+  }
+  const [drag, setDrag] = useState<DragState | null>(null)
+  // Синхронный источник правды для pointer-обработчиков: при быстром тапе React
+  // не успевает закоммитить state между pointerdown и pointerup, поэтому читаем ref.
+  const dragRef = useRef<DragState | null>(null)
   const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map())
   const settleTimer = useRef<number | null>(null)
 
@@ -166,7 +170,7 @@ export default function Budget() {
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     const el = rowRefs.current.get(id)
     const slot = (el?.offsetHeight ?? 56) + 8
-    setDrag({
+    const next: DragState = {
       id,
       fromIndex: index,
       overIndex: index,
@@ -175,21 +179,23 @@ export default function Budget() {
       slot,
       active: false,
       settling: false,
-    })
+    }
+    dragRef.current = next
+    setDrag(next)
   }
 
   // Движение: после порога (6px) — настоящий драг; карточка следует за пальцем.
   const moveDrag = (e: React.PointerEvent) => {
-    const clientY = e.clientY
-    setDrag((d) => {
-      if (!d || d.settling) return d
-      const offset = clientY - d.startY
-      const active = d.active || Math.abs(offset) > 6
-      const steps = Math.round(offset / d.slot)
-      const overIndex = Math.max(0, Math.min(categories.length - 1, d.fromIndex + steps))
-      if (offset === d.offset && overIndex === d.overIndex && active === d.active) return d
-      return { ...d, offset, overIndex, active }
-    })
+    const d = dragRef.current
+    if (!d || d.settling) return
+    const offset = e.clientY - d.startY
+    const active = d.active || Math.abs(offset) > 6
+    const steps = Math.round(offset / d.slot)
+    const overIndex = Math.max(0, Math.min(categories.length - 1, d.fromIndex + steps))
+    if (offset === d.offset && overIndex === d.overIndex && active === d.active) return
+    const next: DragState = { ...d, offset, overIndex, active }
+    dragRef.current = next
+    setDrag(next)
   }
 
   // Отпускание. Если не было движения — это тап, открываем меню.
@@ -202,11 +208,12 @@ export default function Budget() {
         // уже отпущен
       }
     }
-    const d = drag
+    const d = dragRef.current
     if (!d) return
 
     // Простой тап по точкам — переключаем меню категории.
     if (!d.active) {
+      dragRef.current = null
       setDrag(null)
       setMenuId((m) => (m === d.id ? null : d.id))
       return
@@ -215,7 +222,9 @@ export default function Budget() {
     const slot = d.slot
     // Целевое смещение = ровно позиция нового слота, чтобы карточка доехала без рывка.
     const targetOffset = (d.overIndex - d.fromIndex) * slot
-    setDrag({ ...d, settling: true, offset: targetOffset })
+    const settling: DragState = { ...d, settling: true, offset: targetOffset }
+    dragRef.current = settling
+    setDrag(settling)
 
     if (settleTimer.current) window.clearTimeout(settleTimer.current)
     settleTimer.current = window.setTimeout(() => {
@@ -228,6 +237,7 @@ export default function Budget() {
         setCategories(reordered)
         void persistOrder(reordered)
       }
+      dragRef.current = null
       setDrag(null)
     }, 210)
   }
