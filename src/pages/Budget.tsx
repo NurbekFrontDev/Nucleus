@@ -119,9 +119,8 @@ export default function Budget() {
         <form onSubmit={save} className="flex flex-col gap-5">
           <div className="grid grid-cols-2 gap-3">
             <div className="flex flex-col gap-1 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50">
-              <span className="text-xs text-neutral-500 dark:text-neutral-400">Получено в этом месяце (факт)</span>
+              <span className="text-xs text-neutral-500 dark:text-neutral-400">Получено в этом месяце</span>
               <span className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">{formatSum(received)}</span>
-              <span className="text-[11px] text-neutral-400 dark:text-neutral-500">Сумма всех доходов — именно её делят проценты.</span>
             </div>
             <div className="flex flex-col gap-2 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50">
               <label className="text-xs text-neutral-500 dark:text-neutral-400">Цель по доходу (ориентир)</label>
@@ -153,7 +152,7 @@ export default function Budget() {
             <div className="flex items-center gap-2 px-3 text-[11px] text-neutral-400 dark:text-neutral-500">
               <span className="min-w-0 flex-1">Категория</span>
               <span className="w-14 shrink-0 text-center">%</span>
-              <span className="w-24 shrink-0 text-right sm:w-32">Факт · цель</span>
+              <span className="w-24 shrink-0 text-right sm:w-32">Сумма</span>
             </div>
 
             {categories.map((c) => (
@@ -169,13 +168,8 @@ export default function Budget() {
                   className="w-14 shrink-0 rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-center text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
                 />
                 <span className="shrink-0 text-neutral-500">%</span>
-                <span className="flex w-24 shrink-0 flex-col items-end text-right sm:w-32">
-                  <span className="whitespace-nowrap text-xs font-medium text-emerald-600 dark:text-emerald-400 sm:text-sm">
-                    {formatSum((received * Number(c.percent)) / 100)}
-                  </span>
-                  <span className="whitespace-nowrap text-[11px] text-neutral-400 dark:text-neutral-500">
-                    цель {formatSum((goal * Number(c.percent)) / 100)}
-                  </span>
+                <span className="w-24 shrink-0 whitespace-nowrap text-right text-xs font-medium text-emerald-600 dark:text-emerald-400 sm:w-32 sm:text-sm">
+                  {formatSum((received * Number(c.percent)) / 100)}
                 </span>
               </div>
             ))}
