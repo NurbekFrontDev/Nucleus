@@ -74,7 +74,7 @@ export default function Dashboard() {
             id: c.id,
             name: c.name,
             percent: Number(c.percent),
-            plan: (planned * Number(c.percent)) / 100,
+            plan: (incomeSum * Number(c.percent)) / 100,
             fact: factByCat[c.id] ?? 0,
           })),
         )
@@ -105,15 +105,15 @@ export default function Dashboard() {
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3">
-            <Card label="Плановый доход" value={formatSum(plannedIncome)} />
+            <Card label="Цель по доходу" value={formatSum(plannedIncome)} />
             <Card label="Доход (факт)" value={formatSum(actualIncome)} accent="text-emerald-600 dark:text-emerald-400" />
             <Card label="Расходы (факт)" value={formatSum(totalExpense)} accent="text-red-500 dark:text-red-400" />
             <Card label="Уже отложено" value={formatSum(saved)} accent="text-emerald-600 dark:text-emerald-400" />
           </div>
 
-          {plannedIncome <= 0 && (
+          {actualIncome <= 0 && (
             <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-              ⚠️ Задай плановый доход и проценты в разделе «Бюджет», чтобы увидеть план против факта.
+              ⚠️ Добавь доходы во вкладке «Доходы» — проценты категорий распределят реально полученные деньги.
             </p>
           )}
 
