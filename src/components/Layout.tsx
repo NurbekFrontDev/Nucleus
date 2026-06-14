@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom'
+import BackupReminder from './BackupReminder'
 
 const navItems = [
   { to: '/', label: 'Дашборд', icon: '🏠' },
@@ -67,6 +68,8 @@ export default function Layout() {
           </NavLink>
         ))}
       </nav>
+
+      <BackupReminder />
     </div>
   )
 }

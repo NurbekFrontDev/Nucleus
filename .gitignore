@@ -26,3 +26,8 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Локальный бэкап — содержит строку подключения с паролем, НЕ коммитить!
+backup.cmd
+backup.ps1
+finlit-backup*.sql
