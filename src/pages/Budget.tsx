@@ -150,6 +150,16 @@ export default function Budget() {
     setConfirmId(null)
   }
 
+  // Автосохранение «Цели по доходу» при уходе из поля (пустое значение очищает её).
+  const saveGoalIncome = async () => {
+    if (!user || !monthId) return
+    const { error: mErr } = await supabase
+      .from('months')
+      .update({ planned_income: parseAmount(goalIncome) })
+      .eq('id', monthId)
+    if (mErr) setError(mErr.message)
+  }
+
   const save = async (e: FormEvent) => {
     e.preventDefault()
     if (!user || !monthId) return
@@ -199,6 +209,7 @@ export default function Budget() {
                   setGoalIncome(formatAmountInput(e.target.value))
                   setSaved(false)
                 }}
+                onBlur={saveGoalIncome}
                 placeholder="Например, 10 000 000"
                 className={inputCls}
               />

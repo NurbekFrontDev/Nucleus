@@ -477,7 +477,7 @@ export default function Goals() {
             value={price}
             onChange={(e) => setPrice(formatAmountInput(e.target.value))}
             placeholder="Примерная цена (необязательно)"
-            className={'flex-1 ' + fieldBase}
+            className={'flex-1 min-w-0 ' + fieldBase}
           />
           <Select
             className="w-32 shrink-0"
@@ -724,7 +724,7 @@ export default function Goals() {
                             value={goalTarget}
                             onChange={(e) => setGoalTarget(formatAmountInput(e.target.value))}
                             placeholder="Сумма цели"
-                            className={'flex-1 ' + fieldBase}
+                            className={'flex-1 min-w-0 ' + fieldBase}
                           />
                           <Select
                             className="w-32 shrink-0"
