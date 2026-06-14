@@ -368,7 +368,7 @@ export default function Incomes() {
                   </button>
                   <button
                     onClick={() => removeIncome(i.id)}
-                    className="text-neutral-500 transition hover:text-red-500 dark:hover:text-red-400"
+                    className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
                   >
                     Удалить
                   </button>

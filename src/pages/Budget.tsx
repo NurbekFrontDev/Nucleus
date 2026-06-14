@@ -24,6 +24,7 @@ export default function Budget() {
   const [goalIncome, setGoalIncome] = useState('')
   const [received, setReceived] = useState(0)
   const [categories, setCategories] = useState<Category[]>([])
+  const [newCatName, setNewCatName] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [saved, setSaved] = useState(false)
@@ -80,6 +81,38 @@ export default function Budget() {
       cs.map((c) => (c.id === id ? { ...c, percent: Number(val) || 0 } : c)),
     )
     setSaved(false)
+  }
+
+  const addCategory = async () => {
+    if (!user || !newCatName.trim()) return
+    const maxOrder = categories.reduce((m, c) => Math.max(m, c.sort_order), 0)
+    const { data, error: addErr } = await supabase
+      .from('categories')
+      .insert({ user_id: user.id, name: newCatName.trim(), percent: 0, sort_order: maxOrder + 1 })
+      .select('id, name, percent, sort_order')
+      .single()
+    if (addErr || !data) {
+      setError(addErr?.message ?? 'Не удалось добавить категорию')
+      return
+    }
+    const c = data as Category
+    setCategories([...categories, { ...c, percent: Number(c.percent) }])
+    setNewCatName('')
+    setError(null)
+  }
+
+  const removeCategory = async (id: string) => {
+    const c = categories.find((x) => x.id === id)
+    const ok = window.confirm(
+      `Удалить категорию «${c?.name ?? ''}»?\nПрошлые расходы по ней останутся, но потеряют категорию.`,
+    )
+    if (!ok) return
+    const { error: delErr } = await supabase.from('categories').delete().eq('id', id)
+    if (delErr) {
+      setError(delErr.message)
+      return
+    }
+    setCategories((cs) => cs.filter((x) => x.id !== id))
   }
 
   const save = async (e: FormEvent) => {
@@ -149,12 +182,6 @@ export default function Budget() {
               </span>
             </div>
 
-            <div className="flex items-center gap-2 px-3 text-[11px] text-neutral-400 dark:text-neutral-500">
-              <span className="min-w-0 flex-1">Категория</span>
-              <span className="w-14 shrink-0 text-center">%</span>
-              <span className="w-24 shrink-0 text-right sm:w-32">Сумма</span>
-            </div>
-
             {categories.map((c) => (
               <div
                 key={c.id}
@@ -168,11 +195,41 @@ export default function Budget() {
                   className="w-14 shrink-0 rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-center text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
                 />
                 <span className="shrink-0 text-neutral-500">%</span>
-                <span className="w-24 shrink-0 whitespace-nowrap text-right text-xs font-medium text-emerald-600 dark:text-emerald-400 sm:w-32 sm:text-sm">
+                <span className="w-20 shrink-0 whitespace-nowrap text-right text-xs font-medium text-emerald-600 dark:text-emerald-400 sm:w-28 sm:text-sm">
                   {formatSum((received * Number(c.percent)) / 100)}
                 </span>
+                <button
+                  type="button"
+                  onClick={() => removeCategory(c.id)}
+                  title="Удалить категорию"
+                  className="shrink-0 px-1 text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                >
+                  ✕
+                </button>
               </div>
             ))}
+
+            <div className="mt-1 flex gap-2">
+              <input
+                value={newCatName}
+                onChange={(e) => setNewCatName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    addCategory()
+                  }
+                }}
+                placeholder="Новая категория"
+                className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
+              />
+              <button
+                type="button"
+                onClick={addCategory}
+                className="shrink-0 rounded-lg border border-emerald-500/50 px-3 py-2 text-sm text-emerald-600 transition hover:bg-emerald-500/10 dark:text-emerald-400"
+              >
+                + Добавить
+              </button>
+            </div>
           </div>
 
           {totalPercent !== 100 && (

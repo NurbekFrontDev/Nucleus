@@ -51,7 +51,7 @@ const btnPrimary =
 const btnGhost =
   'rounded-lg border border-neutral-300 px-3 py-1.5 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800'
 const btnMuted =
-  'text-sm text-neutral-500 transition hover:text-red-500 dark:hover:text-red-400'
+  'text-sm text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300'
 const sectionTitle = 'text-xl font-semibold'
 
 const chipCls = (active: boolean) =>
@@ -449,7 +449,7 @@ export default function Goals() {
         <button onClick={() => setDone(g, true)} className={btnGhost}>
           Без расхода
         </button>
-        <button onClick={() => setBuyFormId(null)} className={btnMuted}>
+        <button onClick={() => setBuyFormId(null)} className={btnGhost}>
           Отмена
         </button>
       </div>
@@ -657,7 +657,7 @@ export default function Goals() {
                                   </button>
                                   <button
                                     onClick={() => removeContribution(c.id)}
-                                    className="text-neutral-500 transition hover:text-red-500 dark:hover:text-red-400"
+                                    className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
                                   >
                                     Удалить
                                   </button>
@@ -790,7 +790,7 @@ export default function Goals() {
                     <button onClick={() => returnItem(g)} className="transition hover:text-neutral-900 dark:hover:text-neutral-100">
                       Вернуть
                     </button>
-                    <button onClick={() => removeGoal(g.id)} className="transition hover:text-red-500 dark:hover:text-red-400">
+                    <button onClick={() => removeGoal(g.id)} className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300">
                       Удалить
                     </button>
                   </div>

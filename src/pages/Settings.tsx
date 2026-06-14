@@ -202,7 +202,7 @@ export default function Settings() {
                     </button>
                     <button
                       onClick={() => removeCurrency(c.id)}
-                      className="text-xs text-neutral-500 transition hover:text-red-500 dark:hover:text-red-400"
+                      className="text-xs text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
                     >
                       Удалить
                     </button>
