@@ -13,6 +13,9 @@ import {
   parseAmount,
   monthName,
   SUBCATEGORY_PRESETS,
+  effectivePresets,
+  renamePreset,
+  deletePreset,
   formatDateHuman,
   loadCurrencies,
   rateOf,
@@ -153,12 +156,53 @@ export default function Expenses() {
 
   const subOptions = (catId: string): string[] => {
     const name = categories.find((c) => c.id === catId)?.name ?? ''
-    const presets = SUBCATEGORY_PRESETS[name] ?? []
+    const presets = effectivePresets('sub:' + name, SUBCATEGORY_PRESETS[name] ?? [])
     const used = items
       .filter((e) => e.category_id === catId)
       .map((e) => e.subcategory)
       .filter((s): s is string => !!s)
     return Array.from(new Set([...used, ...presets]))
+  }
+
+  // Переименовать подкатегорию: меняем подсказку (в рамках категории) и все записи.
+  const renameSub = async (catId: string, oldV: string, newV: string) => {
+    const v = newV.trim()
+    if (!user || !v || v === oldV) return
+    const name = categories.find((c) => c.id === catId)?.name ?? ''
+    renamePreset('sub:' + name, SUBCATEGORY_PRESETS[name] ?? [], oldV, v)
+    await supabase
+      .from('expenses')
+      .update({ subcategory: v })
+      .eq('user_id', user.id)
+      .eq('category_id', catId)
+      .eq('subcategory', oldV)
+    setItems((prev) =>
+      prev.map((i) =>
+        i.category_id === catId && i.subcategory === oldV ? { ...i, subcategory: v } : i,
+      ),
+    )
+    if (subcategory === oldV) setSubcategory(v)
+    if (editSubcategory === oldV) setEditSubcategory(v)
+  }
+
+  // Удалить подкатегорию: убираем подсказку и очищаем её у записей (суммы остаются).
+  const deleteSub = async (catId: string, v: string) => {
+    if (!user) return
+    const name = categories.find((c) => c.id === catId)?.name ?? ''
+    deletePreset('sub:' + name, SUBCATEGORY_PRESETS[name] ?? [], v)
+    await supabase
+      .from('expenses')
+      .update({ subcategory: null })
+      .eq('user_id', user.id)
+      .eq('category_id', catId)
+      .eq('subcategory', v)
+    setItems((prev) =>
+      prev.map((i) =>
+        i.category_id === catId && i.subcategory === v ? { ...i, subcategory: null } : i,
+      ),
+    )
+    if (subcategory === v) setSubcategory('')
+    if (editSubcategory === v) setEditSubcategory('')
   }
 
   const inPeriod = (d: string) => !period || (d >= period.start && d <= period.end)
@@ -298,6 +342,8 @@ export default function Expenses() {
           onChange={setSubcategory}
           options={subOptions(categoryId)}
           placeholder={t('exp.sub')}
+          onRenameOption={(o, n) => renameSub(categoryId, o, n)}
+          onDeleteOption={(o) => deleteSub(categoryId, o)}
         />
         <input
           value={description}
@@ -368,6 +414,8 @@ export default function Expenses() {
                   onChange={setEditSubcategory}
                   options={subOptions(editCategoryId)}
                   placeholder={t('exp.subShort')}
+                  onRenameOption={(o, n) => renameSub(editCategoryId, o, n)}
+                  onDeleteOption={(o) => deleteSub(editCategoryId, o)}
                 />
                 <input
                   value={editDescription}

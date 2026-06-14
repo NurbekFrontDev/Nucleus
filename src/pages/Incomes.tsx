@@ -14,6 +14,9 @@ import {
   parseAmount,
   monthName,
   INCOME_SOURCE_PRESETS,
+  effectivePresets,
+  renamePreset,
+  deletePreset,
   loadCurrencies,
   rateOf,
   BASE_CURRENCY,
@@ -129,7 +132,30 @@ export default function Incomes() {
   const usedSources = Array.from(
     new Set(items.map((i) => i.source).filter((s): s is string => !!s)),
   )
-  const sourceOptions = Array.from(new Set([...usedSources, ...INCOME_SOURCE_PRESETS]))
+  const sourceOptions = Array.from(
+    new Set([...usedSources, ...effectivePresets('src', INCOME_SOURCE_PRESETS)]),
+  )
+
+  // Переименовать источник: обновляем подсказку и все записи с этим источником.
+  const renameSource = async (oldV: string, newV: string) => {
+    const v = newV.trim()
+    if (!user || !v || v === oldV) return
+    renamePreset('src', INCOME_SOURCE_PRESETS, oldV, v)
+    await supabase.from('incomes').update({ source: v }).eq('user_id', user.id).eq('source', oldV)
+    setItems((prev) => prev.map((i) => (i.source === oldV ? { ...i, source: v } : i)))
+    if (source === oldV) setSource(v)
+    if (editSource === oldV) setEditSource(v)
+  }
+
+  // Удалить источник: убираем подсказку и очищаем источник у записей (суммы остаются).
+  const deleteSource = async (v: string) => {
+    if (!user) return
+    deletePreset('src', INCOME_SOURCE_PRESETS, v)
+    await supabase.from('incomes').update({ source: null }).eq('user_id', user.id).eq('source', v)
+    setItems((prev) => prev.map((i) => (i.source === v ? { ...i, source: null } : i)))
+    if (source === v) setSource('')
+    if (editSource === v) setEditSource('')
+  }
 
   const inPeriod = (d: string) => !period || (d >= period.start && d <= period.end)
 
@@ -259,6 +285,8 @@ export default function Incomes() {
           onChange={setSource}
           options={sourceOptions}
           placeholder={t('inc.source')}
+          onRenameOption={renameSource}
+          onDeleteOption={deleteSource}
         />
         <input
           value={description}
@@ -323,6 +351,8 @@ export default function Incomes() {
                   onChange={setEditSource}
                   options={sourceOptions}
                   placeholder={t('inc.sourceShort')}
+                  onRenameOption={renameSource}
+                  onDeleteOption={deleteSource}
                 />
                 <input
                   value={editDescription}

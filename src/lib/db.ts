@@ -124,6 +124,78 @@ export const INCOME_SOURCE_PRESETS = [
   'Другое',
 ]
 
+// ===== Локальные правки подсказок (пресетов) =====
+// Пресеты подкатегорий и источников захардкожены в коде. Чтобы пользователь мог
+// переименовывать/удалять НЕиспользуемые подсказки, правки храним локально (на
+// устройстве) поверх встроенного списка. Значения, реально использованные в записях,
+// меняются прямо в БД (см. страницы доходов/расходов) и подтягиваются как «использованные».
+// Поэтому такие правки не требуют миграции и работают сразу.
+type PresetOverride = { hidden: string[]; renamed: Record<string, string>; custom: string[] }
+
+function presetKey(kind: string): string {
+  return `finlit-presets-${kind}`
+}
+
+function loadOverride(kind: string): PresetOverride {
+  try {
+    const raw = localStorage.getItem(presetKey(kind))
+    if (raw) {
+      const v = JSON.parse(raw) as Partial<PresetOverride>
+      return { hidden: v.hidden ?? [], renamed: v.renamed ?? {}, custom: v.custom ?? [] }
+    }
+  } catch {
+    // битый JSON или нет localStorage — используем пустые правки
+  }
+  return { hidden: [], renamed: {}, custom: [] }
+}
+
+function saveOverride(kind: string, v: PresetOverride) {
+  try {
+    localStorage.setItem(presetKey(kind), JSON.stringify(v))
+  } catch {
+    // localStorage недоступен — тихо игнорируем
+  }
+}
+
+// Итоговый список подсказок с учётом локальных правок (скрытые/переименованные/добавленные).
+export function effectivePresets(kind: string, builtin: string[]): string[] {
+  const o = loadOverride(kind)
+  const out: string[] = []
+  for (const b of builtin) {
+    if (o.hidden.includes(b)) continue
+    out.push(o.renamed[b] ?? b)
+  }
+  for (const c of o.custom) out.push(c)
+  return Array.from(new Set(out))
+}
+
+// Переименовать подсказку. oldV — то, что показывается сейчас (встроенное или своё).
+export function renamePreset(kind: string, builtin: string[], oldV: string, newV: string) {
+  const v = newV.trim()
+  if (!v || v === oldV) return
+  const o = loadOverride(kind)
+  const builtinKey = builtin.find((b) => (o.renamed[b] ?? b) === oldV)
+  if (builtinKey) {
+    o.renamed[builtinKey] = v
+  } else {
+    o.custom = o.custom.filter((c) => c !== oldV)
+    if (!o.custom.includes(v)) o.custom.push(v)
+  }
+  saveOverride(kind, o)
+}
+
+// Убрать подсказку из списка (для встроенной — скрыть, для своей — удалить запись).
+export function deletePreset(kind: string, builtin: string[], v: string) {
+  const o = loadOverride(kind)
+  const builtinKey = builtin.find((b) => (o.renamed[b] ?? b) === v)
+  if (builtinKey) {
+    if (!o.hidden.includes(builtinKey)) o.hidden.push(builtinKey)
+    delete o.renamed[builtinKey]
+  }
+  o.custom = o.custom.filter((c) => c !== v)
+  saveOverride(kind, o)
+}
+
 // ===== Мультивалюта =====
 // Базовая валюта приложения. Все суммы в БД хранятся в ней (сум).
 export const BASE_CURRENCY = 'UZS'

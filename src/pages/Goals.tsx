@@ -15,6 +15,9 @@ import {
   fetchRate,
   getOrCreateMonth,
   SUBCATEGORY_PRESETS,
+  effectivePresets,
+  renamePreset,
+  deletePreset,
   BASE_CURRENCY,
   WISH_CATEGORIES,
 } from '../lib/db'
@@ -165,8 +168,38 @@ export default function Goals() {
   const rateFor = (code: string) => rates[code] ?? 1
   const catName = (id: string) => categories.find((c) => c.id === id)?.name ?? ''
   const categoryOptions = categories.filter((c) => !c.archived).map((c) => ({ value: c.id, label: tr(c.name) }))
-  // Подсказки подкатегорий для выбранной категории.
-  const subOptions = (catId: string) => SUBCATEGORY_PRESETS[catName(catId)] ?? []
+  // Подсказки подкатегорий для выбранной категории (с учётом локальных правок).
+  const subOptions = (catId: string) =>
+    effectivePresets('sub:' + catName(catId), SUBCATEGORY_PRESETS[catName(catId)] ?? [])
+
+  // Переименовать подкатегорию: меняем подсказку и все записи расходов этой категории.
+  const renameSub = async (catId: string, oldV: string, newV: string) => {
+    const v = newV.trim()
+    if (!user || !v || v === oldV) return
+    const name = catName(catId)
+    renamePreset('sub:' + name, SUBCATEGORY_PRESETS[name] ?? [], oldV, v)
+    await supabase
+      .from('expenses')
+      .update({ subcategory: v })
+      .eq('user_id', user.id)
+      .eq('category_id', catId)
+      .eq('subcategory', oldV)
+    if (buySub === oldV) setBuySub(v)
+  }
+
+  // Удалить подкатегорию: убираем подсказку и очищаем её у записей (суммы остаются).
+  const deleteSub = async (catId: string, v: string) => {
+    if (!user) return
+    const name = catName(catId)
+    deletePreset('sub:' + name, SUBCATEGORY_PRESETS[name] ?? [], v)
+    await supabase
+      .from('expenses')
+      .update({ subcategory: null })
+      .eq('user_id', user.id)
+      .eq('category_id', catId)
+      .eq('subcategory', v)
+    if (buySub === v) setBuySub('')
+  }
 
   const savedFor = (goalId: string) =>
     contribs.filter((c) => c.goal_id === goalId).reduce((s, c) => s + Number(c.amount), 0)
@@ -441,6 +474,8 @@ export default function Goals() {
         onChange={setBuySub}
         options={subOptions(buyCategory)}
         placeholder={t('goals.subOptional')}
+        onRenameOption={(o, n) => renameSub(buyCategory, o, n)}
+        onDeleteOption={(o) => deleteSub(buyCategory, o)}
       />
       <DatePicker value={buyDate} onChange={setBuyDate} />
       <p className="text-xs text-neutral-500">{t('goals.willBeExpense', { n: g.name, v: formatSum(buyConverted) })}</p>
