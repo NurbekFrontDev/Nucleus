@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { formatDateHuman, MONTH_NAMES } from '../lib/db'
+import { formatDateHuman, monthName } from '../lib/db'
+import { useLang } from '../lib/i18n'
 
 type Props = {
   value: string
@@ -10,11 +11,14 @@ type Props = {
 const triggerCls =
   'flex w-full items-center justify-between gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-left text-sm outline-none transition hover:border-emerald-500 focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
 
-const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const WEEKDAYS_RU = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const WEEKDAYS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const pad = (n: number) => String(n).padStart(2, '0')
 
 // Календарь в стиле приложения. Значение — строка YYYY-MM-DD.
 export default function DatePicker({ value, onChange, placeholder }: Props) {
+  const { t, lang } = useLang()
+  const WEEKDAYS = lang === 'en' ? WEEKDAYS_EN : WEEKDAYS_RU
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
   const init = value ? new Date(value + 'T00:00:00') : new Date()
@@ -66,7 +70,7 @@ export default function DatePicker({ value, onChange, placeholder }: Props) {
     <div ref={ref} className="relative">
       <button type="button" onClick={openCal} className={triggerCls}>
         <span className={value ? '' : 'text-neutral-400'}>
-          {value ? formatDateHuman(value) : placeholder ?? 'Выберите дату'}
+          {value ? formatDateHuman(value) : placeholder ?? t('date.select')}
         </span>
         <span className="shrink-0 text-neutral-400">📅</span>
       </button>
@@ -81,7 +85,7 @@ export default function DatePicker({ value, onChange, placeholder }: Props) {
               ‹
             </button>
             <span className="text-sm font-medium">
-              {MONTH_NAMES[viewMonth]} {viewYear}
+              {monthName(viewMonth)} {viewYear}
             </span>
             <button
               type="button"
@@ -131,7 +135,7 @@ export default function DatePicker({ value, onChange, placeholder }: Props) {
               }}
               className="text-neutral-500 transition hover:text-red-500 dark:hover:text-red-400"
             >
-              Очистить
+              {t('date.clear')}
             </button>
             <button
               type="button"
@@ -141,7 +145,7 @@ export default function DatePicker({ value, onChange, placeholder }: Props) {
               }}
               className="text-emerald-600 transition hover:underline dark:text-emerald-400"
             >
-              Сегодня
+              {t('date.today')}
             </button>
           </div>
         </div>

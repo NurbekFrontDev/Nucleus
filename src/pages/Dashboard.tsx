@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
-import { getOrCreateMonth, formatSum, MONTH_NAMES } from '../lib/db'
+import { useLang } from '../lib/i18n'
+import { getOrCreateMonth, formatSum, monthName } from '../lib/db'
 
 type Category = { id: string; name: string; percent: number; sort_order: number }
 type Row = { id: string; name: string; percent: number; plan: number; fact: number }
@@ -25,6 +26,7 @@ function Card({ label, value, accent }: { label: string; value: string; accent?:
 
 export default function Dashboard() {
   const { user } = useAuth()
+  const { t, tr } = useLang()
   const now = new Date()
   const year = now.getFullYear()
   const month = now.getMonth() + 1
@@ -102,29 +104,29 @@ export default function Dashboard() {
 
   return (
     <div className="flex flex-col gap-5">
-      <h1 className="text-2xl font-semibold">🏠 Дашборд · {MONTH_NAMES[month - 1]}</h1>
+      <h1 className="text-2xl font-semibold">🏠 {t('dash.title')} · {monthName(month - 1)}</h1>
 
       {loading ? (
-        <p className="text-neutral-500 dark:text-neutral-400">Загрузка…</p>
+        <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
       ) : error ? (
         <p className="text-sm text-red-500 dark:text-red-400">{error}</p>
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3">
-            <Card label="Цель по доходу" value={formatSum(plannedIncome)} />
-            <Card label="Доход (факт)" value={formatSum(actualIncome)} accent="text-emerald-600 dark:text-emerald-400" />
-            <Card label="Расходы (факт)" value={formatSum(totalSpent)} accent="text-red-500 dark:text-red-400" />
-            <Card label="Уже отложено" value={formatSum(saved)} accent="text-emerald-600 dark:text-emerald-400" />
+            <Card label={t('dash.incomeGoal')} value={formatSum(plannedIncome)} />
+            <Card label={t('dash.incomeFact')} value={formatSum(actualIncome)} accent="text-emerald-600 dark:text-emerald-400" />
+            <Card label={t('dash.expenseFact')} value={formatSum(totalSpent)} accent="text-red-500 dark:text-red-400" />
+            <Card label={t('dash.saved')} value={formatSum(saved)} accent="text-emerald-600 dark:text-emerald-400" />
           </div>
 
           {actualIncome <= 0 && (
             <p className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300">
-              ⚠️ Добавь доходы во вкладке «Доходы» — проценты категорий распределят реально полученные деньги.
+              ⚠️ {t('dash.addIncomeHint')}
             </p>
           )}
 
           <div className="flex flex-col gap-3">
-            <span className="text-sm text-neutral-500 dark:text-neutral-400">План против факта по категориям</span>
+            <span className="text-sm text-neutral-500 dark:text-neutral-400">{t('dash.planVsFact')}</span>
             {rows.map((r) => {
               const st = statusFor(r.plan, r.fact)
               const remainder = r.plan - r.fact
@@ -135,7 +137,7 @@ export default function Dashboard() {
                 >
                   <div className="flex flex-col gap-0.5 text-sm sm:flex-row sm:items-center sm:justify-between">
                     <span className="font-medium">
-                      {st.emoji} {r.name}{' '}
+                      {st.emoji} {tr(r.name)}{' '}
                       <span className="text-neutral-500">{r.percent}%</span>
                     </span>
                     <span className="text-neutral-500 dark:text-neutral-400">
@@ -150,8 +152,8 @@ export default function Dashboard() {
                   </div>
                   <div className="text-right text-xs text-neutral-500">
                     {remainder >= 0
-                      ? `Остаток: ${formatSum(remainder)}`
-                      : `Превышение: ${formatSum(-remainder)}`}
+                      ? t('dash.remainder', { v: formatSum(remainder) })
+                      : t('dash.overspent', { v: formatSum(-remainder) })}
                   </div>
                 </div>
               )

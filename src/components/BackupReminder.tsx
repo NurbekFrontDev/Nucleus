@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useLang } from '../lib/i18n'
 
 // Напоминалка о бэкапе раз в месяц.
 // Дата последнего бэкапа и «отложить» хранятся в localStorage (на этом устройстве).
@@ -25,6 +26,7 @@ function computeShouldShow(): boolean {
 const codeCls = 'rounded bg-neutral-100 px-1 py-0.5 text-[11px] dark:bg-neutral-800'
 
 export default function BackupReminder() {
+  const { t } = useLang()
   const [visible, setVisible] = useState(computeShouldShow)
   const [open, setOpen] = useState(false)
 
@@ -49,9 +51,9 @@ export default function BackupReminder() {
         <div className="flex items-start gap-3">
           <span className="text-xl">🛡️</span>
           <div className="flex-1">
-            <p className="text-sm font-semibold">Пора сделать бэкап</p>
+            <p className="text-sm font-semibold">{t('backup.title')}</p>
             <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-              Прошёл месяц с последней резервной копии. Это займёт пару минут и защитит твои данные.
+              {t('backup.sub')}
             </p>
           </div>
         </div>
@@ -60,30 +62,30 @@ export default function BackupReminder() {
           onClick={() => setOpen((v) => !v)}
           className="mt-3 flex w-full items-center justify-between rounded-lg bg-neutral-100 px-3 py-2 text-xs font-medium text-neutral-600 transition hover:bg-neutral-200 dark:bg-neutral-800 dark:text-neutral-300 dark:hover:bg-neutral-700"
         >
-          <span>Как сделать бэкап</span>
+          <span>{t('backup.how')}</span>
           <span className={`transition-transform ${open ? 'rotate-90' : ''}`}>›</span>
         </button>
 
         {open && (
           <div className="mt-3 space-y-3 text-xs text-neutral-600 dark:text-neutral-300">
             <div>
-              <p className="font-semibold text-neutral-800 dark:text-neutral-100">Способ 1 — экспорт в CSV (просто)</p>
+              <p className="font-semibold text-neutral-800 dark:text-neutral-100">{t('backup.way1')}</p>
               <ol className="mt-1 list-decimal space-y-1 pl-4">
-                <li>Открой Supabase → Table Editor.</li>
-                <li>Для каждой таблицы ({TABLES}) нажми Export → Export to CSV.</li>
-                <li>Сохрани файлы в Google Drive или на компьютер.</li>
+                <li>{t('backup.way1s1')}</li>
+                <li>{t('backup.way1s2', { t: TABLES })}</li>
+                <li>{t('backup.way1s3')}</li>
               </ol>
             </div>
             <div>
-              <p className="font-semibold text-neutral-800 dark:text-neutral-100">Способ 2 — одной командой (Supabase CLI)</p>
+              <p className="font-semibold text-neutral-800 dark:text-neutral-100">{t('backup.way2')}</p>
               <ol className="mt-1 list-decimal space-y-1 pl-4">
-                <li>Один раз: <code className={codeCls}>supabase login</code></li>
-                <li>Один раз: <code className={codeCls}>supabase link --project-ref {PROJECT_REF}</code></li>
-                <li>Каждый раз: <code className={codeCls}>supabase db dump --data-only -f finlit-backup.sql</code></li>
+                <li>{t('backup.once')} <code className={codeCls}>supabase login</code></li>
+                <li>{t('backup.once')} <code className={codeCls}>supabase link --project-ref {PROJECT_REF}</code></li>
+                <li>{t('backup.each')} <code className={codeCls}>supabase db dump --data-only -f finlit-backup.sql</code></li>
               </ol>
             </div>
             <p className="rounded-lg bg-amber-50 px-3 py-2 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
-              ⚠️ Не заливай файл бэкапа в Git — репозиторий публичный. Храни его отдельно.
+              {t('backup.warn')}
             </p>
           </div>
         )}
@@ -93,13 +95,13 @@ export default function BackupReminder() {
             onClick={markDone}
             className="flex-1 rounded-lg bg-emerald-500 px-3 py-2 text-xs font-semibold text-neutral-950 transition hover:bg-emerald-400"
           >
-            ✅ Готово
+            {t('backup.done')}
           </button>
           <button
             onClick={snoozeLater}
             className="rounded-lg border border-neutral-300 px-3 py-2 text-xs text-neutral-500 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
           >
-            Позже
+            {t('backup.later')}
           </button>
         </div>
       </div>

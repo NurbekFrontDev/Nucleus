@@ -3,6 +3,7 @@ import { useAuth } from '../lib/AuthContext'
 import { useTheme } from '../lib/ThemeContext'
 import { supabase } from '../lib/supabase'
 import Select from '../components/Select'
+import { useLang } from '../lib/i18n'
 import { formatAmountInput, POPULAR_CURRENCIES, fetchRate } from '../lib/db'
 
 type Currency = { id: string; code: string; symbol: string | null; rate_to_base: number }
@@ -16,6 +17,7 @@ const parseRate = (s: string) => Number(s.replace(/\s/g, '').replace(',', '.'))
 export default function Settings() {
   const { user, signOut } = useAuth()
   const { theme, toggle } = useTheme()
+  const { t, tr, lang, setLang } = useLang()
 
   const [currencies, setCurrencies] = useState<Currency[]>([])
   const [loading, setLoading] = useState(true)
@@ -50,14 +52,14 @@ export default function Settings() {
 
   const autoRate = async () => {
     if (!newCode) {
-      setError('Сначала выбери валюту из списка')
+      setError(t('set.errChooseFirst'))
       return
     }
     setAutoBusy(true)
     const r = await fetchRate(newCode)
     setAutoBusy(false)
     if (r == null) {
-      setError('Не удалось получить курс автоматически — впиши вручную')
+      setError(t('set.errAutoFail'))
       return
     }
     setRate(String(r))
@@ -68,12 +70,12 @@ export default function Settings() {
     e.preventDefault()
     if (!user) return
     if (!newCode) {
-      setError('Выбери валюту из списка')
+      setError(t('set.errChoose'))
       return
     }
     const r = parseRate(rate)
     if (!r || r <= 0) {
-      setError('Укажи курс в сумах (вручную или кнопкой «Курс сейчас»)')
+      setError(t('set.errRate'))
       return
     }
     const preset = presetOf(newCode)
@@ -83,7 +85,7 @@ export default function Settings() {
       .select('id, code, symbol, rate_to_base')
       .single()
     if (error || !data) {
-      setError(error?.message ?? 'Не удалось добавить')
+      setError(error?.message ?? t('set.errAddFail'))
       return
     }
     setCurrencies(
@@ -110,7 +112,7 @@ export default function Settings() {
   const refreshRate = async (c: Currency) => {
     const r = await fetchRate(c.code)
     if (r == null) {
-      setError('Не удалось обновить курс автоматически')
+      setError(t('set.errRefreshFail'))
       return
     }
     const { error } = await supabase.from('currencies').update({ rate_to_base: r }).eq('id', c.id)
@@ -133,36 +135,56 @@ export default function Settings() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold">⚙️ Настройки</h1>
+      <h1 className="text-2xl font-semibold">⚙️ {t('set.title')}</h1>
 
       <div className="rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50">
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">Вошёл как</p>
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('set.signedInAs')}</p>
         <p className="mt-1 font-medium break-all">{user?.email}</p>
+      </div>
+
+      {/* Язык интерфейса */}
+      <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50">
+        <div className="min-w-0">
+          <p className="font-medium">🌐 {t('set.language')}</p>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">
+            {t('set.langNow', { v: lang === 'en' ? 'English' : 'Русский' })}
+          </p>
+        </div>
+        <div className="w-40 shrink-0">
+          <Select
+            value={lang}
+            onChange={(v) => setLang(v as 'ru' | 'en')}
+            options={[
+              { value: 'ru', label: 'Русский' },
+              { value: 'en', label: 'English' },
+            ]}
+          />
+        </div>
       </div>
 
       <div className="flex items-center justify-between rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50">
         <div>
-          <p className="font-medium">Тема оформления</p>
+          <p className="font-medium">{t('set.theme')}</p>
           <p className="text-sm text-neutral-500 dark:text-neutral-400">
-            Сейчас: {theme === 'dark' ? 'тёмная' : 'светлая'}
+            {t('set.themeNow', { v: theme === 'dark' ? t('set.dark') : t('set.light') })}
           </p>
         </div>
         <button
           onClick={toggle}
           className="rounded-lg border border-neutral-300 px-4 py-2 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
         >
-          {theme === 'dark' ? '☀️ Светлая' : '🌙 Тёмная'}
+          {theme === 'dark' ? `☀️ ${t('set.toLight')}` : `🌙 ${t('set.toDark')}`}
         </button>
       </div>
 
       {/* Валюты и курс */}
       <div className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50">
-        <p className="font-medium">💱 Валюты и курс</p>
+        <p className="font-medium">💱 {t('set.currencies')}</p>
 
         {loading ? (
-          <p className="text-sm text-neutral-500">Загрузка…</p>
+          <p className="text-sm text-neutral-500">{t('common.loading')}</p>
         ) : currencies.length === 0 ? (
-          <p className="text-sm text-neutral-500">Пока добавлен только сум. Добавь валюту ниже.</p>
+          <p className="text-sm text-neutral-500">{t('set.onlyBase')}</p>
         ) : (
           <div className="flex flex-col gap-2">
             {currencies.map((c) => {
@@ -174,7 +196,7 @@ export default function Settings() {
                 >
                   <span className="min-w-0 truncate text-sm font-medium">
                     {c.code} {c.symbol ?? ''}
-                    {p && <span className="text-neutral-500"> · {p.name}</span>}
+                    {p && <span className="text-neutral-500"> · {tr(p.name)}</span>}
                   </span>
                   <div className="flex items-center gap-2">
                     <span className="shrink-0 text-xs text-neutral-500">1 =</span>
@@ -185,19 +207,19 @@ export default function Settings() {
                       onBlur={() => saveRate(c)}
                       className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
                     />
-                    <span className="shrink-0 text-xs text-neutral-500">сум</span>
+                    <span className="shrink-0 text-xs text-neutral-500">{t('set.baseUnit')}</span>
                     <button
                       onClick={() => refreshRate(c)}
-                      title="Подтянуть актуальный курс"
+                      title={t('set.refreshTitle')}
                       className="shrink-0 rounded-lg border border-neutral-300 px-2.5 py-1.5 text-xs transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
                     >
-                      ↻ Курс
+                      ↻ {t('set.refreshRate')}
                     </button>
                     <button
                       onClick={() => removeCurrency(c.id)}
                       className="shrink-0 text-xs text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
                     >
-                      Удалить
+                      {t('common.delete')}
                     </button>
                   </div>
                 </div>
@@ -215,10 +237,10 @@ export default function Settings() {
                 setRate('')
                 setError(null)
               }}
-              placeholder="Выбери валюту…"
+              placeholder={t('set.chooseCur')}
               options={available.map((p) => ({
                 value: p.code,
-                label: `${p.name} — ${p.code} ${p.symbol} (${p.country})`,
+                label: `${tr(p.name)} — ${p.code} ${p.symbol} (${tr(p.country)})`,
               }))}
             />
             <div className="flex gap-2">
@@ -226,7 +248,7 @@ export default function Settings() {
                 inputMode="decimal"
                 value={rate}
                 onChange={(e) => setRate(e.target.value)}
-                placeholder="Курс в сумах"
+                placeholder={t('set.rateInBase')}
                 className={inputCls}
               />
               <button
@@ -235,7 +257,7 @@ export default function Settings() {
                 disabled={autoBusy}
                 className="shrink-0 rounded-lg border border-emerald-500/50 px-3 py-2 text-sm text-emerald-600 transition hover:bg-emerald-500/10 disabled:opacity-60 dark:text-emerald-400"
               >
-                {autoBusy ? '…' : '↻ Курс сейчас'}
+                {autoBusy ? '…' : `↻ ${t('set.rateNow')}`}
               </button>
             </div>
           </div>
@@ -244,11 +266,11 @@ export default function Settings() {
             type="submit"
             className="self-start rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400"
           >
-            Добавить валюту
+            {t('set.addCurrency')}
           </button>
           {newCode && parseRate(rate) > 0 && (
             <p className="text-xs text-neutral-500">
-              Предпросмотр: 1 {newCode} = {formatAmountInput(String(Math.round(parseRate(rate))))} сум
+              {t('set.preview', { c: newCode, v: formatAmountInput(String(Math.round(parseRate(rate)))) })}
             </p>
           )}
         </form>
@@ -258,7 +280,7 @@ export default function Settings() {
         onClick={() => signOut()}
         className="self-start rounded-lg border border-red-500/40 px-4 py-2 text-sm text-red-500 transition hover:bg-red-500/10 dark:text-red-400"
       >
-        Выйти
+        {t('set.signOut')}
       </button>
     </div>
   )

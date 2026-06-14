@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import Select from '../components/Select'
 import Combobox from '../components/Combobox'
 import DatePicker from '../components/DatePicker'
+import { useLang } from '../lib/i18n'
 import {
   formatSum,
   formatAmountInput,
@@ -38,9 +39,6 @@ const GOAL_COLS =
 
 // Валюты для ввода цены желания/цели (всё пересчитывается в сум).
 const PRICE_CURRENCIES = ['UZS', 'USD', 'RUB'] as const
-const priceCurLabel = (c: string) => (c === 'UZS' ? 'Сум' : c === 'USD' ? 'USD $' : 'RUB ₽')
-const priceCurrencyOptions = PRICE_CURRENCIES.map((c) => ({ value: c, label: priceCurLabel(c) }))
-const wishCategoryOptions = WISH_CATEGORIES.map((c) => ({ value: c, label: c }))
 
 // Базовый стиль поля без ширины (чтобы не конфликтовало с flex-1 в строках).
 const fieldBase =
@@ -73,6 +71,11 @@ const catPriority = (c: string | null) => {
 
 export default function Goals() {
   const { user } = useAuth()
+  const { t, tr } = useLang()
+  const priceCurLabel = (c: string) => (c === 'UZS' ? tr('Сум') : c === 'USD' ? 'USD $' : 'RUB ₽')
+  const priceCurrencyOptions = PRICE_CURRENCIES.map((c) => ({ value: c, label: priceCurLabel(c) }))
+  const wishCategoryOptions = WISH_CATEGORIES.map((c) => ({ value: c, label: tr(c) }))
+
   const [goals, setGoals] = useState<Goal[]>([])
   const [contribs, setContribs] = useState<Contribution[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -161,7 +164,7 @@ export default function Goals() {
 
   const rateFor = (code: string) => rates[code] ?? 1
   const catName = (id: string) => categories.find((c) => c.id === id)?.name ?? ''
-  const categoryOptions = categories.filter((c) => !c.archived).map((c) => ({ value: c.id, label: c.name }))
+  const categoryOptions = categories.filter((c) => !c.archived).map((c) => ({ value: c.id, label: tr(c.name) }))
   // Подсказки подкатегорий для выбранной категории.
   const subOptions = (catId: string) => SUBCATEGORY_PRESETS[catName(catId)] ?? []
 
@@ -189,7 +192,7 @@ export default function Goals() {
       .single()
     setBusy(false)
     if (error || !data) {
-      setError(error?.message ?? 'Не удалось добавить')
+      setError(error?.message ?? t('goals.errAdd'))
       return
     }
     setGoals([data as Goal, ...goals])
@@ -210,7 +213,7 @@ export default function Goals() {
   const makeGoal = async (id: string) => {
     const target = Math.round(parseAmount(goalTarget) * rateFor(goalTargetCurrency))
     if (!target) {
-      setError('Укажи сумму цели')
+      setError(t('goals.errGoalAmount'))
       return
     }
     const { data, error } = await supabase
@@ -220,7 +223,7 @@ export default function Goals() {
       .select(GOAL_COLS)
       .single()
     if (error || !data) {
-      setError(error?.message ?? 'Ошибка')
+      setError(error?.message ?? t('common.error'))
       return
     }
     setGoals(goals.map((g) => (g.id === id ? (data as Goal) : g)))
@@ -231,7 +234,7 @@ export default function Goals() {
     if (!user) return
     const value = parseAmount(contribAmount)
     if (!value) {
-      setError('Укажи сумму')
+      setError(t('goals.errAmount'))
       return
     }
     const { data, error } = await supabase
@@ -240,7 +243,7 @@ export default function Goals() {
       .select('id, goal_id, amount, date')
       .single()
     if (error || !data) {
-      setError(error?.message ?? 'Ошибка')
+      setError(error?.message ?? t('common.error'))
       return
     }
     setContribs([...contribs, data as Contribution])
@@ -258,7 +261,7 @@ export default function Goals() {
   const saveContribution = async (id: string) => {
     const value = parseAmount(editContribAmount)
     if (!value) {
-      setError('Укажи сумму')
+      setError(t('goals.errAmount'))
       return
     }
     const { data, error } = await supabase
@@ -268,7 +271,7 @@ export default function Goals() {
       .select('id, goal_id, amount, date')
       .single()
     if (error || !data) {
-      setError(error?.message ?? 'Ошибка')
+      setError(error?.message ?? t('common.error'))
       return
     }
     setContribs(contribs.map((c) => (c.id === id ? (data as Contribution) : c)))
@@ -284,7 +287,7 @@ export default function Goals() {
     setContribs(contribs.filter((c) => c.id !== id))
   }
 
-  // Отметить выполненным БЕЗ записи в расходы (напр. цель-накопление или уже записано вручную).
+  // Отметить выполненным БЕЗ записи в расходы.
   const setDone = async (g: Goal, done: boolean) => {
     const { data, error } = await supabase
       .from('goals')
@@ -293,19 +296,18 @@ export default function Goals() {
       .select(GOAL_COLS)
       .single()
     if (error || !data) {
-      setError(error?.message ?? 'Ошибка')
+      setError(error?.message ?? t('common.error'))
       return
     }
     setGoals(goals.map((x) => (x.id === g.id ? (data as Goal) : x)))
   }
 
-  // Открыть форму «Куплено»: предзаполняем сумму (цель/цена), категорию и дату.
+  // Открыть форму «Куплено»: предзаполняем сумму, категорию и дату.
   const openBuyForm = (g: Goal) => {
     setBuyFormId(g.id)
     const saved = savedFor(g.id)
     const amount = g.target_amount > 0 ? g.target_amount : saved
     setBuyAmount(amount > 0 ? formatAmountInput(String(amount)) : '')
-    // Пытаемся угадать категорию расхода по категории желания.
     const guess =
       categories.find((c) => c.name === g.category) ??
       categories.find((c) => c.name.startsWith('Цели')) ??
@@ -316,12 +318,12 @@ export default function Goals() {
     setError(null)
   }
 
-  // Записать покупку в расходы и связать с желанием/целью (без дублирования).
+  // Записать покупку в расходы и связать с желанием/целью.
   const confirmBuy = async (g: Goal) => {
     if (!user) return
     const value = parseAmount(buyAmount)
     if (!value) {
-      setError('Укажи сумму покупки')
+      setError(t('goals.errBuyAmount'))
       return
     }
     setBusy(true)
@@ -344,14 +346,14 @@ export default function Goals() {
         })
         .select('id')
         .single()
-      if (expErr || !exp) throw expErr ?? new Error('Не удалось создать расход')
+      if (expErr || !exp) throw expErr ?? new Error(t('common.saveFailed'))
       const { data, error } = await supabase
         .from('goals')
         .update({ done: true, expense_id: (exp as { id: string }).id })
         .eq('id', g.id)
         .select(GOAL_COLS)
         .single()
-      if (error || !data) throw error ?? new Error('Ошибка')
+      if (error || !data) throw error ?? new Error(t('common.error'))
       setGoals(goals.map((x) => (x.id === g.id ? (data as Goal) : x)))
       setBuyFormId(null)
     } catch (e) {
@@ -377,7 +379,7 @@ export default function Goals() {
       .select(GOAL_COLS)
       .single()
     if (error || !data) {
-      setError(error?.message ?? 'Ошибка')
+      setError(error?.message ?? t('common.error'))
       return
     }
     setGoals(goals.map((x) => (x.id === g.id ? (data as Goal) : x)))
@@ -417,12 +419,12 @@ export default function Goals() {
   // Форма записи покупки в расходы (общая для желаний и целей).
   const renderBuyForm = (g: Goal) => (
     <div className="flex flex-col gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-3">
-      <p className="text-sm font-medium">🛒 Записать в расходы</p>
+      <p className="text-sm font-medium">🛒 {t('goals.toExpenses')}</p>
       <input
         inputMode="numeric"
         value={buyAmount}
         onChange={(e) => setBuyAmount(formatAmountInput(e.target.value))}
-        placeholder="Сумма покупки"
+        placeholder={t('goals.purchaseAmount')}
         className={inputCls}
       />
       <Select
@@ -432,25 +434,25 @@ export default function Goals() {
           setBuySub('')
         }}
         options={categoryOptions}
-        placeholder="Категория"
+        placeholder={t('common.category')}
       />
       <Combobox
         value={buySub}
         onChange={setBuySub}
         options={subOptions(buyCategory)}
-        placeholder="Подкатегория (необязательно)"
+        placeholder={t('goals.subOptional')}
       />
       <DatePicker value={buyDate} onChange={setBuyDate} />
-      <p className="text-xs text-neutral-500">«{g.name}» попадёт в расходы на {formatSum(buyConverted)}.</p>
+      <p className="text-xs text-neutral-500">{t('goals.willBeExpense', { n: g.name, v: formatSum(buyConverted) })}</p>
       <div className="flex flex-wrap gap-2">
         <button onClick={() => confirmBuy(g)} disabled={busy} className={btnPrimary}>
-          {busy ? 'Сохранение…' : 'Записать в расходы'}
+          {busy ? t('common.saving') : t('goals.recordExpense')}
         </button>
         <button onClick={() => setDone(g, true)} className={btnGhost}>
-          Без расхода
+          {t('goals.noExpense')}
         </button>
         <button onClick={() => setBuyFormId(null)} className={btnGhost}>
-          Отмена
+          {t('common.cancel')}
         </button>
       </div>
     </div>
@@ -458,17 +460,17 @@ export default function Goals() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold">🎯 Цели и желания</h1>
+      <h1 className="text-2xl font-semibold">🎯 {t('goals.title')}</h1>
 
       <form
         onSubmit={addWish}
         className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50"
       >
-        <p className="text-sm font-medium">➕ Добавить в список желаний</p>
+        <p className="text-sm font-medium">➕ {t('goals.addWish')}</p>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder="Что хочу (напр. iPhone, визит к стоматологу)"
+          placeholder={t('goals.wishName')}
           className={inputCls}
         />
         <div className="flex gap-2">
@@ -476,7 +478,7 @@ export default function Goals() {
             inputMode="numeric"
             value={price}
             onChange={(e) => setPrice(formatAmountInput(e.target.value))}
-            placeholder="Примерная цена (необязательно)"
+            placeholder={t('goals.priceApprox')}
             className={'flex-1 min-w-0 ' + fieldBase}
           />
           <Select
@@ -488,7 +490,7 @@ export default function Goals() {
         </div>
         {priceCurrency !== 'UZS' && (
           <p className="text-xs text-neutral-500">
-            Курс: 1 {priceCurrency} ≈ {formatSum(rateFor(priceCurrency))}
+            {t('inc.rate', { c: priceCurrency, v: formatSum(rateFor(priceCurrency)) })}
             {price ? ` · ≈ ${formatSum(wishConverted)}` : ''}
           </p>
         )}
@@ -496,7 +498,7 @@ export default function Goals() {
         <input
           value={note}
           onChange={(e) => setNote(e.target.value)}
-          placeholder="Заметка (необязательно)"
+          placeholder={t('goals.note')}
           className={inputCls}
         />
         {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
@@ -505,19 +507,19 @@ export default function Goals() {
           disabled={busy}
           className="self-start rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-60"
         >
-          {busy ? 'Добавление…' : 'Добавить'}
+          {busy ? t('goals.adding') : t('common.add')}
         </button>
       </form>
 
       {loading ? (
-        <p className="text-neutral-500 dark:text-neutral-400">Загрузка…</p>
+        <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
       ) : (
         <>
           {/* Активные цели */}
           <section className="flex flex-col gap-3">
-            <h2 className={sectionTitle}>🎯 Активные цели</h2>
+            <h2 className={sectionTitle}>🎯 {t('goals.active')}</h2>
             {activeGoals.length === 0 ? (
-              <p className="text-sm text-neutral-500">Пока нет активных целей.</p>
+              <p className="text-sm text-neutral-500">{t('goals.noActive')}</p>
             ) : (
               activeGoals.map((g) => {
                 const saved = savedFor(g.id)
@@ -537,12 +539,12 @@ export default function Goals() {
                           <p className="font-medium">{g.name}</p>
                           {g.category && (
                             <span className={`rounded-full px-2 py-0.5 text-xs ${catBadgeCls(g.category)}`}>
-                              {g.category}
+                              {tr(g.category)}
                             </span>
                           )}
                         </div>
                         {g.target_date && (
-                          <p className="text-xs text-neutral-500">до {formatDateHuman(g.target_date)}</p>
+                          <p className="text-xs text-neutral-500">{t('goals.by', { d: formatDateHuman(g.target_date) })}</p>
                         )}
                       </div>
                       <span className="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
@@ -554,19 +556,19 @@ export default function Goals() {
                     </div>
                     <div className="grid grid-cols-3 gap-2 text-xs">
                       <div>
-                        <p className="text-neutral-500">Собрано</p>
+                        <p className="text-neutral-500">{t('goals.collected')}</p>
                         <p className="font-medium text-emerald-600 dark:text-emerald-400">{formatSum(saved)}</p>
                       </div>
                       <div>
-                        <p className="text-neutral-500">Осталось</p>
+                        <p className="text-neutral-500">{t('goals.left')}</p>
                         <p className="font-medium">{formatSum(remaining)}</p>
                       </div>
                       <div>
-                        <p className="text-neutral-500">В месяц</p>
+                        <p className="text-neutral-500">{t('goals.perMonth')}</p>
                         <p className="font-medium">{months > 0 ? formatSum(perMonth) : '—'}</p>
                       </div>
                     </div>
-                    <p className="text-xs text-neutral-500">Цель: {formatSum(g.target_amount)}</p>
+                    <p className="text-xs text-neutral-500">{t('goals.target', { v: formatSum(g.target_amount) })}</p>
 
                     {buyFormId === g.id ? (
                       renderBuyForm(g)
@@ -576,7 +578,7 @@ export default function Goals() {
                           inputMode="numeric"
                           value={contribAmount}
                           onChange={(e) => setContribAmount(formatAmountInput(e.target.value))}
-                          placeholder="Сколько отложить"
+                          placeholder={t('goals.howMuch')}
                           className={'flex-1 ' + fieldBase}
                         />
                         <div className="flex-1">
@@ -584,10 +586,10 @@ export default function Goals() {
                         </div>
                         <div className="flex gap-2">
                           <button onClick={() => addContribution(g.id)} className={btnPrimary}>
-                            Отложить
+                            {t('goals.setAside')}
                           </button>
                           <button onClick={() => setContribFormId(null)} className={btnGhost}>
-                            Отмена
+                            {t('common.cancel')}
                           </button>
                         </div>
                       </div>
@@ -601,20 +603,20 @@ export default function Goals() {
                           }}
                           className={btnPrimary}
                         >
-                          💰 Отложить
+                          💰 {t('goals.setAsideBtn')}
                         </button>
                         <button onClick={() => openBuyForm(g)} className={btnGhost}>
-                          ✅ Куплено
+                          ✅ {t('goals.bought')}
                         </button>
                         <button onClick={() => removeGoal(g.id)} className={btnMuted}>
-                          Удалить
+                          {t('common.delete')}
                         </button>
                       </div>
                     )}
 
                     {goalContribs.length > 0 && (
                       <details className="text-sm text-neutral-500">
-                        <summary className="cursor-pointer">Вклады ({goalContribs.length})</summary>
+                        <summary className="cursor-pointer">{t('goals.contribs', { n: goalContribs.length })}</summary>
                         <div className="mt-3 flex flex-col gap-2">
                           {goalContribs.map((c) =>
                             editContribId === c.id ? (
@@ -633,10 +635,10 @@ export default function Goals() {
                                 </div>
                                 <div className="flex gap-2">
                                   <button onClick={() => saveContribution(c.id)} className={btnPrimary}>
-                                    Сохранить
+                                    {t('common.save')}
                                   </button>
                                   <button onClick={() => setEditContribId(null)} className={btnGhost}>
-                                    Отмена
+                                    {t('common.cancel')}
                                   </button>
                                 </div>
                               </div>
@@ -653,13 +655,13 @@ export default function Goals() {
                                     onClick={() => startEditContrib(c)}
                                     className="text-neutral-500 transition hover:text-emerald-600 dark:hover:text-emerald-400"
                                   >
-                                    Изменить
+                                    {t('common.edit')}
                                   </button>
                                   <button
                                     onClick={() => removeContribution(c.id)}
                                     className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
                                   >
-                                    Удалить
+                                    {t('common.delete')}
                                   </button>
                                 </div>
                               </div>
@@ -677,22 +679,22 @@ export default function Goals() {
           {/* Список желаний */}
           <section className="flex flex-col gap-3">
             <hr className="border-neutral-200 dark:border-neutral-800" />
-            <h2 className={sectionTitle}>🛒 Хочу купить</h2>
+            <h2 className={sectionTitle}>🛒 {t('goals.wantBuy')}</h2>
             {wishes.length === 0 ? (
-              <p className="text-sm text-neutral-500">Список пуст.</p>
+              <p className="text-sm text-neutral-500">{t('goals.emptyList')}</p>
             ) : (
               <>
                 <div className="flex flex-wrap items-center gap-2">
-                  <span className="text-xs text-neutral-500">Сортировка:</span>
+                  <span className="text-xs text-neutral-500">{t('common.sort')}:</span>
                   <button type="button" onClick={() => setByPriority((v) => !v)} className={chipCls(byPriority)}>
-                    По важности
+                    {t('goals.byPriority')}
                   </button>
                   <span className="text-neutral-300 dark:text-neutral-700">|</span>
                   <button type="button" onClick={() => setDateDir('new')} className={chipCls(dateDir === 'new')}>
-                    Сначала новые
+                    {t('common.sortNew')}
                   </button>
                   <button type="button" onClick={() => setDateDir('old')} className={chipCls(dateDir === 'old')}>
-                    Сначала старые
+                    {t('common.sortOld')}
                   </button>
                 </div>
                 {sortedWishes.map((g) => (
@@ -705,7 +707,7 @@ export default function Goals() {
                         <p className="font-medium">{g.name}</p>
                         {g.category && (
                           <span className={`rounded-full px-2 py-0.5 text-xs ${catBadgeCls(g.category)}`}>
-                            {g.category}
+                            {tr(g.category)}
                           </span>
                         )}
                       </div>
@@ -723,7 +725,7 @@ export default function Goals() {
                             inputMode="numeric"
                             value={goalTarget}
                             onChange={(e) => setGoalTarget(formatAmountInput(e.target.value))}
-                            placeholder="Сумма цели"
+                            placeholder={t('goals.goalAmount')}
                             className={'flex-1 min-w-0 ' + fieldBase}
                           />
                           <Select
@@ -735,30 +737,30 @@ export default function Goals() {
                         </div>
                         {goalTargetCurrency !== 'UZS' && (
                           <p className="text-xs text-neutral-500">
-                            Курс: 1 {goalTargetCurrency} ≈ {formatSum(rateFor(goalTargetCurrency))}
+                            {t('inc.rate', { c: goalTargetCurrency, v: formatSum(rateFor(goalTargetCurrency)) })}
                             {goalTarget ? ` · ≈ ${formatSum(goalConverted)}` : ''}
                           </p>
                         )}
                         <DatePicker value={goalDate} onChange={setGoalDate} />
                         <div className="flex gap-2">
                           <button onClick={() => makeGoal(g.id)} className={btnPrimary}>
-                            Сделать целью
+                            {t('goals.makeGoal')}
                           </button>
                           <button onClick={() => setGoalFormId(null)} className={btnGhost}>
-                            Отмена
+                            {t('common.cancel')}
                           </button>
                         </div>
                       </div>
                     ) : (
                       <div className="flex flex-wrap items-center gap-3">
                         <button onClick={() => openGoalForm(g)} className={btnPrimary}>
-                          🎯 Сделать целью
+                          🎯 {t('goals.makeGoalBtn')}
                         </button>
                         <button onClick={() => openBuyForm(g)} className={btnGhost}>
-                          ✅ Куплено
+                          ✅ {t('goals.bought')}
                         </button>
                         <button onClick={() => removeGoal(g.id)} className={btnMuted}>
-                          Удалить
+                          {t('common.delete')}
                         </button>
                       </div>
                     )}
@@ -772,7 +774,7 @@ export default function Goals() {
           {doneItems.length > 0 && (
             <section className="flex flex-col gap-3">
               <hr className="border-neutral-200 dark:border-neutral-800" />
-              <h2 className={sectionTitle}>✅ Достигнуто / куплено</h2>
+              <h2 className={sectionTitle}>✅ {t('goals.done')}</h2>
               {doneItems.map((g) => (
                 <div
                   key={g.id}
@@ -782,16 +784,16 @@ export default function Goals() {
                     <span className="line-through">{g.name}</span>
                     {g.expense_id && (
                       <span className="rounded-full bg-red-500/15 px-2 py-0.5 text-xs text-red-600 dark:text-red-400">
-                        в расходах
+                        {t('goals.inExpenses')}
                       </span>
                     )}
                   </span>
                   <div className="flex shrink-0 gap-3 text-sm text-neutral-500">
                     <button onClick={() => returnItem(g)} className="transition hover:text-neutral-900 dark:hover:text-neutral-100">
-                      Вернуть
+                      {t('goals.restore')}
                     </button>
                     <button onClick={() => removeGoal(g.id)} className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300">
-                      Удалить
+                      {t('common.delete')}
                     </button>
                   </div>
                 </div>

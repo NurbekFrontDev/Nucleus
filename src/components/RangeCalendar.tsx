@@ -1,7 +1,9 @@
 import { useState } from 'react'
-import { MONTH_NAMES } from '../lib/db'
+import { monthName } from '../lib/db'
+import { useLang } from '../lib/i18n'
 
-const WEEKDAYS = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const WEEKDAYS_RU = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+const WEEKDAYS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const pad = (n: number) => String(n).padStart(2, '0')
 
 // Один календарь для выбора диапазона: первый клик — начало, второй — конец;
@@ -15,6 +17,8 @@ export default function RangeCalendar({
   end: string
   onChange: (start: string, end: string) => void
 }) {
+  const { t, lang } = useLang()
+  const WEEKDAYS = lang === 'en' ? WEEKDAYS_EN : WEEKDAYS_RU
   const [view, setView] = useState(() => {
     const d = start ? new Date(start + 'T00:00:00') : new Date()
     return new Date(d.getFullYear(), d.getMonth(), 1)
@@ -58,7 +62,7 @@ export default function RangeCalendar({
           ‹
         </button>
         <span className="text-sm font-medium">
-          {MONTH_NAMES[month]} {year}
+          {monthName(month)} {year}
         </span>
         <button type="button" onClick={() => shiftMonth(1)} className={navBtn}>
           ›
@@ -98,9 +102,7 @@ export default function RangeCalendar({
         })}
       </div>
       <div className="mt-2 text-center text-xs text-neutral-500 dark:text-neutral-400">
-        {selStart
-          ? 'Выберите конечную дату…'
-          : 'Нажмите начальную дату, затем конечную'}
+        {selStart ? t('range.pickEnd') : t('range.pickStart')}
       </div>
     </div>
   )

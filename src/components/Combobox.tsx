@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useLang } from '../lib/i18n'
 
 type Props = {
   value: string
@@ -13,6 +14,7 @@ const baseCls =
 // Кастомный выпадающий список в стиле приложения.
 // Можно выбрать из списка или вписать своё — значение всё равно сохраняется в БД.
 export default function Combobox({ value, onChange, options, placeholder }: Props) {
+  const { tr } = useLang()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -24,8 +26,10 @@ export default function Combobox({ value, onChange, options, placeholder }: Prop
     return () => document.removeEventListener('mousedown', onDoc)
   }, [])
 
+  // Показываем подсказки на языке интерфейса (сохраняем именно то, что видно).
+  const localized = Array.from(new Set(options.map((o) => tr(o))))
   const q = value.trim().toLowerCase()
-  const filtered = q ? options.filter((o) => o.toLowerCase().includes(q)) : options
+  const filtered = q ? localized.filter((o) => o.toLowerCase().includes(q)) : localized
 
   return (
     <div ref={ref} className="relative">

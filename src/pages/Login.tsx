@@ -1,11 +1,13 @@
 import { useState, type FormEvent } from 'react'
 import { useAuth } from '../lib/AuthContext'
+import { useLang } from '../lib/i18n'
 
 const inputCls =
   'rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
 
 export default function Login() {
   const { signIn, signUp } = useAuth()
+  const { t } = useLang()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -26,9 +28,7 @@ export default function Login() {
       return
     }
     if (mode === 'signup') {
-      setInfo(
-        'Аккаунт создан! Если включено подтверждение по email — проверь почту, иначе можно сразу войти.',
-      )
+      setInfo(t('login.created'))
       setMode('signin')
     }
   }
@@ -41,7 +41,7 @@ export default function Login() {
             💰
           </span>
           <h1 className="text-2xl font-semibold">FinLit</h1>
-          <p className="text-sm text-neutral-500 dark:text-neutral-400">Личный помощник по финансам</p>
+          <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('login.tagline')}</p>
         </div>
 
         <form
@@ -49,7 +49,7 @@ export default function Login() {
           className="flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50"
         >
           <div className="flex flex-col gap-1">
-            <label className="text-sm text-neutral-500 dark:text-neutral-400">Email</label>
+            <label className="text-sm text-neutral-500 dark:text-neutral-400">{t('login.email')}</label>
             <input
               type="email"
               required
@@ -60,7 +60,7 @@ export default function Login() {
             />
           </div>
           <div className="flex flex-col gap-1">
-            <label className="text-sm text-neutral-500 dark:text-neutral-400">Пароль</label>
+            <label className="text-sm text-neutral-500 dark:text-neutral-400">{t('login.password')}</label>
             <input
               type="password"
               required
@@ -80,7 +80,7 @@ export default function Login() {
             disabled={busy}
             className="rounded-lg bg-emerald-500 px-4 py-2.5 font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-60"
           >
-            {busy ? 'Подождите…' : mode === 'signin' ? 'Войти' : 'Зарегистрироваться'}
+            {busy ? t('login.wait') : mode === 'signin' ? t('login.signin') : t('login.signup')}
           </button>
 
           <button
@@ -92,9 +92,7 @@ export default function Login() {
             }}
             className="text-sm text-neutral-500 transition hover:text-emerald-600 dark:text-neutral-400 dark:hover:text-emerald-400"
           >
-            {mode === 'signin'
-              ? 'Нет аккаунта? Зарегистрироваться'
-              : 'Уже есть аккаунт? Войти'}
+            {mode === 'signin' ? t('login.toSignup') : t('login.toSignin')}
           </button>
         </form>
       </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import RangeCalendar from './RangeCalendar'
-import { formatDateHuman, MONTH_NAMES, MONTH_NAMES_GEN } from '../lib/db'
+import { formatDateHuman, monthName, monthGen } from '../lib/db'
+import { useLang } from '../lib/i18n'
 
 export type PeriodValue = {
   start: string
@@ -11,13 +12,13 @@ export type PeriodValue = {
 }
 type Mode = 'day' | 'week' | 'month' | 'year' | 'all' | 'range'
 
-const MODES: Array<{ id: Mode; label: string }> = [
-  { id: 'day', label: 'День' },
-  { id: 'week', label: 'Неделя' },
-  { id: 'month', label: 'Месяц' },
-  { id: 'year', label: 'Год' },
-  { id: 'all', label: 'Всё' },
-  { id: 'range', label: 'Период' },
+const MODES: Array<{ id: Mode; key: string }> = [
+  { id: 'day', key: 'period.day' },
+  { id: 'week', key: 'period.week' },
+  { id: 'month', key: 'period.month' },
+  { id: 'year', key: 'period.year' },
+  { id: 'all', key: 'period.all' },
+  { id: 'range', key: 'period.range' },
 ]
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -42,12 +43,13 @@ function startOfWeek(d: Date) {
 
 function weekLabel(s: Date, e: Date) {
   if (s.getMonth() === e.getMonth() && s.getFullYear() === e.getFullYear())
-    return `${s.getDate()}–${e.getDate()} ${MONTH_NAMES_GEN[s.getMonth()]} ${s.getFullYear()}`
+    return `${s.getDate()}–${e.getDate()} ${monthGen(s.getMonth())} ${s.getFullYear()}`
   return `${formatDateHuman(iso(s))} – ${formatDateHuman(iso(e))}`
 }
 
 // Переключатель периода: День / Неделя / Месяц / Год / Всё / Период.
 export default function PeriodFilter({ onChange }: { onChange: (v: PeriodValue) => void }) {
+  const { t } = useLang()
   const todayISO = iso(new Date())
   const [mode, setMode] = useState<Mode>('month')
   const [anchor, setAnchor] = useState(todayISO)
@@ -72,7 +74,7 @@ export default function PeriodFilter({ onChange }: { onChange: (v: PeriodValue) 
     value = {
       start: iso(s),
       end: iso(e),
-      label: `${MONTH_NAMES[a.getMonth()]} ${a.getFullYear()}`,
+      label: `${monthName(a.getMonth())} ${a.getFullYear()}`,
       groupByMonth: false,
     }
   } else if (mode === 'year') {
@@ -80,7 +82,7 @@ export default function PeriodFilter({ onChange }: { onChange: (v: PeriodValue) 
     const e = new Date(a.getFullYear(), 11, 31)
     value = { start: iso(s), end: iso(e), label: String(a.getFullYear()), groupByMonth: true }
   } else if (mode === 'all') {
-    value = { start: '1900-01-01', end: '2999-12-31', label: 'Всё время', groupByMonth: true }
+    value = { start: '1900-01-01', end: '2999-12-31', label: t('period.allTime'), groupByMonth: true }
   } else {
     value = {
       start: rangeStart,
@@ -116,7 +118,7 @@ export default function PeriodFilter({ onChange }: { onChange: (v: PeriodValue) 
             onClick={() => setMode(m.id)}
             className={chipCls(mode === m.id)}
           >
-            {m.label}
+            {t(m.key)}
           </button>
         ))}
       </div>

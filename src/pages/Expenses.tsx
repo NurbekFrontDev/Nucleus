@@ -5,12 +5,13 @@ import Combobox from '../components/Combobox'
 import Select from '../components/Select'
 import DatePicker from '../components/DatePicker'
 import PeriodFilter, { type PeriodValue } from '../components/PeriodFilter'
+import { useLang } from '../lib/i18n'
 import {
   getOrCreateMonth,
   formatSum,
   formatAmountInput,
   parseAmount,
-  MONTH_NAMES,
+  monthName,
   SUBCATEGORY_PRESETS,
   formatDateHuman,
   loadCurrencies,
@@ -38,10 +39,6 @@ const EXPENSE_COLS =
 const inputCls =
   'w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
 
-// В списке показываем только валюту (курс — серой строкой ниже).
-const curLabel = (c: Currency) =>
-  c.code === BASE_CURRENCY ? 'Сум (UZS)' : `${c.code}${c.symbol ? ' ' + c.symbol : ''}`
-
 const chipCls = (active: boolean) =>
   `rounded-full border px-3 py-1 text-xs transition ${
     active
@@ -51,7 +48,12 @@ const chipCls = (active: boolean) =>
 
 export default function Expenses() {
   const { user } = useAuth()
+  const { t, tr } = useLang()
   const todayISO = new Date().toISOString().slice(0, 10)
+
+  // В списке показываем только валюту (курс — серой строкой ниже).
+  const curLabel = (c: Currency) =>
+    c.code === BASE_CURRENCY ? `${tr('Сум')} (UZS)` : `${c.code}${c.symbol ? ' ' + c.symbol : ''}`
 
   const [period, setPeriod] = useState<PeriodValue | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
@@ -127,13 +129,13 @@ export default function Expenses() {
   const catName = (id: string | null) => {
     const c = categories.find((x) => x.id === id)
     if (!c) return '—'
-    return c.archived ? `${c.name} (удалена)` : c.name
+    return c.archived ? `${tr(c.name)} ${t('exp.deleted')}` : tr(c.name)
   }
 
   const total = items.reduce((s, i) => s + Number(i.amount), 0)
 
   const currencyOptions = currencies.map((c) => ({ value: c.code, label: curLabel(c) }))
-  const categoryOptions = categories.filter((c) => !c.archived).map((c) => ({ value: c.id, label: c.name }))
+  const categoryOptions = categories.filter((c) => !c.archived).map((c) => ({ value: c.id, label: tr(c.name) }))
 
   const sortedItems = [...items].sort((a, b) => {
     const cmp =
@@ -166,7 +168,7 @@ export default function Expenses() {
     if (!user) return
     const original = parseAmount(amount)
     if (!original || original <= 0) {
-      setError('Введите сумму больше нуля')
+      setError(t('common.enterPositive'))
       return
     }
     const base = Math.round(original * rateOf(currencies, currency))
@@ -191,7 +193,7 @@ export default function Expenses() {
       .single()
     setBusy(false)
     if (error || !data) {
-      setError(error?.message ?? 'Не удалось сохранить')
+      setError(error?.message ?? t('common.saveFailed'))
       return
     }
     if (inPeriod((data as Expense).date)) setItems([data as Expense, ...items])
@@ -214,7 +216,7 @@ export default function Expenses() {
   const saveEdit = async (id: string) => {
     const original = parseAmount(editAmount)
     if (!original || original <= 0) {
-      setError('Введите сумму больше нуля')
+      setError(t('common.enterPositive'))
       return
     }
     const base = Math.round(original * rateOf(currencies, editCurrency))
@@ -233,7 +235,7 @@ export default function Expenses() {
       .select(EXPENSE_COLS)
       .single()
     if (error || !data) {
-      setError(error?.message ?? 'Не удалось изменить')
+      setError(error?.message ?? t('common.editFailed'))
       return
     }
     if (inPeriod((data as Expense).date)) {
@@ -256,9 +258,9 @@ export default function Expenses() {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">🧾 Расходы</h1>
+        <h1 className="text-2xl font-semibold">🧾 {t('exp.title')}</h1>
         <span className="text-sm text-neutral-500 dark:text-neutral-400">
-          Итого:{' '}
+          {t('inc.total')}:{' '}
           <b className="text-red-500 dark:text-red-400">{formatSum(total)}</b>
         </span>
       </div>
@@ -274,14 +276,14 @@ export default function Expenses() {
             inputMode="numeric"
             value={amount}
             onChange={(e) => setAmount(formatAmountInput(e.target.value))}
-            placeholder="Сумма"
+            placeholder={t('common.amount')}
             className={inputCls}
           />
           <Select value={currency} onChange={setCurrency} options={currencyOptions} />
         </div>
         {currency !== BASE_CURRENCY && (
           <p className="text-xs text-neutral-500">
-            Курс: 1 {currency} ≈ {formatSum(rateOf(currencies, currency))}
+            {t('inc.rate', { c: currency, v: formatSum(rateOf(currencies, currency)) })}
           </p>
         )}
         <DatePicker value={date} onChange={setDate} />
@@ -289,23 +291,23 @@ export default function Expenses() {
           value={categoryId}
           onChange={setCategoryId}
           options={categoryOptions}
-          placeholder="Категория"
+          placeholder={t('common.category')}
         />
         <Combobox
           value={subcategory}
           onChange={setSubcategory}
           options={subOptions(categoryId)}
-          placeholder="Подкатегория (напр. Интернет)"
+          placeholder={t('exp.sub')}
         />
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Описание (необязательно)"
+          placeholder={t('common.descOptional')}
           className={inputCls}
         />
         {currency !== BASE_CURRENCY && amount && (
           <p className="text-xs text-neutral-500">
-            ≈ {formatSum(parseAmount(amount) * rateOf(currencies, currency))} (по курсу)
+            {t('inc.convApprox', { v: formatSum(parseAmount(amount) * rateOf(currencies, currency)), by: t('common.byRate') })}
           </p>
         )}
         {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
@@ -314,23 +316,23 @@ export default function Expenses() {
           disabled={busy}
           className="rounded-lg bg-emerald-500 px-4 py-2.5 font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-60"
         >
-          {busy ? 'Сохранение…' : 'Добавить расход'}
+          {busy ? t('common.saving') : t('exp.addBtn')}
         </button>
       </form>
 
       {loading ? (
-        <p className="text-neutral-500 dark:text-neutral-400">Загрузка…</p>
+        <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
       ) : items.length === 0 ? (
-        <p className="text-sm text-neutral-500">За этот период расходов нет.</p>
+        <p className="text-sm text-neutral-500">{t('exp.empty')}</p>
       ) : (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-500">Сортировка:</span>
+            <span className="text-xs text-neutral-500">{t('common.sort')}:</span>
             <button type="button" onClick={() => setSortOrder('new')} className={chipCls(sortOrder === 'new')}>
-              Сначала новые
+              {t('common.sortNew')}
             </button>
             <button type="button" onClick={() => setSortOrder('old')} className={chipCls(sortOrder === 'old')}>
-              Сначала старые
+              {t('common.sortOld')}
             </button>
           </div>
           {sortedItems.map((i, idx) => {
@@ -349,7 +351,7 @@ export default function Expenses() {
                     inputMode="numeric"
                     value={editAmount}
                     onChange={(e) => setEditAmount(formatAmountInput(e.target.value))}
-                    placeholder="Сумма"
+                    placeholder={t('common.amount')}
                     className={inputCls}
                   />
                   <Select value={editCurrency} onChange={setEditCurrency} options={currencyOptions} />
@@ -359,18 +361,18 @@ export default function Expenses() {
                   value={editCategoryId}
                   onChange={setEditCategoryId}
                   options={categoryOptions}
-                  placeholder="Категория"
+                  placeholder={t('common.category')}
                 />
                 <Combobox
                   value={editSubcategory}
                   onChange={setEditSubcategory}
                   options={subOptions(editCategoryId)}
-                  placeholder="Подкатегория"
+                  placeholder={t('exp.subShort')}
                 />
                 <input
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
-                  placeholder="Описание"
+                  placeholder={t('common.desc')}
                   className={inputCls}
                 />
                 <div className="flex gap-2">
@@ -378,13 +380,13 @@ export default function Expenses() {
                     onClick={() => saveEdit(i.id)}
                     className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400"
                   >
-                    Сохранить
+                    {t('common.save')}
                   </button>
                   <button
                     onClick={() => setEditId(null)}
                     className="rounded-lg border border-neutral-300 px-4 py-2 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
                   >
-                    Отмена
+                    {t('common.cancel')}
                   </button>
                 </div>
               </div>
@@ -397,7 +399,7 @@ export default function Expenses() {
                   <p className="font-medium">{formatSum(Number(i.amount))}</p>
                   <p className="text-xs text-neutral-500">
                     {catName(i.category_id)}
-                    {i.subcategory ? ` · ${i.subcategory}` : ''} · {formatDateHuman(i.date)}
+                    {i.subcategory ? ` · ${tr(i.subcategory)}` : ''} · {formatDateHuman(i.date)}
                     {i.currency && i.currency !== BASE_CURRENCY && i.original_amount
                       ? ` · ${formatAmountInput(String(i.original_amount))} ${i.currency}`
                       : ''}
@@ -409,13 +411,13 @@ export default function Expenses() {
                     onClick={() => startEdit(i)}
                     className="text-neutral-500 transition hover:text-emerald-600 dark:hover:text-emerald-400"
                   >
-                    Изменить
+                    {t('common.edit')}
                   </button>
                   <button
                     onClick={() => removeExpense(i.id)}
                     className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
                   >
-                    Удалить
+                    {t('common.delete')}
                   </button>
                 </div>
               </div>
@@ -425,7 +427,7 @@ export default function Expenses() {
                 {showMonthHeader && (
                   <div className="mt-3 flex items-center gap-3 first:mt-0">
                     <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-                      {MONTH_NAMES[dd.getMonth()]} {dd.getFullYear()}
+                      {monthName(dd.getMonth())} {dd.getFullYear()}
                     </span>
                     <hr className="flex-1 border-neutral-200 dark:border-neutral-800" />
                   </div>

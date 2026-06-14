@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useLang } from '../lib/i18n'
 
 type Option = { value: string; label: string }
 type Props = {
@@ -14,6 +15,7 @@ const triggerCls =
 
 // Выпадающий список (фиксированные варианты) в стиле приложения.
 export default function Select({ value, onChange, options, className, placeholder }: Props) {
+  const { t } = useLang()
   const [open, setOpen] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
@@ -31,7 +33,7 @@ export default function Select({ value, onChange, options, className, placeholde
     <div ref={ref} className={`relative ${className ?? 'w-full'}`}>
       <button type="button" onClick={() => setOpen((v) => !v)} className={triggerCls}>
         <span className={`truncate ${current ? '' : 'text-neutral-400'}`}>
-          {current ? current.label : placeholder ?? 'Выбрать…'}
+          {current ? current.label : placeholder ?? t('common.choose')}
         </span>
         <span className="shrink-0 text-neutral-400">▾</span>
       </button>

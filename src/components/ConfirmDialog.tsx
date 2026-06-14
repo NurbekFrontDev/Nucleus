@@ -1,4 +1,5 @@
 import { type ReactNode } from 'react'
+import { useLang } from '../lib/i18n'
 
 type Props = {
   open: boolean
@@ -17,13 +18,16 @@ export default function ConfirmDialog({
   open,
   title,
   message,
-  confirmLabel = 'Подтвердить',
-  cancelLabel = 'Отмена',
+  confirmLabel,
+  cancelLabel,
   danger = false,
   onConfirm,
   onCancel,
 }: Props) {
+  const { t } = useLang()
   if (!open) return null
+  const confirmText = confirmLabel ?? t('common.confirm')
+  const cancelText = cancelLabel ?? t('common.cancel')
   return (
     <div
       className="animate-fade fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
@@ -43,7 +47,7 @@ export default function ConfirmDialog({
             onClick={onCancel}
             className="rounded-lg border border-neutral-300 px-4 py-2 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
           >
-            {cancelLabel}
+            {cancelText}
           </button>
           <button
             type="button"
@@ -54,7 +58,7 @@ export default function ConfirmDialog({
                 : 'rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400'
             }
           >
-            {confirmLabel}
+            {confirmText}
           </button>
         </div>
       </div>

@@ -1,17 +1,19 @@
 import { NavLink, Outlet } from 'react-router-dom'
 import BackupReminder from './BackupReminder'
+import { useLang } from '../lib/i18n'
 
 const navItems = [
-  { to: '/', label: 'Дашборд', icon: '🏠' },
-  { to: '/incomes', label: 'Доходы', icon: '💼' },
-  { to: '/expenses', label: 'Расходы', icon: '🧾' },
-  { to: '/budget', label: 'Бюджет', icon: '📊' },
-  { to: '/goals', label: 'Цели', icon: '🎯' },
-  { to: '/history', label: 'История', icon: '🗓️' },
-  { to: '/settings', label: 'Настройки', icon: '⚙️' },
+  { to: '/', key: 'nav.dashboard', icon: '🏠' },
+  { to: '/incomes', key: 'nav.incomes', icon: '💼' },
+  { to: '/expenses', key: 'nav.expenses', icon: '🧾' },
+  { to: '/budget', key: 'nav.budget', icon: '📊' },
+  { to: '/goals', key: 'nav.goals', icon: '🎯' },
+  { to: '/history', key: 'nav.history', icon: '🗓️' },
+  { to: '/settings', key: 'nav.settings', icon: '⚙️' },
 ]
 
 export default function Layout() {
+  const { t } = useLang()
   return (
     <div className="min-h-screen md:flex">
       {/* Боковое меню (десктоп) */}
@@ -37,7 +39,7 @@ export default function Layout() {
               }
             >
               <span>{item.icon}</span>
-              {item.label}
+              {t(item.key)}
             </NavLink>
           ))}
         </nav>
@@ -64,7 +66,7 @@ export default function Layout() {
             }
           >
             <span className="text-base">{item.icon}</span>
-            {item.label}
+            {t(item.key)}
           </NavLink>
         ))}
       </nav>

@@ -5,13 +5,14 @@ import Combobox from '../components/Combobox'
 import Select from '../components/Select'
 import DatePicker from '../components/DatePicker'
 import PeriodFilter, { type PeriodValue } from '../components/PeriodFilter'
+import { useLang } from '../lib/i18n'
 import {
   getOrCreateMonth,
   formatSum,
   formatDateHuman,
   formatAmountInput,
   parseAmount,
-  MONTH_NAMES,
+  monthName,
   INCOME_SOURCE_PRESETS,
   loadCurrencies,
   rateOf,
@@ -35,10 +36,6 @@ const INCOME_COLS = 'id, amount, date, description, source, currency, original_a
 const inputCls =
   'w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
 
-// В списке показываем только валюту (курс — серой строкой ниже).
-const curLabel = (c: Currency) =>
-  c.code === BASE_CURRENCY ? 'Сум (UZS)' : `${c.code}${c.symbol ? ' ' + c.symbol : ''}`
-
 const chipCls = (active: boolean) =>
   `rounded-full border px-3 py-1 text-xs transition ${
     active
@@ -48,7 +45,12 @@ const chipCls = (active: boolean) =>
 
 export default function Incomes() {
   const { user } = useAuth()
+  const { t, tr } = useLang()
   const todayISO = new Date().toISOString().slice(0, 10)
+
+  // В списке показываем только валюту (курс — серой строкой ниже).
+  const curLabel = (c: Currency) =>
+    c.code === BASE_CURRENCY ? `${tr('Сум')} (UZS)` : `${c.code}${c.symbol ? ' ' + c.symbol : ''}`
 
   const [period, setPeriod] = useState<PeriodValue | null>(null)
   const [items, setItems] = useState<Income[]>([])
@@ -136,7 +138,7 @@ export default function Incomes() {
     if (!user) return
     const original = parseAmount(amount)
     if (!original || original <= 0) {
-      setError('Введите сумму больше нуля')
+      setError(t('common.enterPositive'))
       return
     }
     const base = Math.round(original * rateOf(currencies, currency))
@@ -160,7 +162,7 @@ export default function Incomes() {
       .single()
     setBusy(false)
     if (error || !data) {
-      setError(error?.message ?? 'Не удалось сохранить')
+      setError(error?.message ?? t('common.saveFailed'))
       return
     }
     if (inPeriod((data as Income).date)) setItems([data as Income, ...items])
@@ -182,7 +184,7 @@ export default function Incomes() {
   const saveEdit = async (id: string) => {
     const original = parseAmount(editAmount)
     if (!original || original <= 0) {
-      setError('Введите сумму больше нуля')
+      setError(t('common.enterPositive'))
       return
     }
     const base = Math.round(original * rateOf(currencies, editCurrency))
@@ -200,7 +202,7 @@ export default function Incomes() {
       .select(INCOME_COLS)
       .single()
     if (error || !data) {
-      setError(error?.message ?? 'Не удалось изменить')
+      setError(error?.message ?? t('common.editFailed'))
       return
     }
     if (inPeriod((data as Income).date)) {
@@ -223,9 +225,9 @@ export default function Incomes() {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">💼 Доходы</h1>
+        <h1 className="text-2xl font-semibold">💼 {t('inc.title')}</h1>
         <span className="text-sm text-neutral-500 dark:text-neutral-400">
-          Итого:{' '}
+          {t('inc.total')}:{' '}
           <b className="text-emerald-600 dark:text-emerald-400">{formatSum(total)}</b>
         </span>
       </div>
@@ -241,14 +243,14 @@ export default function Incomes() {
             inputMode="numeric"
             value={amount}
             onChange={(e) => setAmount(formatAmountInput(e.target.value))}
-            placeholder="Сумма"
+            placeholder={t('common.amount')}
             className={inputCls}
           />
           <Select value={currency} onChange={setCurrency} options={currencyOptions} />
         </div>
         {currency !== BASE_CURRENCY && (
           <p className="text-xs text-neutral-500">
-            Курс: 1 {currency} ≈ {formatSum(rateOf(currencies, currency))}
+            {t('inc.rate', { c: currency, v: formatSum(rateOf(currencies, currency)) })}
           </p>
         )}
         <DatePicker value={date} onChange={setDate} />
@@ -256,17 +258,17 @@ export default function Incomes() {
           value={source}
           onChange={setSource}
           options={sourceOptions}
-          placeholder="Источник дохода (напр. Зарплата)"
+          placeholder={t('inc.source')}
         />
         <input
           value={description}
           onChange={(e) => setDescription(e.target.value)}
-          placeholder="Описание (необязательно)"
+          placeholder={t('common.descOptional')}
           className={inputCls}
         />
         {currency !== BASE_CURRENCY && amount && (
           <p className="text-xs text-neutral-500">
-            ≈ {formatSum(parseAmount(amount) * rateOf(currencies, currency))} (по курсу)
+            {t('inc.convApprox', { v: formatSum(parseAmount(amount) * rateOf(currencies, currency)), by: t('common.byRate') })}
           </p>
         )}
         {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
@@ -275,23 +277,23 @@ export default function Incomes() {
           disabled={busy}
           className="rounded-lg bg-emerald-500 px-4 py-2.5 font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-60"
         >
-          {busy ? 'Сохранение…' : 'Добавить доход'}
+          {busy ? t('common.saving') : t('inc.addBtn')}
         </button>
       </form>
 
       {loading ? (
-        <p className="text-neutral-500 dark:text-neutral-400">Загрузка…</p>
+        <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
       ) : items.length === 0 ? (
-        <p className="text-sm text-neutral-500">За этот период доходов нет.</p>
+        <p className="text-sm text-neutral-500">{t('inc.empty')}</p>
       ) : (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-500">Сортировка:</span>
+            <span className="text-xs text-neutral-500">{t('common.sort')}:</span>
             <button type="button" onClick={() => setSortOrder('new')} className={chipCls(sortOrder === 'new')}>
-              Сначала новые
+              {t('common.sortNew')}
             </button>
             <button type="button" onClick={() => setSortOrder('old')} className={chipCls(sortOrder === 'old')}>
-              Сначала старые
+              {t('common.sortOld')}
             </button>
           </div>
           {sortedItems.map((i, idx) => {
@@ -310,7 +312,7 @@ export default function Incomes() {
                     inputMode="numeric"
                     value={editAmount}
                     onChange={(e) => setEditAmount(formatAmountInput(e.target.value))}
-                    placeholder="Сумма"
+                    placeholder={t('common.amount')}
                     className={inputCls}
                   />
                   <Select value={editCurrency} onChange={setEditCurrency} options={currencyOptions} />
@@ -320,12 +322,12 @@ export default function Incomes() {
                   value={editSource}
                   onChange={setEditSource}
                   options={sourceOptions}
-                  placeholder="Источник дохода"
+                  placeholder={t('inc.sourceShort')}
                 />
                 <input
                   value={editDescription}
                   onChange={(e) => setEditDescription(e.target.value)}
-                  placeholder="Описание"
+                  placeholder={t('common.desc')}
                   className={inputCls}
                 />
                 <div className="flex gap-2">
@@ -333,13 +335,13 @@ export default function Incomes() {
                     onClick={() => saveEdit(i.id)}
                     className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400"
                   >
-                    Сохранить
+                    {t('common.save')}
                   </button>
                   <button
                     onClick={() => setEditId(null)}
                     className="rounded-lg border border-neutral-300 px-4 py-2 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
                   >
-                    Отмена
+                    {t('common.cancel')}
                   </button>
                 </div>
               </div>
@@ -355,7 +357,7 @@ export default function Incomes() {
                     {i.currency && i.currency !== BASE_CURRENCY && i.original_amount
                       ? ` · ${formatAmountInput(String(i.original_amount))} ${i.currency}`
                       : ''}
-                    {i.source ? ` · ${i.source}` : ''}
+                    {i.source ? ` · ${tr(i.source)}` : ''}
                     {i.description ? ` · ${i.description}` : ''}
                   </p>
                 </div>
@@ -364,13 +366,13 @@ export default function Incomes() {
                     onClick={() => startEdit(i)}
                     className="text-neutral-500 transition hover:text-emerald-600 dark:hover:text-emerald-400"
                   >
-                    Изменить
+                    {t('common.edit')}
                   </button>
                   <button
                     onClick={() => removeIncome(i.id)}
                     className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
                   >
-                    Удалить
+                    {t('common.delete')}
                   </button>
                 </div>
               </div>
@@ -380,7 +382,7 @@ export default function Incomes() {
                 {showMonthHeader && (
                   <div className="mt-3 flex items-center gap-3 first:mt-0">
                     <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-                      {MONTH_NAMES[dd.getMonth()]} {dd.getFullYear()}
+                      {monthName(dd.getMonth())} {dd.getFullYear()}
                     </span>
                     <hr className="flex-1 border-neutral-200 dark:border-neutral-800" />
                   </div>

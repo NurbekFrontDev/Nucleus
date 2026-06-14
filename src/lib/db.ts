@@ -33,18 +33,43 @@ export async function getOrCreateMonth(
   return created as MonthRow
 }
 
-export const MONTH_NAMES = [
+// ===== Язык форматирования (управляется i18n через setDbLang) =====
+type DbLang = 'ru' | 'en'
+let dbLang: DbLang = 'ru'
+export function setDbLang(lang: DbLang) {
+  dbLang = lang
+}
+
+const MONTH_NAMES_RU = [
   'Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь',
 ]
+const MONTH_NAMES_EN = [
+  'January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December',
+]
 
 // Названия месяцев в родительном падеже (для дат: «15 октября 2026»).
-export const MONTH_NAMES_GEN = [
+const MONTH_NAMES_GEN_RU = [
   'января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря',
 ]
 
-// Форматирует дату YYYY-MM-DD в читаемый вид: «15 октября 2026».
+// Обратная совместимость: статический экспорт (русский). Для UI используйте monthName().
+export const MONTH_NAMES = MONTH_NAMES_RU
+export const MONTH_NAMES_GEN = MONTH_NAMES_GEN_RU
+
+// Название месяца с учётом текущего языка. i — 0..11.
+export function monthName(i: number): string {
+  return (dbLang === 'en' ? MONTH_NAMES_EN : MONTH_NAMES_RU)[i] ?? ''
+}
+
+// Название месяца в родительном падеже (для дат). В английском падежей нет.
+export function monthGen(i: number): string {
+  return (dbLang === 'en' ? MONTH_NAMES_EN : MONTH_NAMES_GEN_RU)[i] ?? ''
+}
+
+// Форматирует дату YYYY-MM-DD в читаемый вид: «15 октября 2026» / «15 October 2026».
 export function formatDateHuman(dateStr: string | null | undefined): string {
   if (!dateStr) return ''
   const parts = dateStr.split('-')
@@ -53,12 +78,14 @@ export function formatDateHuman(dateStr: string | null | undefined): string {
   const m = Number(parts[1])
   const d = Number(parts[2])
   if (!y || !m || !d) return dateStr
-  return `${d} ${MONTH_NAMES_GEN[m - 1]} ${y}`
+  return `${d} ${monthGen(m - 1)} ${y}`
 }
 
-// Форматирует число в вид «5 000 000 сум».
+// Форматирует число в вид «5 000 000 сум» / «5,000,000 so'm».
 export function formatSum(value: number): string {
-  return new Intl.NumberFormat('ru-RU').format(Math.round(value)) + ' сум'
+  const locale = dbLang === 'en' ? 'en-US' : 'ru-RU'
+  const unit = dbLang === 'en' ? " so'm" : ' сум'
+  return new Intl.NumberFormat(locale).format(Math.round(value)) + unit
 }
 
 // Форматирует ввод суммы с пробелами по тысячам: "1000000" -> "1 000 000".
