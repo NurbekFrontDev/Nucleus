@@ -1,0 +1,31 @@
+# Keep-alive для бесплатного Supabase.
+# Бесплатный проект Supabase засыпает после 7 дней без активности.
+# Этот workflow раз в 3 дня делает лёгкий запрос к базе, чтобы она не засыпала.
+# Ключ ниже — публичный (publishable/anon): он и так виден в браузере и защищён
+# политиками RLS, поэтому безопасно хранить его прямо в репозитории.
+
+name: Keep Supabase Alive
+
+on:
+  schedule:
+    # Каждые 3 дня в 06:00 UTC (11:00 по Ташкенту). Укладываемся в окно 7 дней.
+    - cron: '0 6 */3 * *'
+  workflow_dispatch: {}
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping Supabase REST
+        run: |
+          echo "Пингуем Supabase, чтобы проект не засыпал..."
+          code=$(curl -s -o /dev/null -w "%{http_code}" \
+            "https://ewgrcmswwvbtoxdxkvuv.supabase.co/rest/v1/categories?select=id&limit=1" \
+            -H "apikey: sb_publishable_6N8-e0r4a93yDsbl-0iyKw_kZ5e2pw0" \
+            -H "Authorization: Bearer sb_publishable_6N8-e0r4a93yDsbl-0iyKw_kZ5e2pw0")
+          echo "HTTP-ответ: $code"
+          # Любой ответ от сервера (даже 401/200) означает, что база проснулась.
+          if [ "$code" = "000" ]; then
+            echo "Сервер не ответил"; exit 1
+          fi
+          echo "Готово: Supabase активен."
