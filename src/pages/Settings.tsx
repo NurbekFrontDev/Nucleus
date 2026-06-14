@@ -172,24 +172,17 @@ export default function Settings() {
                   key={c.id}
                   className="flex flex-col gap-2 rounded-lg border border-neutral-200 bg-neutral-50 p-3 dark:border-neutral-800 dark:bg-neutral-900/40"
                 >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="min-w-0 truncate text-sm font-medium">
-                      {c.code} {c.symbol ?? ''}
-                      {p && <span className="text-neutral-500"> · {p.name}</span>}
-                    </span>
-                    <button
-                      onClick={() => removeCurrency(c.id)}
-                      className="shrink-0 text-xs text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
-                    >
-                      Удалить
-                    </button>
-                  </div>
+                  <span className="min-w-0 truncate text-sm font-medium">
+                    {c.code} {c.symbol ?? ''}
+                    {p && <span className="text-neutral-500"> · {p.name}</span>}
+                  </span>
                   <div className="flex items-center gap-2">
                     <span className="shrink-0 text-xs text-neutral-500">1 =</span>
                     <input
                       inputMode="decimal"
                       value={String(c.rate_to_base)}
                       onChange={(e) => changeRate(c.id, e.target.value)}
+                      onBlur={() => saveRate(c)}
                       className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-2 py-1.5 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
                     />
                     <span className="shrink-0 text-xs text-neutral-500">сум</span>
@@ -201,10 +194,10 @@ export default function Settings() {
                       ↻ Курс
                     </button>
                     <button
-                      onClick={() => saveRate(c)}
-                      className="shrink-0 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-medium text-neutral-950 transition hover:bg-emerald-400"
+                      onClick={() => removeCurrency(c.id)}
+                      className="shrink-0 text-xs text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
                     >
-                      Сохранить
+                      Удалить
                     </button>
                   </div>
                 </div>

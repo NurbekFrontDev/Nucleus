@@ -322,7 +322,6 @@ export default function Budget() {
             </p>
           )}
           {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
-          <p className="text-xs text-neutral-500 dark:text-neutral-400">💾 Изменения сохраняются автоматически.</p>
         </div>
       )}
 
