@@ -65,7 +65,7 @@ export default function Layout() {
               }`
             }
           >
-            <span className="text-base">{item.icon}</span>
+            <span className="flex h-5 items-center justify-center text-base leading-none">{item.icon}</span>
             {t(item.key)}
           </NavLink>
         ))}
