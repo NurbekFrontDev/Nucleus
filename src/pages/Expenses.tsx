@@ -4,10 +4,10 @@ import { supabase } from '../lib/supabase'
 import Combobox from '../components/Combobox'
 import Select from '../components/Select'
 import DatePicker from '../components/DatePicker'
+import PeriodFilter, { type PeriodValue } from '../components/PeriodFilter'
 import {
   getOrCreateMonth,
   formatSum,
-  MONTH_NAMES,
   formatAmountInput,
   parseAmount,
   SUBCATEGORY_PRESETS,
@@ -50,11 +50,9 @@ const chipCls = (active: boolean) =>
 
 export default function Expenses() {
   const { user } = useAuth()
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth() + 1
+  const todayISO = new Date().toISOString().slice(0, 10)
 
-  const [monthId, setMonthId] = useState<string | null>(null)
+  const [period, setPeriod] = useState<PeriodValue | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [items, setItems] = useState<Expense[]>([])
   const [currencies, setCurrencies] = useState<Currency[]>([])
@@ -63,7 +61,7 @@ export default function Expenses() {
   const [sortOrder, setSortOrder] = useState<'new' | 'old'>('new')
 
   const [amount, setAmount] = useState('')
-  const [date, setDate] = useState(now.toISOString().slice(0, 10))
+  const [date, setDate] = useState(todayISO)
   const [categoryId, setCategoryId] = useState('')
   const [currency, setCurrency] = useState(BASE_CURRENCY)
   const [subcategory, setSubcategory] = useState('')
@@ -78,28 +76,39 @@ export default function Expenses() {
   const [editSubcategory, setEditSubcategory] = useState('')
   const [editDescription, setEditDescription] = useState('')
 
+  // Категории и валюты грузим один раз.
   useEffect(() => {
     if (!user) return
     let active = true
     ;(async () => {
+      const [catRes, curList] = await Promise.all([
+        supabase.from('categories').select('id, name').order('sort_order'),
+        loadCurrencies(user.id),
+      ])
+      if (!active) return
+      if (curList) setCurrencies(curList)
+      const cats = (catRes.data ?? []) as Category[]
+      setCategories(cats)
+      setCategoryId((prev) => prev || (cats[0]?.id ?? ''))
+    })()
+    return () => {
+      active = false
+    }
+  }, [user])
+
+  // Записи грузим по диапазону дат выбранного периода.
+  useEffect(() => {
+    if (!user || !period) return
+    let active = true
+    ;(async () => {
       try {
         setLoading(true)
-        const [m, catRes, curList] = await Promise.all([
-          getOrCreateMonth(user.id, year, month),
-          supabase.from('categories').select('id, name').order('sort_order'),
-          loadCurrencies(user.id),
-        ])
-        if (!active) return
-        if (catRes.error) throw catRes.error
-        setMonthId(m.id)
-        setCurrencies(curList)
-        const cats = (catRes.data ?? []) as Category[]
-        setCategories(cats)
-        setCategoryId((prev) => prev || (cats[0]?.id ?? ''))
         const { data, error } = await supabase
           .from('expenses')
           .select(EXPENSE_COLS)
-          .eq('month_id', m.id)
+          .eq('user_id', user.id)
+          .gte('date', period.start)
+          .lte('date', period.end)
           .order('date', { ascending: false })
         if (error) throw error
         if (active) setItems((data ?? []) as Expense[])
@@ -112,7 +121,7 @@ export default function Expenses() {
     return () => {
       active = false
     }
-  }, [user, year, month])
+  }, [user, period?.start, period?.end])
 
   const catName = (id: string | null) =>
     categories.find((c) => c.id === id)?.name ?? '—'
@@ -146,9 +155,11 @@ export default function Expenses() {
     return Array.from(new Set([...used, ...presets]))
   }
 
+  const inPeriod = (d: string) => !period || (d >= period.start && d <= period.end)
+
   const addExpense = async (e: FormEvent) => {
     e.preventDefault()
-    if (!user || !monthId) return
+    if (!user) return
     const original = parseAmount(amount)
     if (!original || original <= 0) {
       setError('Введите сумму больше нуля')
@@ -157,11 +168,13 @@ export default function Expenses() {
     const base = Math.round(original * rateOf(currencies, currency))
     setBusy(true)
     setError(null)
+    const d = new Date(date + 'T00:00:00')
+    const m = await getOrCreateMonth(user.id, d.getFullYear(), d.getMonth() + 1)
     const { data, error } = await supabase
       .from('expenses')
       .insert({
         user_id: user.id,
-        month_id: monthId,
+        month_id: m.id,
         category_id: categoryId || null,
         subcategory: subcategory || null,
         amount: base,
@@ -177,7 +190,7 @@ export default function Expenses() {
       setError(error?.message ?? 'Не удалось сохранить')
       return
     }
-    setItems([data as Expense, ...items])
+    if (inPeriod((data as Expense).date)) setItems([data as Expense, ...items])
     setAmount('')
     setSubcategory('')
     setDescription('')
@@ -219,7 +232,11 @@ export default function Expenses() {
       setError(error?.message ?? 'Не удалось изменить')
       return
     }
-    setItems(items.map((i) => (i.id === id ? (data as Expense) : i)))
+    if (inPeriod((data as Expense).date)) {
+      setItems(items.map((i) => (i.id === id ? (data as Expense) : i)))
+    } else {
+      setItems(items.filter((i) => i.id !== id))
+    }
     setEditId(null)
   }
 
@@ -237,10 +254,12 @@ export default function Expenses() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">🧾 Расходы</h1>
         <span className="text-sm text-neutral-500 dark:text-neutral-400">
-          {MONTH_NAMES[month - 1]} · итого:{' '}
+          Итого:{' '}
           <b className="text-red-500 dark:text-red-400">{formatSum(total)}</b>
         </span>
       </div>
+
+      <PeriodFilter onChange={setPeriod} />
 
       <form
         onSubmit={addExpense}
@@ -298,7 +317,7 @@ export default function Expenses() {
       {loading ? (
         <p className="text-neutral-500 dark:text-neutral-400">Загрузка…</p>
       ) : items.length === 0 ? (
-        <p className="text-sm text-neutral-500">Пока нет расходов за этот месяц.</p>
+        <p className="text-sm text-neutral-500">За этот период расходов нет.</p>
       ) : (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">

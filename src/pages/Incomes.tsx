@@ -4,10 +4,10 @@ import { supabase } from '../lib/supabase'
 import Combobox from '../components/Combobox'
 import Select from '../components/Select'
 import DatePicker from '../components/DatePicker'
+import PeriodFilter, { type PeriodValue } from '../components/PeriodFilter'
 import {
   getOrCreateMonth,
   formatSum,
-  MONTH_NAMES,
   formatDateHuman,
   formatAmountInput,
   parseAmount,
@@ -47,11 +47,9 @@ const chipCls = (active: boolean) =>
 
 export default function Incomes() {
   const { user } = useAuth()
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth() + 1
+  const todayISO = new Date().toISOString().slice(0, 10)
 
-  const [monthId, setMonthId] = useState<string | null>(null)
+  const [period, setPeriod] = useState<PeriodValue | null>(null)
   const [items, setItems] = useState<Income[]>([])
   const [currencies, setCurrencies] = useState<Currency[]>([])
   const [loading, setLoading] = useState(true)
@@ -59,7 +57,7 @@ export default function Incomes() {
   const [sortOrder, setSortOrder] = useState<'new' | 'old'>('new')
 
   const [amount, setAmount] = useState('')
-  const [date, setDate] = useState(now.toISOString().slice(0, 10))
+  const [date, setDate] = useState(todayISO)
   const [currency, setCurrency] = useState(BASE_CURRENCY)
   const [source, setSource] = useState('')
   const [description, setDescription] = useState('')
@@ -72,23 +70,27 @@ export default function Incomes() {
   const [editSource, setEditSource] = useState('')
   const [editDescription, setEditDescription] = useState('')
 
+  // Справочник валют грузим один раз.
   useEffect(() => {
     if (!user) return
+    loadCurrencies(user.id)
+      .then(setCurrencies)
+      .catch(() => {})
+  }, [user])
+
+  // Записи грузим по диапазону дат выбранного периода.
+  useEffect(() => {
+    if (!user || !period) return
     let active = true
     ;(async () => {
       try {
         setLoading(true)
-        const [m, curList] = await Promise.all([
-          getOrCreateMonth(user.id, year, month),
-          loadCurrencies(user.id),
-        ])
-        if (!active) return
-        setMonthId(m.id)
-        setCurrencies(curList)
         const { data, error } = await supabase
           .from('incomes')
           .select(INCOME_COLS)
-          .eq('month_id', m.id)
+          .eq('user_id', user.id)
+          .gte('date', period.start)
+          .lte('date', period.end)
           .order('date', { ascending: false })
         if (error) throw error
         if (active) setItems((data ?? []) as Income[])
@@ -101,7 +103,7 @@ export default function Incomes() {
     return () => {
       active = false
     }
-  }, [user, year, month])
+  }, [user, period?.start, period?.end])
 
   const total = items.reduce((s, i) => s + Number(i.amount), 0)
 
@@ -126,9 +128,11 @@ export default function Incomes() {
   )
   const sourceOptions = Array.from(new Set([...usedSources, ...INCOME_SOURCE_PRESETS]))
 
+  const inPeriod = (d: string) => !period || (d >= period.start && d <= period.end)
+
   const addIncome = async (e: FormEvent) => {
     e.preventDefault()
-    if (!user || !monthId) return
+    if (!user) return
     const original = parseAmount(amount)
     if (!original || original <= 0) {
       setError('Введите сумму больше нуля')
@@ -137,11 +141,13 @@ export default function Incomes() {
     const base = Math.round(original * rateOf(currencies, currency))
     setBusy(true)
     setError(null)
+    const d = new Date(date + 'T00:00:00')
+    const m = await getOrCreateMonth(user.id, d.getFullYear(), d.getMonth() + 1)
     const { data, error } = await supabase
       .from('incomes')
       .insert({
         user_id: user.id,
-        month_id: monthId,
+        month_id: m.id,
         amount: base,
         original_amount: original,
         currency,
@@ -156,7 +162,7 @@ export default function Incomes() {
       setError(error?.message ?? 'Не удалось сохранить')
       return
     }
-    setItems([data as Income, ...items])
+    if (inPeriod((data as Income).date)) setItems([data as Income, ...items])
     setAmount('')
     setSource('')
     setDescription('')
@@ -196,7 +202,11 @@ export default function Incomes() {
       setError(error?.message ?? 'Не удалось изменить')
       return
     }
-    setItems(items.map((i) => (i.id === id ? (data as Income) : i)))
+    if (inPeriod((data as Income).date)) {
+      setItems(items.map((i) => (i.id === id ? (data as Income) : i)))
+    } else {
+      setItems(items.filter((i) => i.id !== id))
+    }
     setEditId(null)
   }
 
@@ -214,10 +224,12 @@ export default function Incomes() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">💼 Доходы</h1>
         <span className="text-sm text-neutral-500 dark:text-neutral-400">
-          {MONTH_NAMES[month - 1]} · итого:{' '}
+          Итого:{' '}
           <b className="text-emerald-600 dark:text-emerald-400">{formatSum(total)}</b>
         </span>
       </div>
+
+      <PeriodFilter onChange={setPeriod} />
 
       <form
         onSubmit={addIncome}
@@ -269,7 +281,7 @@ export default function Incomes() {
       {loading ? (
         <p className="text-neutral-500 dark:text-neutral-400">Загрузка…</p>
       ) : items.length === 0 ? (
-        <p className="text-sm text-neutral-500">Пока нет доходов за этот месяц.</p>
+        <p className="text-sm text-neutral-500">За этот период доходов нет.</p>
       ) : (
         <div className="flex flex-col gap-2">
           <div className="flex items-center gap-2">

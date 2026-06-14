@@ -521,6 +521,7 @@ export default function Goals() {
 
           {/* Список желаний */}
           <section className="flex flex-col gap-3">
+            <hr className="border-neutral-200 dark:border-neutral-800" />
             <h2 className={sectionTitle}>🛒 Хочу купить</h2>
             {wishes.length === 0 ? (
               <p className="text-sm text-neutral-500">Список пуст.</p>
@@ -612,7 +613,8 @@ export default function Goals() {
 
           {/* Достигнуто */}
           {doneItems.length > 0 && (
-            <section className="flex flex-col gap-2">
+            <section className="flex flex-col gap-3">
+              <hr className="border-neutral-200 dark:border-neutral-800" />
               <h2 className={sectionTitle}>✅ Достигнуто / куплено</h2>
               {doneItems.map((g) => (
                 <div

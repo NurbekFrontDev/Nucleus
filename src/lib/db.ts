@@ -146,11 +146,24 @@ export function rateOf(currencies: Currency[], code: string): number {
 }
 
 // Подтягивает актуальный курс: сколько сумов стоит 1 единица валюты (code).
-// Источник — бесплатный публичный API open.er-api.com. Возвращает null при ошибке.
+// Возвращает null при ошибке. Источники по приоритету: ЦБ Узбекистана (официальный,
+// ближе всего к Google для сума) → currency-api → open.er-api.com.
 export async function fetchRate(code: string): Promise<number | null> {
   if (code === BASE_CURRENCY) return 1
   const lower = code.toLowerCase()
   const base = BASE_CURRENCY.toLowerCase()
+  // Источник 0: Центробанк Узбекистана — официальный курс к суму, обновляется ежедневно,
+  // именно его обычно показывает и Google для UZS. Без ключа, CORS-ok.
+  try {
+    const res = await fetch('https://cbu.uz/ru/arkhiv-kursov-valyut/json/' + code + '/')
+    if (res.ok) {
+      const json = await res.json()
+      const rate = Number(Array.isArray(json) ? json[0]?.Rate : undefined)
+      if (rate > 0) return Math.round(rate * 100) / 100
+    }
+  } catch {
+    // пробуем следующий источник
+  }
   // Источник 1: currency-api — живой курс валют, без ключа, CORS-ok (ближе к рыночному).
   const urls = [
     'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/' + lower + '.json',
