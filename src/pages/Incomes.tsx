@@ -2,6 +2,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import Combobox from '../components/Combobox'
+import Select from '../components/Select'
+import DatePicker from '../components/DatePicker'
 import {
   getOrCreateMonth,
   formatSum,
@@ -32,12 +34,9 @@ const INCOME_COLS = 'id, amount, date, description, source, currency, original_a
 const inputCls =
   'w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
 
-const fmtRate = (n: number) => new Intl.NumberFormat('ru-RU').format(Math.round(n))
-
+// В списке показываем только валюту (курс — серой строкой ниже).
 const curLabel = (c: Currency) =>
-  c.code === BASE_CURRENCY
-    ? 'Сум (UZS)'
-    : `${c.code}${c.symbol ? ' ' + c.symbol : ''} · ${fmtRate(c.rate_to_base)} сум`
+  c.code === BASE_CURRENCY ? 'Сум (UZS)' : `${c.code}${c.symbol ? ' ' + c.symbol : ''}`
 
 const chipCls = (active: boolean) =>
   `rounded-full border px-3 py-1 text-xs transition ${
@@ -105,6 +104,8 @@ export default function Incomes() {
   }, [user, year, month])
 
   const total = items.reduce((s, i) => s + Number(i.amount), 0)
+
+  const currencyOptions = currencies.map((c) => ({ value: c.code, label: curLabel(c) }))
 
   const sortedItems = [...items].sort((a, b) => {
     const cmp =
@@ -230,29 +231,14 @@ export default function Incomes() {
             placeholder="Сумма"
             className={inputCls}
           />
-          <select
-            value={currency}
-            onChange={(e) => setCurrency(e.target.value)}
-            className={inputCls}
-          >
-            {currencies.map((c) => (
-              <option key={c.code} value={c.code}>
-                {curLabel(c)}
-              </option>
-            ))}
-          </select>
+          <Select value={currency} onChange={setCurrency} options={currencyOptions} />
         </div>
         {currency !== BASE_CURRENCY && (
           <p className="text-xs text-neutral-500">
             Курс: 1 {currency} ≈ {formatSum(rateOf(currencies, currency))}
           </p>
         )}
-        <input
-          type="date"
-          value={date}
-          onChange={(e) => setDate(e.target.value)}
-          className={inputCls}
-        />
+        <DatePicker value={date} onChange={setDate} />
         <Combobox
           value={source}
           onChange={setSource}
@@ -309,24 +295,9 @@ export default function Incomes() {
                     placeholder="Сумма"
                     className={inputCls}
                   />
-                  <select
-                    value={editCurrency}
-                    onChange={(e) => setEditCurrency(e.target.value)}
-                    className={inputCls}
-                  >
-                    {currencies.map((c) => (
-                      <option key={c.code} value={c.code}>
-                        {curLabel(c)}
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={editCurrency} onChange={setEditCurrency} options={currencyOptions} />
                 </div>
-                <input
-                  type="date"
-                  value={editDate}
-                  onChange={(e) => setEditDate(e.target.value)}
-                  className={inputCls}
-                />
+                <DatePicker value={editDate} onChange={setEditDate} />
                 <Combobox
                   value={editSource}
                   onChange={setEditSource}

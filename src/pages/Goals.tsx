@@ -1,6 +1,8 @@
 import { useEffect, useState, type FormEvent } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
+import Select from '../components/Select'
+import DatePicker from '../components/DatePicker'
 import {
   formatSum,
   formatAmountInput,
@@ -31,16 +33,20 @@ const GOAL_COLS =
 // Валюты для ввода цены желания/цели (всё пересчитывается в сум).
 const PRICE_CURRENCIES = ['UZS', 'USD', 'RUB'] as const
 const priceCurLabel = (c: string) => (c === 'UZS' ? 'Сум' : c === 'USD' ? 'USD $' : 'RUB ₽')
+const priceCurrencyOptions = PRICE_CURRENCIES.map((c) => ({ value: c, label: priceCurLabel(c) }))
+const wishCategoryOptions = WISH_CATEGORIES.map((c) => ({ value: c, label: c }))
 
-const inputCls =
-  'w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
+// Базовый стиль поля без ширины (чтобы не конфликтовало с flex-1 в строках).
+const fieldBase =
+  'rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
+const inputCls = 'w-full ' + fieldBase
 const btnPrimary =
   'rounded-lg bg-emerald-500 px-3 py-1.5 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400'
 const btnGhost =
   'rounded-lg border border-neutral-300 px-3 py-1.5 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800'
 const btnMuted =
   'text-sm text-neutral-500 transition hover:text-red-500 dark:hover:text-red-400'
-const sectionTitle = 'text-lg font-semibold'
+const sectionTitle = 'text-xl font-semibold'
 
 const chipCls = (active: boolean) =>
   `rounded-full border px-3 py-1 text-xs transition ${
@@ -318,19 +324,14 @@ export default function Goals() {
             value={price}
             onChange={(e) => setPrice(formatAmountInput(e.target.value))}
             placeholder="Примерная цена (необязательно)"
-            className={inputCls + ' flex-1'}
+            className={'flex-1 ' + fieldBase}
           />
-          <select
+          <Select
+            className="w-32 shrink-0"
             value={priceCurrency}
-            onChange={(e) => setPriceCurrency(e.target.value)}
-            className={inputCls + ' w-28 shrink-0'}
-          >
-            {PRICE_CURRENCIES.map((c) => (
-              <option key={c} value={c}>
-                {priceCurLabel(c)}
-              </option>
-            ))}
-          </select>
+            onChange={setPriceCurrency}
+            options={priceCurrencyOptions}
+          />
         </div>
         {priceCurrency !== 'UZS' && (
           <p className="text-xs text-neutral-500">
@@ -338,17 +339,7 @@ export default function Goals() {
             {price ? ` · ≈ ${formatSum(wishConverted)}` : ''}
           </p>
         )}
-        <select
-          value={wishCategory}
-          onChange={(e) => setWishCategory(e.target.value)}
-          className={inputCls}
-        >
-          {WISH_CATEGORIES.map((c) => (
-            <option key={c} value={c}>
-              {c}
-            </option>
-          ))}
-        </select>
+        <Select value={wishCategory} onChange={setWishCategory} options={wishCategoryOptions} />
         <input
           value={note}
           onChange={(e) => setNote(e.target.value)}
@@ -431,14 +422,11 @@ export default function Goals() {
                           value={contribAmount}
                           onChange={(e) => setContribAmount(formatAmountInput(e.target.value))}
                           placeholder="Сколько отложить"
-                          className={inputCls}
+                          className={'flex-1 ' + fieldBase}
                         />
-                        <input
-                          type="date"
-                          value={contribDate}
-                          onChange={(e) => setContribDate(e.target.value)}
-                          className={inputCls}
-                        />
+                        <div className="flex-1">
+                          <DatePicker value={contribDate} onChange={setContribDate} />
+                        </div>
                         <div className="flex gap-2">
                           <button onClick={() => addContribution(g.id)} className={btnPrimary}>
                             Отложить
@@ -483,14 +471,11 @@ export default function Goals() {
                                   inputMode="numeric"
                                   value={editContribAmount}
                                   onChange={(e) => setEditContribAmount(formatAmountInput(e.target.value))}
-                                  className={inputCls}
+                                  className={'flex-1 ' + fieldBase}
                                 />
-                                <input
-                                  type="date"
-                                  value={editContribDate}
-                                  onChange={(e) => setEditContribDate(e.target.value)}
-                                  className={inputCls}
-                                />
+                                <div className="flex-1">
+                                  <DatePicker value={editContribDate} onChange={setEditContribDate} />
+                                </div>
                                 <div className="flex gap-2">
                                   <button onClick={() => saveContribution(c.id)} className={btnPrimary}>
                                     Сохранить
@@ -581,19 +566,14 @@ export default function Goals() {
                             value={goalTarget}
                             onChange={(e) => setGoalTarget(formatAmountInput(e.target.value))}
                             placeholder="Сумма цели"
-                            className={inputCls + ' flex-1'}
+                            className={'flex-1 ' + fieldBase}
                           />
-                          <select
+                          <Select
+                            className="w-32 shrink-0"
                             value={goalTargetCurrency}
-                            onChange={(e) => setGoalTargetCurrency(e.target.value)}
-                            className={inputCls + ' w-28 shrink-0'}
-                          >
-                            {PRICE_CURRENCIES.map((c) => (
-                              <option key={c} value={c}>
-                                {priceCurLabel(c)}
-                              </option>
-                            ))}
-                          </select>
+                            onChange={setGoalTargetCurrency}
+                            options={priceCurrencyOptions}
+                          />
                         </div>
                         {goalTargetCurrency !== 'UZS' && (
                           <p className="text-xs text-neutral-500">
@@ -601,12 +581,7 @@ export default function Goals() {
                             {goalTarget ? ` · ≈ ${formatSum(goalConverted)}` : ''}
                           </p>
                         )}
-                        <input
-                          type="date"
-                          value={goalDate}
-                          onChange={(e) => setGoalDate(e.target.value)}
-                          className={inputCls}
-                        />
+                        <DatePicker value={goalDate} onChange={setGoalDate} />
                         <div className="flex gap-2">
                           <button onClick={() => makeGoal(g.id)} className={btnPrimary}>
                             Сделать целью

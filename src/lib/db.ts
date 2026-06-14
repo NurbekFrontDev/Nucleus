@@ -149,15 +149,36 @@ export function rateOf(currencies: Currency[], code: string): number {
 // Источник — бесплатный публичный API open.er-api.com. Возвращает null при ошибке.
 export async function fetchRate(code: string): Promise<number | null> {
   if (code === BASE_CURRENCY) return 1
+  const lower = code.toLowerCase()
+  const base = BASE_CURRENCY.toLowerCase()
+  // Источник 1: currency-api — живой курс валют, без ключа, CORS-ok (ближе к рыночному).
+  const urls = [
+    'https://cdn.jsdelivr.net/npm/@fawazahmed0/currency-api@latest/v1/currencies/' + lower + '.json',
+    'https://latest.currency-api.pages.dev/v1/currencies/' + lower + '.json',
+  ]
+  for (const url of urls) {
+    try {
+      const res = await fetch(url)
+      if (!res.ok) continue
+      const json = await res.json()
+      const rate = json?.[lower]?.[base]
+      if (typeof rate === 'number' && rate > 0) return Math.round(rate * 100) / 100
+    } catch {
+      // пробуем следующий источник
+    }
+  }
+  // Источник 2 (резерв): open.er-api.com
   try {
     const res = await fetch('https://open.er-api.com/v6/latest/' + code)
-    if (!res.ok) return null
-    const json = await res.json()
-    const rate = json?.rates?.[BASE_CURRENCY]
-    return typeof rate === 'number' && rate > 0 ? Math.round(rate * 100) / 100 : null
+    if (res.ok) {
+      const json = await res.json()
+      const rate = json?.rates?.[BASE_CURRENCY]
+      if (typeof rate === 'number' && rate > 0) return Math.round(rate * 100) / 100
+    }
   } catch {
-    return null
+    // игнорируем
   }
+  return null
 }
 
 // Категории важности для списка покупок/желаний (по приоритету сверху вниз).

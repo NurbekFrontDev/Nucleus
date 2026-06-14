@@ -2,6 +2,7 @@ import { useEffect, useState, type FormEvent } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useTheme } from '../lib/ThemeContext'
 import { supabase } from '../lib/supabase'
+import Select from '../components/Select'
 import { formatAmountInput, POPULAR_CURRENCIES, fetchRate } from '../lib/db'
 
 type Currency = { id: string; code: string; symbol: string | null; rate_to_base: number }
@@ -214,22 +215,19 @@ export default function Settings() {
 
         <form onSubmit={addCurrency} className="flex flex-col gap-2 border-t border-neutral-200 pt-3 dark:border-neutral-800">
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-            <select
+            <Select
               value={newCode}
-              onChange={(e) => {
-                setNewCode(e.target.value)
+              onChange={(v) => {
+                setNewCode(v)
                 setRate('')
                 setError(null)
               }}
-              className={inputCls}
-            >
-              <option value="">Выбери валюту…</option>
-              {available.map((p) => (
-                <option key={p.code} value={p.code}>
-                  {p.name} — {p.code} {p.symbol} ({p.country})
-                </option>
-              ))}
-            </select>
+              placeholder="Выбери валюту…"
+              options={available.map((p) => ({
+                value: p.code,
+                label: `${p.name} — ${p.code} ${p.symbol} (${p.country})`,
+              }))}
+            />
             <div className="flex gap-2">
               <input
                 inputMode="decimal"
