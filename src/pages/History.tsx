@@ -59,7 +59,7 @@ export default function History() {
             .from('expenses')
             .select('amount, month_id, subcategory, category_id')
             .eq('user_id', user.id),
-          supabase.from('categories').select('id, name').eq('user_id', user.id),
+          supabase.from('categories').select('id, name, archived').eq('user_id', user.id),
         ])
         if (!active) return
         if (mRes.error) throw mRes.error
@@ -68,7 +68,8 @@ export default function History() {
         if (catRes.error) throw catRes.error
 
         const catName: Record<string, string> = {}
-        for (const c of (catRes.data ?? []) as { id: string; name: string }[]) catName[c.id] = c.name
+        for (const c of (catRes.data ?? []) as { id: string; name: string; archived?: boolean }[])
+          catName[c.id] = c.archived ? `${c.name} (удалена)` : c.name
 
         const map: Record<string, Detail> = {}
         const ensure = (id: string) => {

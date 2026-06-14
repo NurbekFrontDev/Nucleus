@@ -10,6 +10,7 @@ create table if not exists public.categories (
   name text not null,
   percent numeric(5,2) not null default 0,
   sort_order int not null default 0,
+  archived boolean not null default false,
   created_at timestamptz not null default now()
 );
 
@@ -87,7 +88,8 @@ begin
     (new.id, 'Долги', 20, 3),
     (new.id, 'Обязательные', 30, 4),
     (new.id, 'Цели/Хотелки', 20, 5),
-    (new.id, 'Свободные', 10, 6);
+    (new.id, 'Свободные', 5, 6),
+    (new.id, 'Благотворительность', 5, 7);
   return new;
 end;
 $$;

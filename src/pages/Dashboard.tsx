@@ -33,6 +33,7 @@ export default function Dashboard() {
   const [error, setError] = useState<string | null>(null)
   const [plannedIncome, setPlannedIncome] = useState(0)
   const [actualIncome, setActualIncome] = useState(0)
+  const [totalSpent, setTotalSpent] = useState(0)
   const [rows, setRows] = useState<Row[]>([])
 
   useEffect(() => {
@@ -47,6 +48,7 @@ export default function Dashboard() {
             .from('categories')
             .select('id, name, percent, sort_order')
             .eq('user_id', user.id)
+            .eq('archived', false)
             .order('sort_order'),
           supabase.from('incomes').select('amount').eq('month_id', m.id),
           supabase.from('expenses').select('amount, category_id').eq('month_id', m.id),
@@ -66,9 +68,14 @@ export default function Dashboard() {
           if (!e.category_id) continue
           factByCat[e.category_id] = (factByCat[e.category_id] ?? 0) + Number(e.amount)
         }
+        const expenseSum = ((expRes.data ?? []) as { amount: number }[]).reduce(
+          (s, e) => s + Number(e.amount),
+          0,
+        )
         const planned = Number(m.planned_income) || 0
         setPlannedIncome(planned)
         setActualIncome(incomeSum)
+        setTotalSpent(expenseSum)
         setRows(
           cats.map((c) => ({
             id: c.id,
@@ -89,7 +96,6 @@ export default function Dashboard() {
     }
   }, [user, year, month])
 
-  const totalExpense = rows.reduce((s, r) => s + r.fact, 0)
   const saved = rows
     .filter((r) => r.name === 'Сбережения' || r.name === 'Инвестиции')
     .reduce((s, r) => s + r.fact, 0)
@@ -107,7 +113,7 @@ export default function Dashboard() {
           <div className="grid grid-cols-2 gap-3">
             <Card label="Цель по доходу" value={formatSum(plannedIncome)} />
             <Card label="Доход (факт)" value={formatSum(actualIncome)} accent="text-emerald-600 dark:text-emerald-400" />
-            <Card label="Расходы (факт)" value={formatSum(totalExpense)} accent="text-red-500 dark:text-red-400" />
+            <Card label="Расходы (факт)" value={formatSum(totalSpent)} accent="text-red-500 dark:text-red-400" />
             <Card label="Уже отложено" value={formatSum(saved)} accent="text-emerald-600 dark:text-emerald-400" />
           </div>
 

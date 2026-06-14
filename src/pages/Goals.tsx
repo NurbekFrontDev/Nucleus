@@ -31,7 +31,7 @@ type Goal = {
   created_at: string
 }
 type Contribution = { id: string; goal_id: string; amount: number; date: string }
-type Category = { id: string; name: string }
+type Category = { id: string; name: string; archived?: boolean }
 
 const GOAL_COLS =
   'id, name, note, target_amount, target_date, is_goal, done, category, expense_id, created_at'
@@ -127,7 +127,7 @@ export default function Goals() {
             .from('goal_contributions')
             .select('id, goal_id, amount, date')
             .eq('user_id', user.id),
-          supabase.from('categories').select('id, name').eq('user_id', user.id).order('sort_order'),
+          supabase.from('categories').select('id, name, archived').eq('user_id', user.id).order('sort_order'),
           loadCurrencies(user.id),
         ])
         if (!active) return
@@ -161,7 +161,7 @@ export default function Goals() {
 
   const rateFor = (code: string) => rates[code] ?? 1
   const catName = (id: string) => categories.find((c) => c.id === id)?.name ?? ''
-  const categoryOptions = categories.map((c) => ({ value: c.id, label: c.name }))
+  const categoryOptions = categories.filter((c) => !c.archived).map((c) => ({ value: c.id, label: c.name }))
   // Подсказки подкатегорий для выбранной категории.
   const subOptions = (catId: string) => SUBCATEGORY_PRESETS[catName(catId)] ?? []
 

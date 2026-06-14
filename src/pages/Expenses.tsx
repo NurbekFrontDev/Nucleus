@@ -19,7 +19,7 @@ import {
   type Currency,
 } from '../lib/db'
 
-type Category = { id: string; name: string }
+type Category = { id: string; name: string; archived?: boolean }
 type Expense = {
   id: string
   amount: number
@@ -83,7 +83,7 @@ export default function Expenses() {
     let active = true
     ;(async () => {
       const [catRes, curList] = await Promise.all([
-        supabase.from('categories').select('id, name').order('sort_order'),
+        supabase.from('categories').select('id, name, archived').order('sort_order'),
         loadCurrencies(user.id),
       ])
       if (!active) return
@@ -124,13 +124,16 @@ export default function Expenses() {
     }
   }, [user, period?.start, period?.end])
 
-  const catName = (id: string | null) =>
-    categories.find((c) => c.id === id)?.name ?? '—'
+  const catName = (id: string | null) => {
+    const c = categories.find((x) => x.id === id)
+    if (!c) return '—'
+    return c.archived ? `${c.name} (удалена)` : c.name
+  }
 
   const total = items.reduce((s, i) => s + Number(i.amount), 0)
 
   const currencyOptions = currencies.map((c) => ({ value: c.code, label: curLabel(c) }))
-  const categoryOptions = categories.map((c) => ({ value: c.id, label: c.name }))
+  const categoryOptions = categories.filter((c) => !c.archived).map((c) => ({ value: c.id, label: c.name }))
 
   const sortedItems = [...items].sort((a, b) => {
     const cmp =
