@@ -372,6 +372,21 @@ export function isSavingsCategory(name: string | null | undefined): boolean {
   return !!name && SAVINGS_CATEGORY_NAMES.includes(name.trim())
 }
 
+// Долги — это реальный расход (деньги уходят навсегда), поэтому в карточке «Расходы»
+// они остаются. НО для подушки безопасности их исключаем: платёж по долгу не должен
+// раздувать средние расходы «на жизнь» (особенно разовый возврат долга человеку).
+export const DEBT_CATEGORY_NAMES = ['Долги']
+
+export function isDebtCategory(name: string | null | undefined): boolean {
+  return !!name && DEBT_CATEGORY_NAMES.includes(name.trim())
+}
+
+// Категории, которые НЕ учитываются при расчёте подушки безопасности:
+// накопления (остаются твоими) и долги (разовые/временные, не «жизнь на каждый месяц»).
+export function isCushionExcludedCategory(name: string | null | undefined): boolean {
+  return isSavingsCategory(name) || isDebtCategory(name)
+}
+
 // ===== Подушка безопасности =====
 // Считает среднемесячные расходы за последние N месяцев и рекомендуемый размер
 // подушки (среднее в месяц, умноженное на число месяцев покрытия).
@@ -398,15 +413,15 @@ export async function loadCushionStats(
     .eq('user_id', userId)
   if (error) throw error
 
-  // id накопительных категорий — их расходы исключаем (отложенное ≠ трата на жизнь).
+  // id категорий, которые не идут в подушку (накопления и долги).
   const { data: cats, error: eCats } = await supabase
     .from('categories')
     .select('id, name')
     .eq('user_id', userId)
   if (eCats) throw eCats
-  const savingsIds = new Set(
+  const excludedIds = new Set(
     ((cats ?? []) as { id: string; name: string }[])
-      .filter((c) => isSavingsCategory(c.name))
+      .filter((c) => isCushionExcludedCategory(c.name))
       .map((c) => c.id),
   )
 
@@ -427,7 +442,7 @@ export async function loadCushionStats(
   const byMonth: Record<string, number> = {}
   let total = 0
   for (const ex of (exps ?? []) as { amount: number; month_id: string; category_id: string | null }[]) {
-    if (ex.category_id && savingsIds.has(ex.category_id)) continue // отложенное — не трата
+    if (ex.category_id && excludedIds.has(ex.category_id)) continue // накопления и долги — не «жизнь на месяц»
     const a = Number(ex.amount) || 0
     total += a
     byMonth[ex.month_id] = (byMonth[ex.month_id] ?? 0) + a
