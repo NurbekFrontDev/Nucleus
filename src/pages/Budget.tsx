@@ -13,15 +13,10 @@ import {
 
 type Category = { id: string; name: string; percent: number; sort_order: number; archived?: boolean }
 
-// Два варианта дизайна карточек (временный переключатель в углу):
-//  A — всё в одну строку: [точки] Название · % (мелко) · сумма (крупно).
-//  B — две строки: сверху крупная сумма, снизу мелкий процент.
-type Design = 'a' | 'b'
-
 const inputCls =
   'w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
 
-// Мелкое поле процента (общее для обоих вариантов).
+// Мелкое поле процента.
 const percentInputCls =
   'w-11 shrink-0 rounded-lg border border-neutral-300 bg-white px-1.5 py-1 text-center text-xs tabular-nums outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
 
@@ -39,22 +34,6 @@ export default function Budget() {
   const [newCatName, setNewCatName] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-
-  // Временный переключатель дизайна карточек (сохраняется в localStorage).
-  const [design, setDesign] = useState<Design>(() => {
-    try {
-      return localStorage.getItem('finlit-budget-design') === 'b' ? 'b' : 'a'
-    } catch {
-      return 'a'
-    }
-  })
-  useEffect(() => {
-    try {
-      localStorage.setItem('finlit-budget-design', design)
-    } catch {
-      // игнорируем
-    }
-  }, [design])
 
   // Управление категориями: меню (выпадает по тапу на точки), переименование, удаление.
   const [menuId, setMenuId] = useState<string | null>(null)
@@ -436,17 +415,7 @@ export default function Budget() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">📊 {t('budget.title')} · {monthName(month - 1)}</h1>
-        <button
-          type="button"
-          onClick={() => setDesign((d) => (d === 'a' ? 'b' : 'a'))}
-          title={t('budget.designTitle')}
-          className="shrink-0 rounded-lg border border-neutral-300 px-2.5 py-1.5 text-xs text-neutral-600 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-        >
-          ⇄ {t('budget.design', { n: design === 'a' ? 'A' : 'B' })}
-        </button>
-      </div>
+      <h1 className="text-2xl font-semibold">📊 {t('budget.title')} · {monthName(month - 1)}</h1>
 
       {loading ? (
         <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
@@ -531,31 +500,15 @@ export default function Budget() {
                       : 'border-neutral-200 dark:border-neutral-800'
                   }`}
                 >
-                  {design === 'a' ? (
-                    // Вариант A — одна строка: точки · название · процент (мелко) · сумма (крупно).
-                    <div className="flex items-center gap-2">
-                      {grip(c, index)}
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium">{tr(c.name)}</span>
-                      {percentField(c)}
-                      <span className="min-w-[6rem] shrink-0 text-right text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-                        {formatSum((received * Number(c.percent)) / 100)}
-                      </span>
-                      {menuButton(c)}
-                    </div>
-                  ) : (
-                    // Вариант B — две строки: сверху крупная сумма, снизу мелкий процент.
-                    <div className="flex flex-col gap-1.5">
-                      <div className="flex items-center gap-2">
-                        {grip(c, index)}
-                        <span className="min-w-0 flex-1 truncate text-sm font-medium">{tr(c.name)}</span>
-                        <span className="shrink-0 text-lg font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-                          {formatSum((received * Number(c.percent)) / 100)}
-                        </span>
-                        {menuButton(c)}
-                      </div>
-                      <div className="flex items-center gap-1.5 pl-7">{percentField(c)}</div>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-2">
+                    {grip(c, index)}
+                    <span className="min-w-0 flex-1 truncate text-sm font-medium">{tr(c.name)}</span>
+                    {percentField(c)}
+                    <span className="min-w-[6rem] shrink-0 text-right text-sm font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                      {formatSum((received * Number(c.percent)) / 100)}
+                    </span>
+                    {menuButton(c)}
+                  </div>
                 </div>
               ),
             )}
