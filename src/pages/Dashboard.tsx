@@ -2,7 +2,16 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import { useLang } from '../lib/i18n'
-import { getOrCreateMonth, formatSum, monthName } from '../lib/db'
+import {
+  getOrCreateMonth,
+  formatSum,
+  monthName,
+  loadCushionStats,
+  loadCushionMonths,
+  saveCushionMonths,
+  DEFAULT_CUSHION_MONTHS,
+  type CushionStats,
+} from '../lib/db'
 
 type Category = { id: string; name: string; percent: number; sort_order: number }
 type Row = { id: string; name: string; percent: number; plan: number; fact: number }
@@ -37,6 +46,8 @@ export default function Dashboard() {
   const [actualIncome, setActualIncome] = useState(0)
   const [totalSpent, setTotalSpent] = useState(0)
   const [rows, setRows] = useState<Row[]>([])
+  const [cushionMonths, setCushionMonths] = useState(DEFAULT_CUSHION_MONTHS)
+  const [cushion, setCushion] = useState<CushionStats | null>(null)
 
   useEffect(() => {
     if (!user) return
@@ -98,6 +109,34 @@ export default function Dashboard() {
     }
   }, [user, year, month])
 
+  useEffect(() => {
+    if (!user) return
+    let active = true
+    ;(async () => {
+      const n = await loadCushionMonths(user.id)
+      if (active) setCushionMonths(n)
+    })()
+    return () => {
+      active = false
+    }
+  }, [user])
+
+  useEffect(() => {
+    if (!user) return
+    let active = true
+    ;(async () => {
+      try {
+        const stats = await loadCushionStats(user.id, cushionMonths)
+        if (active) setCushion(stats)
+      } catch {
+        if (active) setCushion(null)
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [user, cushionMonths])
+
   const saved = rows
     .filter((r) => r.name === 'Сбережения' || r.name === 'Инвестиции')
     .reduce((s, r) => s + r.fact, 0)
@@ -124,6 +163,49 @@ export default function Dashboard() {
               {t('dash.addIncomeHint')}
             </p>
           )}
+
+          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 dark:border-emerald-500/20">
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm font-medium">{t('cushion.title')}</span>
+              <div className="flex items-center gap-1 text-xs">
+                <span className="text-neutral-500 dark:text-neutral-400">{t('cushion.coverage')}</span>
+                {[3, 6, 12].map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => {
+                      setCushionMonths(n)
+                      if (user) saveCushionMonths(user.id, n)
+                    }}
+                    className={`rounded-lg px-2 py-1 ${
+                      cushionMonths === n
+                        ? 'bg-emerald-500 text-white'
+                        : 'bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                    }`}
+                  >
+                    {t('cushion.months', { n })}
+                  </button>
+                ))}
+              </div>
+            </div>
+            {cushion && cushion.monthsUsed > 0 ? (
+              <>
+                <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
+                  {formatSum(cushion.recommended)}
+                </p>
+                <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                  {t('cushion.basis', { avg: formatSum(cushion.avgMonthly), n: cushionMonths })}
+                </p>
+                <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+                  {t('cushion.monthsUsed', { n: cushion.monthsUsed })}
+                </p>
+                <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">
+                  {t('cushion.hint', { n: cushionMonths })}
+                </p>
+              </>
+            ) : (
+              <p className="mt-2 text-sm text-neutral-500 dark:text-neutral-400">{t('cushion.noData')}</p>
+            )}
+          </div>
 
           <div className="flex flex-col gap-3">
             <span className="text-sm text-neutral-500 dark:text-neutral-400">{t('dash.planVsFact')}</span>

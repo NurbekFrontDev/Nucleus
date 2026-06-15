@@ -361,3 +361,86 @@ export async function saveGoalsSplit(userId: string, value: number): Promise<voi
       { onConflict: 'user_id' },
     )
 }
+
+// ===== Подушка безопасности =====
+// Считает среднемесячные расходы за последние N месяцев и рекомендуемый размер
+// подушки (среднее в месяц, умноженное на число месяцев покрытия).
+// Сумма растёт автоматически вместе с расходами.
+export type CushionStats = {
+  monthsUsed: number     // сколько месяцев из окна реально содержат расходы
+  totalExpenses: number  // сумма расходов за эти месяцы
+  avgMonthly: number     // средние расходы в месяц
+  recommended: number    // рекомендуемая подушка = avgMonthly * coverageMonths
+}
+
+export async function loadCushionStats(
+  userId: string,
+  coverageMonths = 6,
+): Promise<CushionStats> {
+  const empty: CushionStats = { monthsUsed: 0, totalExpenses: 0, avgMonthly: 0, recommended: 0 }
+  const now = new Date()
+  const curIdx = now.getFullYear() * 12 + now.getMonth() // 0-based индекс месяца
+  const minIdx = curIdx - (coverageMonths - 1)
+
+  const { data: months, error } = await supabase
+    .from('months')
+    .select('id, year, month')
+    .eq('user_id', userId)
+  if (error) throw error
+
+  const windowIds = ((months ?? []) as { id: string; year: number; month: number }[])
+    .filter((m) => {
+      const idx = Number(m.year) * 12 + (Number(m.month) - 1)
+      return idx >= minIdx && idx <= curIdx
+    })
+    .map((m) => m.id)
+  if (windowIds.length === 0) return empty
+
+  const { data: exps, error: e2 } = await supabase
+    .from('expenses')
+    .select('amount, month_id')
+    .in('month_id', windowIds)
+  if (e2) throw e2
+
+  const byMonth: Record<string, number> = {}
+  let total = 0
+  for (const ex of (exps ?? []) as { amount: number; month_id: string }[]) {
+    const a = Number(ex.amount) || 0
+    total += a
+    byMonth[ex.month_id] = (byMonth[ex.month_id] ?? 0) + a
+  }
+  const monthsWithData = Object.values(byMonth).filter((v) => v > 0).length
+  if (monthsWithData === 0) return empty
+  const avgMonthly = total / monthsWithData
+  return {
+    monthsUsed: monthsWithData,
+    totalExpenses: total,
+    avgMonthly,
+    recommended: avgMonthly * coverageMonths,
+  }
+}
+
+// Сколько месяцев покрывает подушка (3/6/12). Хранится в app_settings
+// (одна строка на пользователя), чтобы синхронизировалось между устройствами.
+export const DEFAULT_CUSHION_MONTHS = 6
+
+export async function loadCushionMonths(userId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('app_settings')
+    .select('cushion_months')
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (error) return DEFAULT_CUSHION_MONTHS
+  const v = Number((data as { cushion_months?: number } | null)?.cushion_months)
+  return v === 3 || v === 6 || v === 12 ? v : DEFAULT_CUSHION_MONTHS
+}
+
+export async function saveCushionMonths(userId: string, n: number): Promise<void> {
+  const v = n === 3 || n === 6 || n === 12 ? n : DEFAULT_CUSHION_MONTHS
+  await supabase
+    .from('app_settings')
+    .upsert(
+      { user_id: userId, cushion_months: v, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' },
+    )
+}
