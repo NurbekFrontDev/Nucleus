@@ -55,8 +55,6 @@ export default function History() {
   const [error, setError] = useState<string | null>(null)
   const [period, setPeriod] = useState<PeriodValue | null>(null)
   const [sortOrder, setSortOrder] = useState<'new' | 'old'>('new')
-  // ВРЕМЕННО: переключатель вида фильтра периодов (по центру / на всю ширину). Убрать после выбора.
-  const [filterAlign, setFilterAlign] = useState<'center' | 'stretch'>('center')
 
   useEffect(() => {
     if (!user) return
@@ -165,18 +163,9 @@ export default function History() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between gap-2">
-        <h1 className="text-2xl font-semibold">🗓️ {t('hist.title')}</h1>
-        <button
-          type="button"
-          onClick={() => setFilterAlign((v) => (v === 'center' ? 'stretch' : 'center'))}
-          className="rounded-lg border border-neutral-300 px-2 py-1 text-xs text-neutral-500 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
-        >
-          {filterAlign === 'center' ? 'Вид: по центру' : 'Вид: на всю ширину'}
-        </button>
-      </div>
+      <h1 className="text-2xl font-semibold">🗓️ {t('hist.title')}</h1>
 
-      <PeriodFilter onChange={setPeriod} modes={['month', 'year', 'all', 'range']} modesAlign={filterAlign} />
+      <PeriodFilter onChange={setPeriod} modes={['month', 'year', 'all', 'range']} modesAlign="center" />
 
       {loading ? (
         <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>

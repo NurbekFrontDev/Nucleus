@@ -55,16 +55,14 @@ export default function PeriodFilter({
 }: {
   onChange: (v: PeriodValue) => void
   modes?: Mode[]
-  modesAlign?: 'left' | 'center' | 'stretch'
+  modesAlign?: 'left' | 'center'
 }) {
   const { t } = useLang()
   const shownModes = modes ? MODES.filter((m) => modes.includes(m.id)) : MODES
   const rowCls =
     modesAlign === 'center'
       ? 'flex flex-wrap justify-center gap-2'
-      : modesAlign === 'stretch'
-        ? 'flex gap-2'
-        : 'flex flex-wrap gap-2'
+      : 'flex flex-wrap gap-2'
   const todayISO = iso(new Date())
   const [mode, setMode] = useState<Mode>('month')
   const [anchor, setAnchor] = useState(todayISO)
@@ -131,7 +129,7 @@ export default function PeriodFilter({
             key={m.id}
             type="button"
             onClick={() => setMode(m.id)}
-            className={`${chipCls(mode === m.id)}${modesAlign === 'stretch' ? ' flex-1 text-center' : ''}`}
+            className={chipCls(mode === m.id)}
           >
             {t(m.key)}
           </button>
