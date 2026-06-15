@@ -500,14 +500,15 @@ export async function loadCushionStats(
 
   const { data: exps, error: e2 } = await supabase
     .from('expenses')
-    .select('amount, month_id, category_id')
+    .select('amount, month_id, category_id, paid_from_pot')
     .in('month_id', windowIds)
   if (e2) throw e2
 
   const byMonth: Record<string, number> = {}
   let total = 0
-  for (const ex of (exps ?? []) as { amount: number; month_id: string; category_id: string | null }[]) {
+  for (const ex of (exps ?? []) as { amount: number; month_id: string; category_id: string | null; paid_from_pot: string | null }[]) {
     if (ex.category_id && excludedIds.has(ex.category_id)) continue // накопления и долги — не «жизнь на месяц»
+    if (ex.paid_from_pot) continue // трата из копилки (разовая, оплачена прошлыми накоплениями) — не раздуваем среднее
     const a = Number(ex.amount) || 0
     total += a
     byMonth[ex.month_id] = (byMonth[ex.month_id] ?? 0) + a

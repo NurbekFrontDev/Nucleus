@@ -186,11 +186,13 @@ export default function Dashboard() {
             </p>
           )}
 
-          <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 dark:border-emerald-500/20">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium">{t('cushion.title')}</span>
-              <div className="flex items-center gap-1 text-xs">
-                <span className="text-neutral-500 dark:text-neutral-400">{t('cushion.coverage')}</span>
+          <div className="grid grid-cols-2 gap-3 items-start">
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 dark:border-emerald-500/20">
+              <p className="text-sm font-medium">{t('cushion.title')}</p>
+              <p className="mt-1 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
+                {formatSum(pots.cushion)}
+              </p>
+              <div className="mt-2 flex gap-1">
                 {[3, 6, 12].map((n) => (
                   <button
                     key={n}
@@ -198,7 +200,7 @@ export default function Dashboard() {
                       setCushionMonths(n)
                       if (user) saveCushionMonths(user.id, n)
                     }}
-                    className={`rounded-lg px-2 py-1 ${
+                    className={`flex-1 rounded-lg py-1 text-xs ${
                       cushionMonths === n
                         ? 'bg-emerald-500 text-white'
                         : 'bg-neutral-200 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
@@ -208,38 +210,29 @@ export default function Dashboard() {
                   </button>
                 ))}
               </div>
+              {cushion && cushion.recommended > 0 ? (
+                <>
+                  <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
+                    <div
+                      className="h-full rounded-full bg-emerald-500"
+                      style={ { width: `${Math.min((pots.cushion / cushion.recommended) * 100, 100)}%` } }
+                    />
+                  </div>
+                  <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
+                    {t('cushion.progress', { n: cushionMonths, rec: formatSum(cushion.recommended) })}
+                  </p>
+                </>
+              ) : (
+                <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">{t('cushion.noData')}</p>
+              )}
             </div>
-            <p className="mt-2 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
-              {formatSum(pots.cushion)}
-            </p>
-            {cushion && cushion.recommended > 0 ? (
-              <>
-                <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
-                  <div
-                    className="h-full rounded-full bg-emerald-500"
-                    style={ { width: `${Math.min((pots.cushion / cushion.recommended) * 100, 100)}%` } }
-                  />
-                </div>
-                <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-                  {t('cushion.progress', { rec: formatSum(cushion.recommended) })}
-                </p>
-                <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-                  {t('cushion.basis', { avg: formatSum(cushion.avgMonthly), n: cushionMonths })}
-                </p>
-              </>
-            ) : (
-              <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{t('cushion.noData')}</p>
-            )}
-          </div>
 
-          <div className="rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sm font-medium">{t('savings.freeTitle')}</span>
-              <span className="text-lg font-semibold text-emerald-600 dark:text-emerald-400">
+            <div className="rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50">
+              <p className="text-sm font-medium">{t('savings.freeTitle')}</p>
+              <p className="mt-1 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
                 {formatSum(pots.free)}
-              </span>
+              </p>
             </div>
-            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{t('savings.freeHint')}</p>
           </div>
 
           <div className="flex flex-col gap-3">
