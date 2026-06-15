@@ -51,12 +51,20 @@ function weekLabel(s: Date, e: Date) {
 export default function PeriodFilter({
   onChange,
   modes,
+  modesAlign = 'left',
 }: {
   onChange: (v: PeriodValue) => void
   modes?: Mode[]
+  modesAlign?: 'left' | 'center' | 'stretch'
 }) {
   const { t } = useLang()
   const shownModes = modes ? MODES.filter((m) => modes.includes(m.id)) : MODES
+  const rowCls =
+    modesAlign === 'center'
+      ? 'flex flex-wrap justify-center gap-2'
+      : modesAlign === 'stretch'
+        ? 'flex gap-2'
+        : 'flex flex-wrap gap-2'
   const todayISO = iso(new Date())
   const [mode, setMode] = useState<Mode>('month')
   const [anchor, setAnchor] = useState(todayISO)
@@ -117,13 +125,13 @@ export default function PeriodFilter({
 
   return (
     <div className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-3 dark:border-neutral-800 dark:bg-neutral-900/50">
-      <div className="flex flex-wrap gap-2">
+      <div className={rowCls}>
         {shownModes.map((m) => (
           <button
             key={m.id}
             type="button"
             onClick={() => setMode(m.id)}
-            className={chipCls(mode === m.id)}
+            className={`${chipCls(mode === m.id)}${modesAlign === 'stretch' ? ' flex-1 text-center' : ''}`}
           >
             {t(m.key)}
           </button>
