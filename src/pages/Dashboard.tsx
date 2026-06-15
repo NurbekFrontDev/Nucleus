@@ -9,6 +9,7 @@ import {
   loadCushionStats,
   loadCushionMonths,
   saveCushionMonths,
+  isSavingsCategory,
   DEFAULT_CUSHION_MONTHS,
   type CushionStats,
 } from '../lib/db'
@@ -76,15 +77,19 @@ export default function Dashboard() {
           (s: number, r: { amount: number }) => s + Number(r.amount),
           0,
         )
+        // Накопительные категории (Сбережения/Инвестиции): отложенное туда — не трата,
+        // поэтому исключаем их из карточки «Расходы» (но в «План против факта» они остаются).
+        const savingsCatIds = new Set(
+          cats.filter((c) => isSavingsCategory(c.name)).map((c) => c.id),
+        )
         const factByCat: Record<string, number> = {}
         for (const e of (expRes.data ?? []) as { amount: number; category_id: string | null }[]) {
           if (!e.category_id) continue
           factByCat[e.category_id] = (factByCat[e.category_id] ?? 0) + Number(e.amount)
         }
-        const expenseSum = ((expRes.data ?? []) as { amount: number }[]).reduce(
-          (s, e) => s + Number(e.amount),
-          0,
-        )
+        const expenseSum = ((expRes.data ?? []) as { amount: number; category_id: string | null }[])
+          .filter((e) => !e.category_id || !savingsCatIds.has(e.category_id))
+          .reduce((s, e) => s + Number(e.amount), 0)
         const planned = Number(m.planned_income) || 0
         setPlannedIncome(planned)
         setActualIncome(incomeSum)
