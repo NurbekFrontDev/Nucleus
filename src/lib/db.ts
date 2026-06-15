@@ -335,3 +335,29 @@ export function monthsUntil(dateStr: string | null): number {
     (target.getMonth() - now.getMonth())
   return Math.max(1, months)
 }
+
+// ===== Настройка распределения внутри категории «Цели» (80/20) =====
+// Доля главной цели в процентах (0..100). Второстепенным — остаток (100 - это).
+// Хранится в app_settings (одна строка на пользователя), чтобы синхронизировалось между устройствами.
+export const DEFAULT_GOALS_SPLIT = 80
+
+export async function loadGoalsSplit(userId: string): Promise<number> {
+  const { data, error } = await supabase
+    .from('app_settings')
+    .select('goals_primary_split')
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (error) return DEFAULT_GOALS_SPLIT
+  const v = Number((data as { goals_primary_split?: number } | null)?.goals_primary_split)
+  return Number.isFinite(v) && v >= 0 && v <= 100 ? v : DEFAULT_GOALS_SPLIT
+}
+
+export async function saveGoalsSplit(userId: string, value: number): Promise<void> {
+  const v = Math.max(0, Math.min(100, Math.round(value)))
+  await supabase
+    .from('app_settings')
+    .upsert(
+      { user_id: userId, goals_primary_split: v, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' },
+    )
+}

@@ -11,15 +11,15 @@ import {
   parseAmount,
   monthsUntil,
   formatDateHuman,
-  loadCurrencies,
-  fetchRate,
   getOrCreateMonth,
   SUBCATEGORY_PRESETS,
   effectivePresets,
   renamePreset,
   deletePreset,
-  BASE_CURRENCY,
   WISH_CATEGORIES,
+  loadGoalsSplit,
+  saveGoalsSplit,
+  DEFAULT_GOALS_SPLIT,
 } from '../lib/db'
 
 type Goal = {
@@ -29,19 +29,17 @@ type Goal = {
   target_amount: number
   target_date: string | null
   is_goal: boolean
+  is_primary: boolean
   done: boolean
   category: string | null
   expense_id: string | null
   created_at: string
 }
 type Contribution = { id: string; goal_id: string; amount: number; date: string }
-type Category = { id: string; name: string; archived?: boolean }
+type Category = { id: string; name: string; percent?: number; archived?: boolean }
 
 const GOAL_COLS =
-  'id, name, note, target_amount, target_date, is_goal, done, category, expense_id, created_at'
-
-// Валюты для ввода цены желания/цели (всё пересчитывается в сум).
-const PRICE_CURRENCIES = ['UZS', 'USD', 'RUB'] as const
+  'id, name, note, target_amount, target_date, is_goal, is_primary, done, category, expense_id, created_at'
 
 // Базовый стиль поля без ширины (чтобы не конфликтовало с flex-1 в строках).
 const fieldBase =
@@ -75,20 +73,18 @@ const catPriority = (c: string | null) => {
 export default function Goals() {
   const { user } = useAuth()
   const { t, tr } = useLang()
-  const priceCurLabel = (c: string) => (c === 'UZS' ? tr('Сум') : c === 'USD' ? 'USD $' : 'RUB ₽')
-  const priceCurrencyOptions = PRICE_CURRENCIES.map((c) => ({ value: c, label: priceCurLabel(c) }))
   const wishCategoryOptions = WISH_CATEGORIES.map((c) => ({ value: c, label: tr(c) }))
 
   const [goals, setGoals] = useState<Goal[]>([])
   const [contribs, setContribs] = useState<Contribution[]>([])
   const [categories, setCategories] = useState<Category[]>([])
+  const [received, setReceived] = useState(0)
+  const [split, setSplit] = useState(DEFAULT_GOALS_SPLIT)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
-  const [rates, setRates] = useState<Record<string, number>>({ UZS: 1 })
 
   const [name, setName] = useState('')
   const [price, setPrice] = useState('')
-  const [priceCurrency, setPriceCurrency] = useState<string>('UZS')
   const [note, setNote] = useState('')
   const [wishCategory, setWishCategory] = useState<string>('Цели и хотелки')
   const [busy, setBusy] = useState(false)
@@ -99,7 +95,6 @@ export default function Goals() {
 
   const [goalFormId, setGoalFormId] = useState<string | null>(null)
   const [goalTarget, setGoalTarget] = useState('')
-  const [goalTargetCurrency, setGoalTargetCurrency] = useState<string>('UZS')
   const [goalDate, setGoalDate] = useState('')
 
   const [contribFormId, setContribFormId] = useState<string | null>(null)
@@ -123,7 +118,9 @@ export default function Goals() {
     ;(async () => {
       try {
         setLoading(true)
-        const [gRes, cRes, catRes, curList] = await Promise.all([
+        const now = new Date()
+        const m = await getOrCreateMonth(user.id, now.getFullYear(), now.getMonth() + 1)
+        const [gRes, cRes, catRes, incRes, splitVal] = await Promise.all([
           supabase
             .from('goals')
             .select(GOAL_COLS)
@@ -133,27 +130,26 @@ export default function Goals() {
             .from('goal_contributions')
             .select('id, goal_id, amount, date')
             .eq('user_id', user.id),
-          supabase.from('categories').select('id, name, archived').eq('user_id', user.id).order('sort_order'),
-          loadCurrencies(user.id),
+          supabase
+            .from('categories')
+            .select('id, name, percent, archived')
+            .eq('user_id', user.id)
+            .order('sort_order'),
+          supabase.from('incomes').select('amount').eq('month_id', m.id),
+          loadGoalsSplit(user.id),
         ])
         if (!active) return
         if (gRes.error) throw gRes.error
         if (cRes.error) throw cRes.error
         if (catRes.error) throw catRes.error
+        if (incRes.error) throw incRes.error
         setGoals((gRes.data ?? []) as Goal[])
         setContribs((cRes.data ?? []) as Contribution[])
         setCategories((catRes.data ?? []) as Category[])
-        // Курсы для USD/RUB: берём из валют пользователя, иначе подтягиваем автоматически.
-        const map: Record<string, number> = { UZS: 1 }
-        for (const code of ['USD', 'RUB']) {
-          const found = curList.find((c) => c.code === code)
-          if (found) map[code] = Number(found.rate_to_base)
-          else {
-            const r = await fetchRate(code)
-            if (r) map[code] = r
-          }
-        }
-        if (active) setRates(map)
+        setReceived(
+          (incRes.data ?? []).reduce((s: number, r: { amount: number }) => s + Number(r.amount), 0),
+        )
+        setSplit(splitVal)
       } catch (e) {
         if (active) setError((e as Error).message)
       } finally {
@@ -165,7 +161,6 @@ export default function Goals() {
     }
   }, [user])
 
-  const rateFor = (code: string) => rates[code] ?? 1
   const catName = (id: string) => categories.find((c) => c.id === id)?.name ?? ''
   const categoryOptions = categories.filter((c) => !c.archived).map((c) => ({ value: c.id, label: tr(c.name) }))
   // Подсказки подкатегорий для выбранной категории (с учётом локальных правок).
@@ -209,16 +204,16 @@ export default function Goals() {
     if (!user || !name.trim()) return
     setBusy(true)
     setError(null)
-    const targetBase = Math.round(parseAmount(price) * rateFor(priceCurrency))
     const { data, error } = await supabase
       .from('goals')
       .insert({
         user_id: user.id,
         name: name.trim(),
         note: note.trim() || null,
-        target_amount: targetBase,
+        target_amount: parseAmount(price),
         category: wishCategory,
         is_goal: false,
+        is_primary: false,
         done: false,
       })
       .select(GOAL_COLS)
@@ -232,19 +227,17 @@ export default function Goals() {
     setName('')
     setPrice('')
     setNote('')
-    setPriceCurrency('UZS')
   }
 
   const openGoalForm = (g: Goal) => {
     setGoalFormId(g.id)
     setGoalTarget(g.target_amount ? formatAmountInput(String(g.target_amount)) : '')
-    setGoalTargetCurrency('UZS')
     setGoalDate(g.target_date ?? '')
     setError(null)
   }
 
   const makeGoal = async (id: string) => {
-    const target = Math.round(parseAmount(goalTarget) * rateFor(goalTargetCurrency))
+    const target = parseAmount(goalTarget)
     if (!target) {
       setError(t('goals.errGoalAmount'))
       return
@@ -261,6 +254,50 @@ export default function Goals() {
     }
     setGoals(goals.map((g) => (g.id === id ? (data as Goal) : g)))
     setGoalFormId(null)
+  }
+
+  // Сделать цель главной: снимаем флаг со всех остальных, ставим этой.
+  const setPrimary = async (id: string) => {
+    if (!user) return
+    const { error: clearErr } = await supabase
+      .from('goals')
+      .update({ is_primary: false })
+      .eq('user_id', user.id)
+      .eq('is_primary', true)
+    if (clearErr) {
+      setError(clearErr.message)
+      return
+    }
+    const { data, error } = await supabase
+      .from('goals')
+      .update({ is_primary: true })
+      .eq('id', id)
+      .select(GOAL_COLS)
+      .single()
+    if (error || !data) {
+      setError(error?.message ?? t('common.error'))
+      return
+    }
+    setGoals(goals.map((g) => (g.id === id ? (data as Goal) : { ...g, is_primary: false })))
+  }
+
+  const unsetPrimary = async (id: string) => {
+    const { data, error } = await supabase
+      .from('goals')
+      .update({ is_primary: false })
+      .eq('id', id)
+      .select(GOAL_COLS)
+      .single()
+    if (error || !data) {
+      setError(error?.message ?? t('common.error'))
+      return
+    }
+    setGoals(goals.map((g) => (g.id === id ? (data as Goal) : g)))
+  }
+
+  const saveSplit = async () => {
+    if (!user) return
+    await saveGoalsSplit(user.id, split)
   }
 
   const addContribution = async (goalId: string) => {
@@ -324,7 +361,7 @@ export default function Goals() {
   const setDone = async (g: Goal, done: boolean) => {
     const { data, error } = await supabase
       .from('goals')
-      .update({ done })
+      .update({ done, is_primary: done ? false : g.is_primary })
       .eq('id', g.id)
       .select(GOAL_COLS)
       .single()
@@ -374,15 +411,13 @@ export default function Goals() {
           category_id: buyCategory || null,
           subcategory: buySub.trim() || null,
           month_id: month.id,
-          currency: BASE_CURRENCY,
-          original_amount: value,
         })
         .select('id')
         .single()
       if (expErr || !exp) throw expErr ?? new Error(t('common.saveFailed'))
       const { data, error } = await supabase
         .from('goals')
-        .update({ done: true, expense_id: (exp as { id: string }).id })
+        .update({ done: true, is_primary: false, expense_id: (exp as { id: string }).id })
         .eq('id', g.id)
         .select(GOAL_COLS)
         .single()
@@ -435,6 +470,15 @@ export default function Goals() {
   const activeGoals = goals.filter((g) => g.is_goal && !g.done)
   const wishes = goals.filter((g) => !g.is_goal && !g.done)
   const doneItems = goals.filter((g) => g.done)
+  const primaryGoal = activeGoals.find((g) => g.is_primary) ?? null
+  const secondaryGoals = activeGoals.filter((g) => g.id !== primaryGoal?.id)
+
+  // Распределение внутри категории «Цели» (80/20 по умолчанию).
+  const goalsCat = categories.find((c) => !c.archived && c.name.startsWith('Цели'))
+  const goalsPercent = goalsCat ? Number(goalsCat.percent ?? 0) : 0
+  const goalsBudget = (received * goalsPercent) / 100
+  const mainBudget = (goalsBudget * split) / 100
+  const secBudget = (goalsBudget * (100 - split)) / 100
 
   const sortedWishes = [...wishes].sort((a, b) => {
     if (byPriority) {
@@ -445,16 +489,14 @@ export default function Goals() {
     return dateDir === 'new' ? -cmp : cmp
   })
 
-  const wishConverted = Math.round(parseAmount(price) * rateFor(priceCurrency))
-  const goalConverted = Math.round(parseAmount(goalTarget) * rateFor(goalTargetCurrency))
-  const buyConverted = parseAmount(buyAmount)
+  const buyTotal = parseAmount(buyAmount)
 
   // Форма записи покупки в расходы (общая для желаний и целей).
   const renderBuyForm = (g: Goal) => (
     <div className="flex flex-col gap-2 rounded-lg border border-emerald-500/40 bg-emerald-500/5 p-3">
       <p className="text-sm font-medium">{t('goals.toExpenses')}</p>
       <input
-        inputMode="numeric"
+        inputMode="decimal"
         value={buyAmount}
         onChange={(e) => setBuyAmount(formatAmountInput(e.target.value))}
         placeholder={t('goals.purchaseAmount')}
@@ -478,7 +520,7 @@ export default function Goals() {
         onDeleteOption={(o) => deleteSub(buyCategory, o)}
       />
       <DatePicker value={buyDate} onChange={setBuyDate} />
-      <p className="text-xs text-neutral-500">{t('goals.willBeExpense', { n: g.name, v: formatSum(buyConverted) })}</p>
+      <p className="text-xs text-neutral-500">{t('goals.willBeExpense', { n: g.name, v: formatSum(buyTotal) })}</p>
       <div className="flex flex-wrap gap-2">
         <button onClick={() => confirmBuy(g)} disabled={busy} className={btnPrimary}>
           {busy ? t('common.saving') : t('goals.recordExpense')}
@@ -492,6 +534,177 @@ export default function Goals() {
       </div>
     </div>
   )
+
+  // Карточка активной цели (используется и для главной, и для второстепенных).
+  const renderActiveGoal = (g: Goal) => {
+    const saved = savedFor(g.id)
+    const pct = g.target_amount > 0 ? Math.min(100, (saved / g.target_amount) * 100) : 0
+    const remaining = Math.max(0, g.target_amount - saved)
+    const months = monthsUntil(g.target_date)
+    const perMonth = months > 0 ? remaining / months : 0
+    const goalContribs = contribs.filter((c) => c.goal_id === g.id)
+    return (
+      <div
+        key={g.id}
+        className={`flex flex-col gap-3 rounded-2xl border p-4 ${
+          g.is_primary
+            ? 'border-emerald-500/60 bg-emerald-500/5 dark:bg-emerald-500/10'
+            : 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/50'
+        }`}
+      >
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              {g.is_primary && <span aria-hidden>⭐</span>}
+              <p className="font-medium">{g.name}</p>
+              {g.category && (
+                <span className={`rounded-full px-2 py-0.5 text-xs ${catBadgeCls(g.category)}`}>{tr(g.category)}</span>
+              )}
+            </div>
+            {g.target_date && (
+              <p className="text-xs text-neutral-500">{t('goals.by', { d: formatDateHuman(g.target_date) })}</p>
+            )}
+          </div>
+          <span className="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
+            {Math.round(pct)}%
+          </span>
+        </div>
+        <div className="h-2.5 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
+          <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
+        </div>
+        <div className="grid grid-cols-3 gap-2 text-xs">
+          <div>
+            <p className="text-neutral-500">{t('goals.collected')}</p>
+            <p className="font-medium text-emerald-600 dark:text-emerald-400">{formatSum(saved)}</p>
+          </div>
+          <div>
+            <p className="text-neutral-500">{t('goals.left')}</p>
+            <p className="font-medium">{formatSum(remaining)}</p>
+          </div>
+          <div>
+            <p className="text-neutral-500">{t('goals.perMonth')}</p>
+            <p className="font-medium">{months > 0 ? formatSum(perMonth) : '—'}</p>
+          </div>
+        </div>
+        <p className="text-xs text-neutral-500">{t('goals.target', { v: formatSum(g.target_amount) })}</p>
+        {g.is_primary && mainBudget > 0 && (
+          <p className="text-xs font-medium text-emerald-600 dark:text-emerald-400">
+            {t('goals.monthToMain', { v: formatSum(mainBudget) })}
+          </p>
+        )}
+
+        {buyFormId === g.id ? (
+          renderBuyForm(g)
+        ) : contribFormId === g.id ? (
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <input
+              inputMode="decimal"
+              value={contribAmount}
+              onChange={(e) => setContribAmount(formatAmountInput(e.target.value))}
+              placeholder={t('goals.howMuch')}
+              className={'flex-1 ' + fieldBase}
+            />
+            <div className="flex-1">
+              <DatePicker value={contribDate} onChange={setContribDate} />
+            </div>
+            <div className="flex gap-2">
+              <button onClick={() => addContribution(g.id)} className={btnPrimary}>
+                {t('goals.setAside')}
+              </button>
+              <button onClick={() => setContribFormId(null)} className={btnGhost}>
+                {t('common.cancel')}
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              onClick={() => {
+                setContribFormId(g.id)
+                setContribAmount('')
+                setError(null)
+              }}
+              className={btnPrimary}
+            >
+              {t('goals.setAsideBtn')}
+            </button>
+            <button onClick={() => openBuyForm(g)} className={btnGhost}>
+              {t('goals.bought')}
+            </button>
+            {g.is_primary ? (
+              <button onClick={() => unsetPrimary(g.id)} className={btnGhost}>
+                {t('goals.unsetPrimary')}
+              </button>
+            ) : (
+              <button onClick={() => setPrimary(g.id)} className={btnGhost}>
+                {t('goals.makePrimary')}
+              </button>
+            )}
+            <button onClick={() => removeGoal(g.id)} className={btnMuted}>
+              {t('common.delete')}
+            </button>
+          </div>
+        )}
+
+        {goalContribs.length > 0 && (
+          <details className="text-sm text-neutral-500">
+            <summary className="cursor-pointer">{t('goals.contribs', { n: goalContribs.length })}</summary>
+            <div className="mt-3 flex flex-col gap-2">
+              {goalContribs.map((c) =>
+                editContribId === c.id ? (
+                  <div
+                    key={c.id}
+                    className="flex flex-col gap-2 rounded-lg bg-neutral-100 p-2.5 dark:bg-neutral-800/50 sm:flex-row"
+                  >
+                    <input
+                      inputMode="decimal"
+                      value={editContribAmount}
+                      onChange={(e) => setEditContribAmount(formatAmountInput(e.target.value))}
+                      className={'flex-1 ' + fieldBase}
+                    />
+                    <div className="flex-1">
+                      <DatePicker value={editContribDate} onChange={setEditContribDate} />
+                    </div>
+                    <div className="flex gap-2">
+                      <button onClick={() => saveContribution(c.id)} className={btnPrimary}>
+                        {t('common.save')}
+                      </button>
+                      <button onClick={() => setEditContribId(null)} className={btnGhost}>
+                        {t('common.cancel')}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div
+                    key={c.id}
+                    className="flex items-center justify-between gap-3 rounded-lg bg-neutral-100 px-3 py-2.5 text-sm dark:bg-neutral-800/50"
+                  >
+                    <span className="text-neutral-700 dark:text-neutral-300">
+                      {formatDateHuman(c.date)} · {formatSum(Number(c.amount))}
+                    </span>
+                    <div className="flex shrink-0 gap-3">
+                      <button
+                        onClick={() => startEditContrib(c)}
+                        className="text-neutral-500 transition hover:text-emerald-600 dark:hover:text-emerald-400"
+                      >
+                        {t('common.edit')}
+                      </button>
+                      <button
+                        onClick={() => removeContribution(c.id)}
+                        className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                      >
+                        {t('common.delete')}
+                      </button>
+                    </div>
+                  </div>
+                ),
+              )}
+            </div>
+          </details>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -508,27 +721,13 @@ export default function Goals() {
           placeholder={t('goals.wishName')}
           className={inputCls}
         />
-        <div className="flex gap-2">
-          <input
-            inputMode="numeric"
-            value={price}
-            onChange={(e) => setPrice(formatAmountInput(e.target.value))}
-            placeholder={t('goals.priceApprox')}
-            className={'flex-1 min-w-0 ' + fieldBase}
-          />
-          <Select
-            className="w-32 shrink-0"
-            value={priceCurrency}
-            onChange={setPriceCurrency}
-            options={priceCurrencyOptions}
-          />
-        </div>
-        {priceCurrency !== 'UZS' && (
-          <p className="text-xs text-neutral-500">
-            {t('inc.rate', { c: priceCurrency, v: formatSum(rateFor(priceCurrency)) })}
-            {price ? ` · ≈ ${formatSum(wishConverted)}` : ''}
-          </p>
-        )}
+        <input
+          inputMode="decimal"
+          value={price}
+          onChange={(e) => setPrice(formatAmountInput(e.target.value))}
+          placeholder={t('goals.priceApprox')}
+          className={inputCls}
+        />
         <Select value={wishCategory} onChange={setWishCategory} options={wishCategoryOptions} />
         <input
           value={note}
@@ -550,164 +749,64 @@ export default function Goals() {
         <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
       ) : (
         <>
-          {/* Активные цели */}
+          {/* Распределение категории «Цели» (80/20) */}
+          <section className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50">
+            <h2 className={sectionTitle}>{t('goals.split')}</h2>
+            <p className="text-xs text-neutral-500">{t('goals.splitHint', { a: split, b: 100 - split })}</p>
+            {goalsCat ? (
+              <>
+                <p className="text-sm">{t('goals.goalsBudget', { v: formatSum(goalsBudget) })}</p>
+                <div className="flex h-3 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
+                  <div className="h-full bg-emerald-500" style={{ width: `${split}%` }} />
+                  <div className="h-full bg-sky-400" style={{ width: `${100 - split}%` }} />
+                </div>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <p className="text-neutral-500">{t('goals.splitMain', { a: split })}</p>
+                    <p className="font-medium text-emerald-600 dark:text-emerald-400">{formatSum(mainBudget)}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-neutral-500">{t('goals.splitSecondary', { b: 100 - split })}</p>
+                    <p className="font-medium text-sky-600 dark:text-sky-400">{formatSum(secBudget)}</p>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <p className="text-xs text-amber-600 dark:text-amber-400">{t('goals.noGoalsCat')}</p>
+            )}
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-neutral-500">{t('goals.mainShare')}</label>
+              <input
+                inputMode="numeric"
+                value={String(split)}
+                onChange={(e) =>
+                  setSplit(Math.max(0, Math.min(100, Number(e.target.value.replace(/[^\d]/g, '')) || 0)))
+                }
+                onBlur={saveSplit}
+                className="w-16 rounded-lg border border-neutral-300 bg-white px-2 py-1 text-center text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
+              />
+              <span className="text-xs text-neutral-500">/ {100 - split}%</span>
+            </div>
+          </section>
+
+          {/* Главная цель */}
           <section className="flex flex-col gap-3">
-            <h2 className={sectionTitle}>{t('goals.active')}</h2>
-            {activeGoals.length === 0 ? (
+            <h2 className={sectionTitle}>{t('goals.primary')}</h2>
+            {primaryGoal ? (
+              renderActiveGoal(primaryGoal)
+            ) : (
+              <p className="text-sm text-neutral-500">{t('goals.noPrimary')}</p>
+            )}
+          </section>
+
+          {/* Второстепенные цели */}
+          <section className="flex flex-col gap-3">
+            <hr className="border-neutral-200 dark:border-neutral-800" />
+            <h2 className={sectionTitle}>{t('goals.secondaryGoals')}</h2>
+            {secondaryGoals.length === 0 ? (
               <p className="text-sm text-neutral-500">{t('goals.noActive')}</p>
             ) : (
-              activeGoals.map((g) => {
-                const saved = savedFor(g.id)
-                const pct = g.target_amount > 0 ? Math.min(100, (saved / g.target_amount) * 100) : 0
-                const remaining = Math.max(0, g.target_amount - saved)
-                const months = monthsUntil(g.target_date)
-                const perMonth = months > 0 ? remaining / months : 0
-                const goalContribs = contribs.filter((c) => c.goal_id === g.id)
-                return (
-                  <div
-                    key={g.id}
-                    className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50"
-                  >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <p className="font-medium">{g.name}</p>
-                          {g.category && (
-                            <span className={`rounded-full px-2 py-0.5 text-xs ${catBadgeCls(g.category)}`}>
-                              {tr(g.category)}
-                            </span>
-                          )}
-                        </div>
-                        {g.target_date && (
-                          <p className="text-xs text-neutral-500">{t('goals.by', { d: formatDateHuman(g.target_date) })}</p>
-                        )}
-                      </div>
-                      <span className="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-400">
-                        {Math.round(pct)}%
-                      </span>
-                    </div>
-                    <div className="h-2.5 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
-                      <div className="h-full rounded-full bg-emerald-500" style={ { width: `${pct}%` } } />
-                    </div>
-                    <div className="grid grid-cols-3 gap-2 text-xs">
-                      <div>
-                        <p className="text-neutral-500">{t('goals.collected')}</p>
-                        <p className="font-medium text-emerald-600 dark:text-emerald-400">{formatSum(saved)}</p>
-                      </div>
-                      <div>
-                        <p className="text-neutral-500">{t('goals.left')}</p>
-                        <p className="font-medium">{formatSum(remaining)}</p>
-                      </div>
-                      <div>
-                        <p className="text-neutral-500">{t('goals.perMonth')}</p>
-                        <p className="font-medium">{months > 0 ? formatSum(perMonth) : '—'}</p>
-                      </div>
-                    </div>
-                    <p className="text-xs text-neutral-500">{t('goals.target', { v: formatSum(g.target_amount) })}</p>
-
-                    {buyFormId === g.id ? (
-                      renderBuyForm(g)
-                    ) : contribFormId === g.id ? (
-                      <div className="flex flex-col gap-2 sm:flex-row">
-                        <input
-                          inputMode="numeric"
-                          value={contribAmount}
-                          onChange={(e) => setContribAmount(formatAmountInput(e.target.value))}
-                          placeholder={t('goals.howMuch')}
-                          className={'flex-1 ' + fieldBase}
-                        />
-                        <div className="flex-1">
-                          <DatePicker value={contribDate} onChange={setContribDate} />
-                        </div>
-                        <div className="flex gap-2">
-                          <button onClick={() => addContribution(g.id)} className={btnPrimary}>
-                            {t('goals.setAside')}
-                          </button>
-                          <button onClick={() => setContribFormId(null)} className={btnGhost}>
-                            {t('common.cancel')}
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <div className="flex flex-wrap items-center gap-3">
-                        <button
-                          onClick={() => {
-                            setContribFormId(g.id)
-                            setContribAmount('')
-                            setError(null)
-                          }}
-                          className={btnPrimary}
-                        >
-                          {t('goals.setAsideBtn')}
-                        </button>
-                        <button onClick={() => openBuyForm(g)} className={btnGhost}>
-                          {t('goals.bought')}
-                        </button>
-                        <button onClick={() => removeGoal(g.id)} className={btnMuted}>
-                          {t('common.delete')}
-                        </button>
-                      </div>
-                    )}
-
-                    {goalContribs.length > 0 && (
-                      <details className="text-sm text-neutral-500">
-                        <summary className="cursor-pointer">{t('goals.contribs', { n: goalContribs.length })}</summary>
-                        <div className="mt-3 flex flex-col gap-2">
-                          {goalContribs.map((c) =>
-                            editContribId === c.id ? (
-                              <div
-                                key={c.id}
-                                className="flex flex-col gap-2 rounded-lg bg-neutral-100 p-2.5 dark:bg-neutral-800/50 sm:flex-row"
-                              >
-                                <input
-                                  inputMode="numeric"
-                                  value={editContribAmount}
-                                  onChange={(e) => setEditContribAmount(formatAmountInput(e.target.value))}
-                                  className={'flex-1 ' + fieldBase}
-                                />
-                                <div className="flex-1">
-                                  <DatePicker value={editContribDate} onChange={setEditContribDate} />
-                                </div>
-                                <div className="flex gap-2">
-                                  <button onClick={() => saveContribution(c.id)} className={btnPrimary}>
-                                    {t('common.save')}
-                                  </button>
-                                  <button onClick={() => setEditContribId(null)} className={btnGhost}>
-                                    {t('common.cancel')}
-                                  </button>
-                                </div>
-                              </div>
-                            ) : (
-                              <div
-                                key={c.id}
-                                className="flex items-center justify-between gap-3 rounded-lg bg-neutral-100 px-3 py-2.5 text-sm dark:bg-neutral-800/50"
-                              >
-                                <span className="text-neutral-700 dark:text-neutral-300">
-                                  {formatDateHuman(c.date)} · {formatSum(Number(c.amount))}
-                                </span>
-                                <div className="flex shrink-0 gap-3">
-                                  <button
-                                    onClick={() => startEditContrib(c)}
-                                    className="text-neutral-500 transition hover:text-emerald-600 dark:hover:text-emerald-400"
-                                  >
-                                    {t('common.edit')}
-                                  </button>
-                                  <button
-                                    onClick={() => removeContribution(c.id)}
-                                    className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
-                                  >
-                                    {t('common.delete')}
-                                  </button>
-                                </div>
-                              </div>
-                            ),
-                          )}
-                        </div>
-                      </details>
-                    )}
-                  </div>
-                )
-              })
+              secondaryGoals.map(renderActiveGoal)
             )}
           </section>
 
@@ -755,27 +854,13 @@ export default function Goals() {
                       renderBuyForm(g)
                     ) : goalFormId === g.id ? (
                       <div className="flex flex-col gap-2">
-                        <div className="flex gap-2">
-                          <input
-                            inputMode="numeric"
-                            value={goalTarget}
-                            onChange={(e) => setGoalTarget(formatAmountInput(e.target.value))}
-                            placeholder={t('goals.goalAmount')}
-                            className={'flex-1 min-w-0 ' + fieldBase}
-                          />
-                          <Select
-                            className="w-32 shrink-0"
-                            value={goalTargetCurrency}
-                            onChange={setGoalTargetCurrency}
-                            options={priceCurrencyOptions}
-                          />
-                        </div>
-                        {goalTargetCurrency !== 'UZS' && (
-                          <p className="text-xs text-neutral-500">
-                            {t('inc.rate', { c: goalTargetCurrency, v: formatSum(rateFor(goalTargetCurrency)) })}
-                            {goalTarget ? ` · ≈ ${formatSum(goalConverted)}` : ''}
-                          </p>
-                        )}
+                        <input
+                          inputMode="decimal"
+                          value={goalTarget}
+                          onChange={(e) => setGoalTarget(formatAmountInput(e.target.value))}
+                          placeholder={t('goals.goalAmount')}
+                          className={inputCls}
+                        />
                         <DatePicker value={goalDate} onChange={setGoalDate} />
                         <div className="flex gap-2">
                           <button onClick={() => makeGoal(g.id)} className={btnPrimary}>
