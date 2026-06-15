@@ -43,7 +43,7 @@ const btnMuted =
   'text-sm text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300'
 const sectionTitle = 'text-xl font-semibold'
 
-export default function Debts() {
+export default function Debts({ embedded = false }: { embedded?: boolean }) {
   const { user } = useAuth()
   const { t } = useLang()
 
@@ -450,7 +450,11 @@ export default function Debts() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">💳 {t('debts.title')}</h1>
+        {embedded ? (
+          <span />
+        ) : (
+          <h1 className="text-2xl font-semibold">💳 {t('debts.title')}</h1>
+        )}
         {active.length > 0 && (
           <span className="text-sm text-neutral-500 dark:text-neutral-400">
             {t('debts.totalLeft', { v: formatSum(totalLeft) })}

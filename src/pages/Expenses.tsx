@@ -5,6 +5,7 @@ import Combobox from '../components/Combobox'
 import Select from '../components/Select'
 import DatePicker from '../components/DatePicker'
 import PeriodFilter, { type PeriodValue } from '../components/PeriodFilter'
+import Debts from './Debts'
 import { useLang } from '../lib/i18n'
 import {
   getOrCreateMonth,
@@ -43,11 +44,19 @@ const chipCls = (active: boolean) =>
       : 'border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
   }`
 
+const tabCls = (active: boolean) =>
+  `rounded-lg px-4 py-1.5 text-sm font-medium transition ${
+    active
+      ? 'bg-white text-neutral-900 shadow-sm dark:bg-neutral-800 dark:text-neutral-100'
+      : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200'
+  }`
+
 export default function Expenses() {
   const { user } = useAuth()
   const { t, tr } = useLang()
   const todayISO = new Date().toISOString().slice(0, 10)
 
+  const [view, setView] = useState<'expenses' | 'debts'>('expenses')
   const [period, setPeriod] = useState<PeriodValue | null>(null)
   const [categories, setCategories] = useState<Category[]>([])
   const [items, setItems] = useState<Expense[]>([])
@@ -279,171 +288,185 @@ export default function Expenses() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">🧾 {t('exp.title')}</h1>
-        <span className="text-sm text-neutral-500 dark:text-neutral-400">
-          {t('inc.total')}:{' '}
-          <b className="text-red-500 dark:text-red-400">{formatSum(total)}</b>
-        </span>
+      <div className="inline-flex self-start rounded-xl border border-neutral-200 bg-neutral-100 p-1 dark:border-neutral-800 dark:bg-neutral-900/50">
+        <button type="button" onClick={() => setView('expenses')} className={tabCls(view === 'expenses')}>
+          🧾 {t('exp.title')}
+        </button>
+        <button type="button" onClick={() => setView('debts')} className={tabCls(view === 'debts')}>
+          💳 {t('debts.title')}
+        </button>
       </div>
 
-      <PeriodFilter onChange={setPeriod} />
-
-      <form
-        onSubmit={addExpense}
-        className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50"
-      >
-        <input
-          inputMode="decimal"
-          value={amount}
-          onChange={(e) => setAmount(formatAmountInput(e.target.value))}
-          placeholder={t('common.amount')}
-          className={inputCls}
-        />
-        <DatePicker value={date} onChange={setDate} />
-        <Select
-          value={categoryId}
-          onChange={setCategoryId}
-          options={categoryOptions}
-          placeholder={t('common.category')}
-        />
-        <Combobox
-          value={subcategory}
-          onChange={setSubcategory}
-          options={subOptions(categoryId)}
-          placeholder={t('exp.sub')}
-          onRenameOption={(o, n) => renameSub(categoryId, o, n)}
-          onDeleteOption={(o) => deleteSub(categoryId, o)}
-        />
-        <input
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          placeholder={t('common.descOptional')}
-          className={inputCls}
-        />
-        {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
-        <button
-          type="submit"
-          disabled={busy}
-          className="rounded-lg bg-emerald-500 px-4 py-2.5 font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-60"
-        >
-          {busy ? t('common.saving') : t('exp.addBtn')}
-        </button>
-      </form>
-
-      {loading ? (
-        <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
-      ) : items.length === 0 ? (
-        <p className="text-sm text-neutral-500">{t('exp.empty')}</p>
+      {view === 'debts' ? (
+        <Debts embedded />
       ) : (
-        <div className="flex flex-col gap-2">
-          <div className="flex items-center gap-2">
-            <span className="text-xs text-neutral-500">{t('common.sort')}:</span>
-            <button type="button" onClick={() => setSortOrder('new')} className={chipCls(sortOrder === 'new')}>
-              {t('common.sortNew')}
-            </button>
-            <button type="button" onClick={() => setSortOrder('old')} className={chipCls(sortOrder === 'old')}>
-              {t('common.sortOld')}
-            </button>
+        <>
+          <div className="flex items-center justify-end">
+            <span className="text-sm text-neutral-500 dark:text-neutral-400">
+              {t('inc.total')}:{' '}
+              <b className="text-red-500 dark:text-red-400">{formatSum(total)}</b>
+            </span>
           </div>
-          {sortedItems.map((i, idx) => {
-            const showMonthHeader =
-              period?.groupByMonth &&
-              (idx === 0 || sortedItems[idx - 1].date.slice(0, 7) !== i.date.slice(0, 7))
-            const dd = new Date(i.date + 'T00:00:00')
-            const row =
-              editId === i.id ? (
-              <div
-                key={i.id}
-                className="flex flex-col gap-3 rounded-xl border border-emerald-500/40 bg-neutral-50 px-4 py-3 dark:bg-neutral-900/40"
-              >
-                <input
-                  inputMode="decimal"
-                  value={editAmount}
-                  onChange={(e) => setEditAmount(formatAmountInput(e.target.value))}
-                  placeholder={t('common.amount')}
-                  className={inputCls}
-                />
-                <DatePicker value={editDate} onChange={setEditDate} />
-                <Select
-                  value={editCategoryId}
-                  onChange={setEditCategoryId}
-                  options={categoryOptions}
-                  placeholder={t('common.category')}
-                />
-                <Combobox
-                  value={editSubcategory}
-                  onChange={setEditSubcategory}
-                  options={subOptions(editCategoryId)}
-                  placeholder={t('exp.subShort')}
-                  onRenameOption={(o, n) => renameSub(editCategoryId, o, n)}
-                  onDeleteOption={(o) => deleteSub(editCategoryId, o)}
-                />
-                <input
-                  value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                  placeholder={t('common.desc')}
-                  className={inputCls}
-                />
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => saveEdit(i.id)}
-                    className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400"
-                  >
-                    {t('common.save')}
-                  </button>
-                  <button
-                    onClick={() => setEditId(null)}
-                    className="rounded-lg border border-neutral-300 px-4 py-2 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-                  >
-                    {t('common.cancel')}
-                  </button>
-                </div>
+
+          <PeriodFilter onChange={setPeriod} />
+
+          <form
+            onSubmit={addExpense}
+            className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50"
+          >
+            <input
+              inputMode="decimal"
+              value={amount}
+              onChange={(e) => setAmount(formatAmountInput(e.target.value))}
+              placeholder={t('common.amount')}
+              className={inputCls}
+            />
+            <DatePicker value={date} onChange={setDate} />
+            <Select
+              value={categoryId}
+              onChange={setCategoryId}
+              options={categoryOptions}
+              placeholder={t('common.category')}
+            />
+            <Combobox
+              value={subcategory}
+              onChange={setSubcategory}
+              options={subOptions(categoryId)}
+              placeholder={t('exp.sub')}
+              onRenameOption={(o, n) => renameSub(categoryId, o, n)}
+              onDeleteOption={(o) => deleteSub(categoryId, o)}
+            />
+            <input
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+              placeholder={t('common.descOptional')}
+              className={inputCls}
+            />
+            {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
+            <button
+              type="submit"
+              disabled={busy}
+              className="rounded-lg bg-emerald-500 px-4 py-2.5 font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-60"
+            >
+              {busy ? t('common.saving') : t('exp.addBtn')}
+            </button>
+          </form>
+
+          {loading ? (
+            <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
+          ) : items.length === 0 ? (
+            <p className="text-sm text-neutral-500">{t('exp.empty')}</p>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-neutral-500">{t('common.sort')}:</span>
+                <button type="button" onClick={() => setSortOrder('new')} className={chipCls(sortOrder === 'new')}>
+                  {t('common.sortNew')}
+                </button>
+                <button type="button" onClick={() => setSortOrder('old')} className={chipCls(sortOrder === 'old')}>
+                  {t('common.sortOld')}
+                </button>
               </div>
-            ) : (
-              <div
-                key={i.id}
-                className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/40"
-              >
-                <div className="min-w-0">
-                  <p className="font-medium">{formatSum(Number(i.amount))}</p>
-                  <p className="text-xs text-neutral-500">
-                    {catName(i.category_id)}
-                    {i.subcategory ? ` · ${tr(i.subcategory)}` : ''} · {formatDateHuman(i.date)}
-                    {i.description ? ` · ${i.description}` : ''}
-                  </p>
-                </div>
-                <div className="flex shrink-0 gap-3 text-sm">
-                  <button
-                    onClick={() => startEdit(i)}
-                    className="text-neutral-500 transition hover:text-emerald-600 dark:hover:text-emerald-400"
+              {sortedItems.map((i, idx) => {
+                const showMonthHeader =
+                  period?.groupByMonth &&
+                  (idx === 0 || sortedItems[idx - 1].date.slice(0, 7) !== i.date.slice(0, 7))
+                const dd = new Date(i.date + 'T00:00:00')
+                const row =
+                  editId === i.id ? (
+                  <div
+                    key={i.id}
+                    className="flex flex-col gap-3 rounded-xl border border-emerald-500/40 bg-neutral-50 px-4 py-3 dark:bg-neutral-900/40"
                   >
-                    {t('common.edit')}
-                  </button>
-                  <button
-                    onClick={() => removeExpense(i.id)}
-                    className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
-                  >
-                    {t('common.delete')}
-                  </button>
-                </div>
-              </div>
-              )
-            return (
-              <Fragment key={i.id}>
-                {showMonthHeader && (
-                  <div className="mt-3 flex items-center gap-3 first:mt-0">
-                    <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
-                      {monthName(dd.getMonth())} {dd.getFullYear()}
-                    </span>
-                    <hr className="flex-1 border-neutral-200 dark:border-neutral-800" />
+                    <input
+                      inputMode="decimal"
+                      value={editAmount}
+                      onChange={(e) => setEditAmount(formatAmountInput(e.target.value))}
+                      placeholder={t('common.amount')}
+                      className={inputCls}
+                    />
+                    <DatePicker value={editDate} onChange={setEditDate} />
+                    <Select
+                      value={editCategoryId}
+                      onChange={setEditCategoryId}
+                      options={categoryOptions}
+                      placeholder={t('common.category')}
+                    />
+                    <Combobox
+                      value={editSubcategory}
+                      onChange={setEditSubcategory}
+                      options={subOptions(editCategoryId)}
+                      placeholder={t('exp.subShort')}
+                      onRenameOption={(o, n) => renameSub(editCategoryId, o, n)}
+                      onDeleteOption={(o) => deleteSub(editCategoryId, o)}
+                    />
+                    <input
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                      placeholder={t('common.desc')}
+                      className={inputCls}
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        onClick={() => saveEdit(i.id)}
+                        className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400"
+                      >
+                        {t('common.save')}
+                      </button>
+                      <button
+                        onClick={() => setEditId(null)}
+                        className="rounded-lg border border-neutral-300 px-4 py-2 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                      >
+                        {t('common.cancel')}
+                      </button>
+                    </div>
                   </div>
-                )}
-                {row}
-              </Fragment>
-            )
-          })}
-        </div>
+                ) : (
+                  <div
+                    key={i.id}
+                    className="flex items-center justify-between gap-3 rounded-xl border border-neutral-200 bg-neutral-50 px-4 py-3 dark:border-neutral-800 dark:bg-neutral-900/40"
+                  >
+                    <div className="min-w-0">
+                      <p className="font-medium">{formatSum(Number(i.amount))}</p>
+                      <p className="text-xs text-neutral-500">
+                        {catName(i.category_id)}
+                        {i.subcategory ? ` · ${tr(i.subcategory)}` : ''} · {formatDateHuman(i.date)}
+                        {i.description ? ` · ${i.description}` : ''}
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 gap-3 text-sm">
+                      <button
+                        onClick={() => startEdit(i)}
+                        className="text-neutral-500 transition hover:text-emerald-600 dark:hover:text-emerald-400"
+                      >
+                        {t('common.edit')}
+                      </button>
+                      <button
+                        onClick={() => removeExpense(i.id)}
+                        className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                      >
+                        {t('common.delete')}
+                      </button>
+                    </div>
+                  </div>
+                  )
+                return (
+                  <Fragment key={i.id}>
+                    {showMonthHeader && (
+                      <div className="mt-3 flex items-center gap-3 first:mt-0">
+                        <span className="text-xs font-semibold uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+                          {monthName(dd.getMonth())} {dd.getFullYear()}
+                        </span>
+                        <hr className="flex-1 border-neutral-200 dark:border-neutral-800" />
+                      </div>
+                    )}
+                    {row}
+                  </Fragment>
+                )
+              })}
+            </div>
+          )}
+        </>
       )}
     </div>
   )

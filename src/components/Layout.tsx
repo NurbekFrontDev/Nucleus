@@ -8,7 +8,6 @@ const navItems = [
   { to: '/expenses', key: 'nav.expenses', icon: '🧾' },
   { to: '/budget', key: 'nav.budget', icon: '📊' },
   { to: '/goals', key: 'nav.goals', icon: '🎯' },
-  { to: '/debts', key: 'nav.debts', icon: '💳' },
   { to: '/history', key: 'nav.history', icon: '🗓️' },
   { to: '/settings', key: 'nav.settings', icon: '⚙️' },
 ]
