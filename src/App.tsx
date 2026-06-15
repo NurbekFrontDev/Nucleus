@@ -7,6 +7,7 @@ import Incomes from './pages/Incomes'
 import Expenses from './pages/Expenses'
 import Budget from './pages/Budget'
 import Goals from './pages/Goals'
+import Debts from './pages/Debts'
 import History from './pages/History'
 import Settings from './pages/Settings'
 
@@ -38,6 +39,7 @@ function App() {
         <Route path="/expenses" element={<Expenses />} />
         <Route path="/budget" element={<Budget />} />
         <Route path="/goals" element={<Goals />} />
+        <Route path="/debts" element={<Debts />} />
         <Route path="/history" element={<History />} />
         <Route path="/settings" element={<Settings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
