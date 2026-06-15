@@ -205,6 +205,7 @@ const UI: Record<Lang, Record<string, string>> = {
     'debts.deleteMsg': 'Долг «{n}» будет удалён. Прошлые платежи останутся в расходах по месяцам.',
     'debts.paidOff': 'Выплачен полностью ✅',
     'debts.paidSection': '✅ Оплаченные долги',
+    'debts.undo': '↩️ Вернуть',
 
     'hist.title': 'История',
     'hist.empty': 'Пока нет данных. Добавь доходы и расходы — месяцы появятся здесь.',
@@ -218,6 +219,7 @@ const UI: Record<Lang, Record<string, string>> = {
     'hist.noExpense': 'Нет расходов',
     'hist.noSource': 'Без источника',
     'hist.other': 'Прочее',
+    'hist.noPeriod': 'За выбранный период данных нет.',
 
     'set.title': 'Настройки',
     'set.signedInAs': 'Вошёл как',
@@ -454,6 +456,7 @@ const UI: Record<Lang, Record<string, string>> = {
     'debts.deleteMsg': 'The “{n}” debt will be deleted. Past payments stay in monthly expenses.',
     'debts.paidOff': 'Fully repaid ✅',
     'debts.paidSection': '✅ Paid off',
+    'debts.undo': '↩️ Undo',
 
     'hist.title': 'History',
     'hist.empty': 'No data yet. Add income and expenses — months will appear here.',
@@ -467,6 +470,7 @@ const UI: Record<Lang, Record<string, string>> = {
     'hist.noExpense': 'No expenses',
     'hist.noSource': 'No source',
     'hist.other': 'Other',
+    'hist.noPeriod': 'No data for the selected period.',
 
     'set.title': 'Settings',
     'set.signedInAs': 'Signed in as',

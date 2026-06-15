@@ -269,6 +269,14 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
     setPayments(payments.filter((x) => x.id !== p.id))
   }
 
+  // Вернуть полностью выплаченный долг в активные: убираем последний платёж (и связанный расход).
+  const undoLastPayment = async (d: Debt) => {
+    const last = payments
+      .filter((p) => p.debt_id === d.id)
+      .sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))[0]
+    if (last) await removePayment(last)
+  }
+
   // Очистить долги: прячем активные долги (archived), но платежи и расходы остаются в истории.
   const clearAll = async () => {
     if (!user) return
@@ -416,6 +424,15 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
                 {t('common.cancel')}
               </button>
             </div>
+          </div>
+        ) : done ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <button onClick={() => undoLastPayment(d)} className={btnGhost}>
+              {t('debts.undo')}
+            </button>
+            <button onClick={() => setDeleteId(d.id)} className={btnMuted}>
+              {t('common.delete')}
+            </button>
           </div>
         ) : (
           <div className="flex flex-wrap items-center gap-3">

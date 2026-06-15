@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
+import PeriodFilter, { type PeriodValue } from '../components/PeriodFilter'
 import { useLang } from '../lib/i18n'
 import { formatSum, monthName } from '../lib/db'
 
@@ -36,6 +37,14 @@ function toBreakdown(map: Acc): Breakdown[] {
     .sort((a, b) => b.amount - a.amount)
 }
 
+const pad = (n: number) => String(n).padStart(2, '0')
+
+const chipCls = (active: boolean) =>
+  'rounded-full border px-3 py-1 text-xs transition ' +
+  (active
+    ? 'border-emerald-500 bg-emerald-500 font-medium text-neutral-950'
+    : 'border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800')
+
 export default function History() {
   const { user } = useAuth()
   const { t, tr } = useLang()
@@ -44,6 +53,8 @@ export default function History() {
   const [openId, setOpenId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [period, setPeriod] = useState<PeriodValue | null>(null)
+  const [sortOrder, setSortOrder] = useState<'new' | 'old'>('new')
 
   useEffect(() => {
     if (!user) return
@@ -137,9 +148,24 @@ export default function History() {
     return tr(b.label) + (b.archived ? ` ${t('exp.deleted')}` : '')
   }
 
+  // Фильтруем месяцы по выбранному периоду (по пересечению с диапазоном) и сортируем.
+  const visibleMonths = months
+    .filter((m) => {
+      if (!period) return true
+      const mStart = m.year + '-' + pad(m.month) + '-01'
+      const mEnd = m.year + '-' + pad(m.month) + '-31'
+      return mEnd >= period.start && mStart <= period.end
+    })
+    .sort((a, b) => {
+      const cmp = a.year !== b.year ? a.year - b.year : a.month - b.month
+      return sortOrder === 'new' ? -cmp : cmp
+    })
+
   return (
     <div className="flex flex-col gap-5">
       <h1 className="text-2xl font-semibold">🗓️ {t('hist.title')}</h1>
+
+      <PeriodFilter onChange={setPeriod} />
 
       {loading ? (
         <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
@@ -149,7 +175,19 @@ export default function History() {
         <p className="text-sm text-neutral-500">{t('hist.empty')}</p>
       ) : (
         <div className="flex flex-col gap-2">
-          {months.map((m) => {
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-neutral-500">{t('common.sort')}</span>
+            <button type="button" onClick={() => setSortOrder('new')} className={chipCls(sortOrder === 'new')}>
+              {t('common.sortNew')}
+            </button>
+            <button type="button" onClick={() => setSortOrder('old')} className={chipCls(sortOrder === 'old')}>
+              {t('common.sortOld')}
+            </button>
+          </div>
+          {visibleMonths.length === 0 ? (
+            <p className="text-sm text-neutral-500">{t('hist.noPeriod')}</p>
+          ) : (
+            visibleMonths.map((m) => {
             const d = details[m.id] ?? {
               income: 0,
               expense: 0,
@@ -180,8 +218,8 @@ export default function History() {
                         balance >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'
                       }`}
                     >
-                      {balance >= 0 ? '+' : ''}
-                      {formatSum(balance)}
+                      {balance >= 0 ? '+' : '-'}
+                      {formatSum(Math.abs(balance))}
                     </span>
                   </div>
                   <div className="grid grid-cols-1 gap-1 text-xs text-neutral-500 dark:text-neutral-400 sm:grid-cols-3 sm:gap-3">
@@ -253,7 +291,8 @@ export default function History() {
                 )}
               </div>
             )
-          })}
+          })
+          )}
         </div>
       )}
     </div>
