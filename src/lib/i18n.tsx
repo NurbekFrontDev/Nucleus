@@ -203,6 +203,7 @@ const UI: Record<Lang, Record<string, string>> = {
     'debts.deleteTitle': 'Удалить долг?',
     'debts.deleteMsg': 'Долг «{n}» будет удалён. Прошлые платежи останутся в расходах по месяцам.',
     'debts.paidOff': 'Выплачен полностью ✅',
+    'debts.paidSection': '✅ Оплаченные долги',
 
     'hist.title': 'История',
     'hist.empty': 'Пока нет данных. Добавь доходы и расходы — месяцы появятся здесь.',
@@ -450,6 +451,7 @@ const UI: Record<Lang, Record<string, string>> = {
     'debts.deleteTitle': 'Delete debt?',
     'debts.deleteMsg': 'The “{n}” debt will be deleted. Past payments stay in monthly expenses.',
     'debts.paidOff': 'Fully repaid ✅',
+    'debts.paidSection': '✅ Paid off',
 
     'hist.title': 'History',
     'hist.empty': 'No data yet. Add income and expenses — months will appear here.',

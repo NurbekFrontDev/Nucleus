@@ -57,6 +57,8 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
+  // Отдельное состояние для записи платежа, чтобы не крутилась кнопка «Добавить».
+  const [paying, setPaying] = useState(false)
 
   const [editId, setEditId] = useState<string | null>(null)
   const [editPerson, setEditPerson] = useState('')
@@ -115,8 +117,16 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
   const paidFor = (debtId: string) =>
     payments.filter((p) => p.debt_id === debtId).reduce((s, p) => s + Number(p.amount), 0)
 
+  const isDebtDone = (d: Debt) => {
+    const total = Number(d.amount)
+    return total > 0 && paidFor(d.id) >= total
+  }
+
   const active = debts.filter((d) => !d.archived)
   const cleared = debts.filter((d) => d.archived)
+  // Активные делим: ещё не выплаченные сверху, полностью выплаченные — вниз.
+  const unpaid = active.filter((d) => !isDebtDone(d))
+  const paidOff = active.filter((d) => isDebtDone(d))
   const totalLeft = active.reduce(
     (s, d) => s + Math.max(0, Number(d.amount) - paidFor(d.id)),
     0,
@@ -206,7 +216,7 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
       setError(t('debts.errPayAmount'))
       return
     }
-    setBusy(true)
+    setPaying(true)
     setError(null)
     try {
       const dt = new Date(payDate + 'T00:00:00')
@@ -242,7 +252,7 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
     } catch (e) {
       setError((e as Error).message)
     } finally {
-      setBusy(false)
+      setPaying(false)
     }
   }
 
@@ -313,12 +323,17 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
     return (
       <div
         key={d.id}
-        className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50"
+        className={
+          'flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50' +
+          (done ? ' opacity-80' : '')
+        }
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex flex-wrap items-center gap-2">
-              <p className="font-medium">{d.person}</p>
+              <p className={'font-medium' + (done ? ' text-neutral-500 line-through dark:text-neutral-400' : '')}>
+                {d.person}
+              </p>
               {done && (
                 <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-600 dark:text-emerald-400">
                   {t('debts.paidOff')}
@@ -394,8 +409,8 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
               <p className="text-xs text-amber-600 dark:text-amber-400">{t('debts.noCat')}</p>
             )}
             <div className="flex flex-wrap gap-2">
-              <button onClick={() => confirmPay(d)} disabled={busy} className={btnPrimary}>
-                {busy ? t('common.saving') : t('debts.pay')}
+              <button onClick={() => confirmPay(d)} disabled={paying} className={btnPrimary}>
+                {paying ? t('common.saving') : t('debts.pay')}
               </button>
               <button onClick={() => setPayFormId(null)} className={btnGhost}>
                 {t('common.cancel')}
@@ -503,15 +518,26 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
           {active.length === 0 ? (
             <p className="text-sm text-neutral-500">{t('debts.empty')}</p>
           ) : (
-            <section className="flex flex-col gap-3">
-              {active.map(renderDebt)}
+            <>
+              {unpaid.length > 0 && (
+                <section className="flex flex-col gap-3">{unpaid.map(renderDebt)}</section>
+              )}
+
+              {paidOff.length > 0 && (
+                <section className="flex flex-col gap-3">
+                  <hr className="border-neutral-200 dark:border-neutral-800" />
+                  <h2 className={sectionTitle}>{t('debts.paidSection')}</h2>
+                  {paidOff.map(renderDebt)}
+                </section>
+              )}
+
               <button
                 onClick={() => setClearOpen(true)}
                 className="self-start text-sm text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
               >
                 {t('debts.clear')}
               </button>
-            </section>
+            </>
           )}
 
           {cleared.length > 0 && (
