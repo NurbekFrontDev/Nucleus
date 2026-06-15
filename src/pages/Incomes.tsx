@@ -222,7 +222,7 @@ export default function Incomes() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">💼 {t('inc.title')}</h1>
         <span className="text-sm text-neutral-500 dark:text-neutral-400">
-          {t('inc.total')}:{' '}
+          {t('inc.total')}{' '}
           <b className="text-emerald-600 dark:text-emerald-400">{formatSum(total)}</b>
         </span>
       </div>

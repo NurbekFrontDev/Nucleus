@@ -130,6 +130,8 @@ const UI: Record<Lang, Record<string, string>> = {
     'exp.fromPotHint': 'Спишется из выбранной копилки — её баланс уменьшится.',
     'exp.fromCushion': 'из подушки',
     'exp.fromFree': 'из накоплений',
+    'exp.totalSpent': 'Расходы:',
+    'exp.totalToPots': 'в копилки:',
 
     'goals.title': 'Цели и желания',
     'goals.addWish': '➕ Добавить в список желаний',
@@ -387,6 +389,8 @@ const UI: Record<Lang, Record<string, string>> = {
     'exp.fromPotHint': 'It will be deducted from the chosen pot — its balance goes down.',
     'exp.fromCushion': 'from cushion',
     'exp.fromFree': 'from savings',
+    'exp.totalSpent': 'Spent:',
+    'exp.totalToPots': 'to savings:',
 
     'goals.title': 'Goals & wishes',
     'goals.addWish': '➕ Add to wishlist',

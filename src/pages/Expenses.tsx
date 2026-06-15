@@ -135,6 +135,12 @@ export default function Expenses() {
   }
 
   const total = items.reduce((s, i) => s + Number(i.amount), 0)
+  // Отложенное в Сбережения/Инвестиции — это не трата, а перенос в копилку.
+  // Считаем отдельно, чтобы «Расходы» совпадали с дашбордом.
+  const toSavings = items
+    .filter((i) => isSavingsCategory(categories.find((c) => c.id === i.category_id)?.name))
+    .reduce((s, i) => s + Number(i.amount), 0)
+  const realTotal = total - toSavings
 
   const categoryOptions = categories.filter((c) => !c.archived).map((c) => ({ value: c.id, label: tr(c.name) }))
 
@@ -313,11 +319,17 @@ export default function Expenses() {
         <Debts embedded />
       ) : (
         <>
-          <div className="flex items-center justify-end">
+          <div className="flex flex-wrap items-center justify-end gap-x-4 gap-y-1">
             <span className="text-sm text-neutral-500 dark:text-neutral-400">
-              {t('inc.total')}:{' '}
-              <b className="text-red-500 dark:text-red-400">{formatSum(total)}</b>
+              {t('exp.totalSpent')}{' '}
+              <b className="text-red-500 dark:text-red-400">{formatSum(realTotal)}</b>
             </span>
+            {toSavings > 0 && (
+              <span className="text-sm text-neutral-500 dark:text-neutral-400">
+                {t('exp.totalToPots')}{' '}
+                <b className="text-emerald-600 dark:text-emerald-400">{formatSum(toSavings)}</b>
+              </span>
+            )}
           </div>
 
           <PeriodFilter onChange={setPeriod} />

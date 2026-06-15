@@ -227,7 +227,7 @@ export default function Dashboard() {
               )}
             </div>
 
-            <div className="rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50">
+            <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 dark:border-emerald-500/20">
               <p className="text-sm font-medium">{t('savings.freeTitle')}</p>
               <p className="mt-1 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
                 {formatSum(pots.free)}
