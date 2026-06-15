@@ -30,15 +30,27 @@ html.dark body {
   color: #f5f5f5;
 }
 
-/* --- Единые анимации интерфейса (минималистичные, быстрые) --- */
+/* --- Единые анимации интерфейса (мягкие, приятные) --- */
+/* Появление всплывающих элементов — ведёмся по прозрачности, с мягким замедлением. */
 @keyframes fl-pop {
   from {
     opacity: 0;
-    transform: translateY(-6px) scale(0.95);
+    transform: translateY(-6px) scale(0.97);
   }
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes fl-pop-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-6px) scale(0.97);
   }
 }
 
@@ -51,10 +63,19 @@ html.dark body {
   }
 }
 
+@keyframes fl-fade-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
 @keyframes fl-dialog {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.96);
+    transform: translateY(10px) scale(0.96);
   }
   to {
     opacity: 1;
@@ -62,21 +83,47 @@ html.dark body {
   }
 }
 
+@keyframes fl-dialog-out {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+}
+
+/* Плавная кривая появления (ease-out): быстрый старт, мягкая остановка. */
 /* Выпадающие меню, списки выбора, календари, разворачивающиеся блоки */
 .animate-pop {
   transform-origin: top;
-  animation: fl-pop 190ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: fl-pop 240ms cubic-bezier(0.16, 1, 0.3, 1);
   will-change: transform, opacity;
 }
+.animate-pop-out {
+  transform-origin: top;
+  animation: fl-pop-out 180ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  will-change: transform, opacity;
+  pointer-events: none;
+}
 
-/* Плавное появление (фон модалок) */
+/* Плавное появление / исчезновение (фон модалок) */
 .animate-fade {
-  animation: fl-fade 160ms ease-out;
+  animation: fl-fade 200ms ease-out;
+}
+.animate-fade-out {
+  animation: fl-fade-out 180ms ease-in forwards;
+  pointer-events: none;
 }
 
 /* Модальные окна */
 .animate-dialog {
-  animation: fl-dialog 220ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: fl-dialog 260ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.animate-dialog-out {
+  animation: fl-dialog-out 190ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
 }
 
 /* Лёгкий отклик на нажатие для всех кнопок — единое микро-взаимодействие по всему интерфейсу. */
@@ -126,8 +173,11 @@ body {
     scroll-behavior: auto;
   }
   .animate-pop,
+  .animate-pop-out,
   .animate-fade,
-  .animate-dialog {
+  .animate-fade-out,
+  .animate-dialog,
+  .animate-dialog-out {
     animation: none;
   }
   button {

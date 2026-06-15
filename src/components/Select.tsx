@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLang } from '../lib/i18n'
+import { useAnimatedMount } from '../lib/useAnimatedMount'
 
 type Option = { value: string; label: string }
 type Props = {
@@ -17,6 +18,7 @@ const triggerCls =
 export default function Select({ value, onChange, options, className, placeholder }: Props) {
   const { t } = useLang()
   const [open, setOpen] = useState(false)
+  const show = useAnimatedMount(open)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -37,8 +39,8 @@ export default function Select({ value, onChange, options, className, placeholde
         </span>
         <span className="shrink-0 text-neutral-400">▾</span>
       </button>
-      {open && (
-        <div className="animate-pop absolute z-30 mt-1 max-h-60 w-full min-w-max overflow-auto rounded-lg border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+      {show && (
+        <div className={`${open ? 'animate-pop' : 'animate-pop-out'} absolute z-30 mt-1 max-h-60 w-full min-w-max overflow-auto rounded-lg border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}>
           {options.map((o) => (
             <button
               key={o.value}

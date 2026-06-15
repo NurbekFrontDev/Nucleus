@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLang } from '../lib/i18n'
+import { useAnimatedMount } from '../lib/useAnimatedMount'
 
 type Props = {
   value: string
@@ -29,6 +30,7 @@ export default function Combobox({
 }: Props) {
   const { t, tr } = useLang()
   const [open, setOpen] = useState(false)
+  const show = useAnimatedMount(open)
   const [menuFor, setMenuFor] = useState<string | null>(null)
   const [editingRaw, setEditingRaw] = useState<string | null>(null)
   const [editText, setEditText] = useState('')
@@ -102,8 +104,8 @@ export default function Combobox({
           ▾
         </button>
       </div>
-      {open && filtered.length > 0 && (
-        <div className="animate-pop absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+      {show && filtered.length > 0 && (
+        <div className={`${open ? 'animate-pop' : 'animate-pop-out'} absolute z-30 mt-1 max-h-56 w-full overflow-auto rounded-lg border border-neutral-200 bg-white py-1 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}>
           {filtered.map((it) => {
             // Режим переименования — инлайн-поле.
             if (editingRaw === it.raw) {

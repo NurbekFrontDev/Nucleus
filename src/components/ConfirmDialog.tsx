@@ -1,5 +1,6 @@
 import { type ReactNode } from 'react'
 import { useLang } from '../lib/i18n'
+import { useAnimatedMount } from '../lib/useAnimatedMount'
 
 type Props = {
   open: boolean
@@ -25,16 +26,17 @@ export default function ConfirmDialog({
   onCancel,
 }: Props) {
   const { t } = useLang()
-  if (!open) return null
+  const show = useAnimatedMount(open, 220)
+  if (!show) return null
   const confirmText = confirmLabel ?? t('common.confirm')
   const cancelText = cancelLabel ?? t('common.cancel')
   return (
     <div
-      className="animate-fade fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+      className={`${open ? 'animate-fade' : 'animate-fade-out'} fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4`}
       onClick={onCancel}
     >
       <div
-        className="animate-dialog w-full max-w-sm rounded-2xl border border-neutral-200 bg-white p-5 shadow-xl dark:border-neutral-800 dark:bg-neutral-900"
+        className={`${open ? 'animate-dialog' : 'animate-dialog-out'} w-full max-w-sm rounded-2xl border border-neutral-200 bg-white p-5 shadow-xl dark:border-neutral-800 dark:bg-neutral-900`}
         onClick={(e) => e.stopPropagation()}
       >
         <h2 className="text-lg font-semibold">{title}</h2>

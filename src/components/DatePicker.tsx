@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { formatDateHuman, monthName } from '../lib/db'
 import { useLang } from '../lib/i18n'
+import { useAnimatedMount } from '../lib/useAnimatedMount'
 
 type Props = {
   value: string
@@ -20,6 +21,7 @@ export default function DatePicker({ value, onChange, placeholder }: Props) {
   const { t, lang } = useLang()
   const WEEKDAYS = lang === 'en' ? WEEKDAYS_EN : WEEKDAYS_RU
   const [open, setOpen] = useState(false)
+  const show = useAnimatedMount(open)
   const ref = useRef<HTMLDivElement>(null)
   const init = value ? new Date(value + 'T00:00:00') : new Date()
   const [viewYear, setViewYear] = useState(init.getFullYear())
@@ -74,8 +76,8 @@ export default function DatePicker({ value, onChange, placeholder }: Props) {
         </span>
         <span className="shrink-0 text-neutral-400">📅</span>
       </button>
-      {open && (
-        <div className="animate-pop absolute z-30 mt-1 w-72 rounded-lg border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+      {show && (
+        <div className={`${open ? 'animate-pop' : 'animate-pop-out'} absolute z-30 mt-1 w-72 rounded-lg border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}>
           <div className="mb-2 flex items-center justify-between">
             <button
               type="button"

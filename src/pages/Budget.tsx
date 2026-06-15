@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
+import { useAnimatedMount } from '../lib/useAnimatedMount'
 import ConfirmDialog from '../components/ConfirmDialog'
 import { useLang } from '../lib/i18n'
 import {
@@ -19,6 +20,63 @@ const inputCls =
 // Мелкое поле процента.
 const percentInputCls =
   'w-11 shrink-0 rounded-lg border border-neutral-300 bg-white px-1.5 py-1 text-center text-xs tabular-nums outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
+
+// Меню категории («Изменить / Удалить»). Отдельный компонент — чтобы
+// работала анимация появления и исчезновения (хук useAnimatedMount).
+function CategoryMenu({
+  open,
+  label,
+  editLabel,
+  deleteLabel,
+  onToggle,
+  onEdit,
+  onDelete,
+}: {
+  open: boolean
+  label: string
+  editLabel: string
+  deleteLabel: string
+  onToggle: () => void
+  onEdit: () => void
+  onDelete: () => void
+}) {
+  const show = useAnimatedMount(open)
+  return (
+    <div className="relative shrink-0">
+      <button
+        type="button"
+        aria-label={label}
+        title={label}
+        onClick={onToggle}
+        className="px-1 text-lg leading-none text-neutral-400 transition hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300"
+      >
+        ⋮
+      </button>
+      {show && (
+        <div
+          className={`${
+            open ? 'animate-pop' : 'animate-pop-out'
+          } absolute right-0 top-full z-30 mt-1 w-36 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}
+        >
+          <button
+            type="button"
+            onClick={onEdit}
+            className="block w-full px-3 py-2 text-left text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          >
+            {editLabel}
+          </button>
+          <button
+            type="button"
+            onClick={onDelete}
+            className="block w-full px-3 py-2 text-left text-sm text-red-500 transition hover:bg-red-500/10 dark:text-red-400"
+          >
+            {deleteLabel}
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export default function Budget() {
   const { user } = useAuth()
@@ -363,41 +421,20 @@ export default function Budget() {
     </button>
   )
 
-  // Кнопка меню справа — «Изменить / Удалить» (обычный onClick — надёжно на тапе).
-  // Меню раскрывается от правого края, чтобы не уезжать за экран.
+  // Кнопка меню справа — «Изменить / Удалить» (отдельный компонент с анимацией).
   const menuButton = (c: Category) => (
-    <div className="relative shrink-0">
-      <button
-        type="button"
-        aria-label={t('budget.menuLabel')}
-        title={t('budget.menuLabel')}
-        onClick={() => setMenuId((m) => (m === c.id ? null : c.id))}
-        className="px-1 text-lg leading-none text-neutral-400 transition hover:text-neutral-600 dark:text-neutral-500 dark:hover:text-neutral-300"
-      >
-        ⋮
-      </button>
-      {menuId === c.id && (
-        <div className="animate-pop absolute right-0 top-full z-30 mt-1 w-36 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
-          <button
-            type="button"
-            onClick={() => startRename(c)}
-            className="block w-full px-3 py-2 text-left text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
-          >
-            {t('budget.menuEdit')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setMenuId(null)
-              setConfirmId(c.id)
-            }}
-            className="block w-full px-3 py-2 text-left text-sm text-red-500 transition hover:bg-red-500/10 dark:text-red-400"
-          >
-            {t('budget.menuDelete')}
-          </button>
-        </div>
-      )}
-    </div>
+    <CategoryMenu
+      open={menuId === c.id}
+      label={t('budget.menuLabel')}
+      editLabel={t('budget.menuEdit')}
+      deleteLabel={t('budget.menuDelete')}
+      onToggle={() => setMenuId((m) => (m === c.id ? null : c.id))}
+      onEdit={() => startRename(c)}
+      onDelete={() => {
+        setMenuId(null)
+        setConfirmId(c.id)
+      }}
+    />
   )
 
   const percentField = (c: Category) => (
