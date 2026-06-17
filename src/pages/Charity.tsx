@@ -545,7 +545,7 @@ export default function Charity() {
                                 <div className="flex shrink-0 gap-3">
                                   <button
                                     onClick={() => startEdit(c)}
-                                    className="text-rose-600 transition hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
+                                    className="text-neutral-500 transition hover:text-emerald-600 dark:hover:text-emerald-400"
                                   >
                                     {t('common.edit')}
                                   </button>
@@ -656,7 +656,7 @@ export default function Charity() {
                           <div className="flex shrink-0 gap-3">
                             <button
                               onClick={() => startEdit(c)}
-                              className="text-rose-600 transition hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
+                              className="text-neutral-500 transition hover:text-emerald-600 dark:hover:text-emerald-400"
                             >
                               {t('common.edit')}
                             </button>
@@ -674,14 +674,8 @@ export default function Charity() {
                 </div>
               )}
 
-              <p className="text-xs text-neutral-500">{t('charity.smallHint')}</p>
             </div>
           </section>
-
-          {/* Как пополнять и жертвовать */}
-          <p className="rounded-xl border border-rose-500/20 bg-rose-500/5 px-4 py-3 text-xs text-neutral-600 dark:text-neutral-300">
-            {t('charity.howto')}
-          </p>
         </>
       )}
     </div>
