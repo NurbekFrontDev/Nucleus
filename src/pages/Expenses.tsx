@@ -135,16 +135,16 @@ export default function Expenses() {
     return c.archived ? `${tr(c.name)} ${t('exp.deleted')}` : tr(c.name)
   }
 
-  // «В копилки» — деньги, отложенные в копилки (Сбережения/Инвестиции и
-  // благотворительность). Считаем только пополнения: записи без paid_from_pot.
-  // Снятие/пожертвование из копилки (paid_from_pot) сюда НЕ входит.
-  const toSavings = items
-    .filter((i) => {
-      if (i.paid_from_pot) return false
-      const n = categories.find((c) => c.id === i.category_id)?.name
-      return isSavingsCategory(n) || isCharityCategory(n)
-    })
-    .reduce((s, i) => s + Number(i.amount), 0)
+  // «В копилки» — чистый поток денег в копилки за период (пополнения − снятия),
+  // как и баланс копилок на дашборде. Пополнение копилки (Сбережения/Инвестиции/
+  // Благотворительность без paid_from_pot) прибавляет; снятие/пожертвование из любой
+  // копилки (paid_from_pot) вычитает. Поэтому «положил 3, отдал 3» даёт 0.
+  const toSavings = items.reduce((s, i) => {
+    if (i.paid_from_pot) return s - Number(i.amount)
+    const n = categories.find((c) => c.id === i.category_id)?.name
+    if (isSavingsCategory(n) || isCharityCategory(n)) return s + Number(i.amount)
+    return s
+  }, 0)
   // «Расходы» — реальные траты на жизнь. Накопления и благотворительность
   // исключаем целиком, чтобы совпадало с карточкой «Расходы» на дашборде.
   const realTotal = items

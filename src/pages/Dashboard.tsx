@@ -193,7 +193,7 @@ export default function Dashboard() {
             </p>
           )}
 
-          <div className="grid grid-cols-2 gap-3 items-start">
+          <div className="grid grid-cols-2 gap-3 items-stretch">
             <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 dark:border-emerald-500/20">
               <p className="text-sm font-medium">{t('cushion.title')}</p>
               <p className="mt-1 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
@@ -234,15 +234,15 @@ export default function Dashboard() {
               )}
             </div>
 
-            <div className="flex flex-col gap-3">
-              <div className="rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 dark:border-emerald-500/20">
+            <div className="flex h-full flex-col gap-3">
+              <div className="flex flex-1 flex-col justify-center rounded-2xl border border-emerald-500/30 bg-emerald-500/5 p-4 dark:border-emerald-500/20">
                 <p className="text-sm font-medium">{t('savings.freeTitle')}</p>
                 <p className="mt-1 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
                   {formatSum(pots.free)}
                 </p>
               </div>
 
-              <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4 dark:border-rose-500/20">
+              <div className="flex flex-1 flex-col justify-center rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4 dark:border-rose-500/20">
                 <p className="text-sm font-medium">{t('charity.title')}</p>
                 <p className="mt-1 text-2xl font-semibold text-rose-600 dark:text-rose-400">
                   {formatSum(pots.charity)}
