@@ -75,6 +75,12 @@ export default function Charity() {
   const [smallAmount, setSmallAmount] = useState('')
   const [smallDate, setSmallDate] = useState(todayISO())
 
+  // Редактирование записи из списка (пополнение крупной цели или маленькое пожертвование).
+  const [editId, setEditId] = useState<string | null>(null)
+  const [editAmount, setEditAmount] = useState('')
+  const [editDate, setEditDate] = useState(todayISO())
+  const [editTo, setEditTo] = useState('')
+
   useEffect(() => {
     if (!user) return
     let active = true
@@ -244,6 +250,54 @@ export default function Charity() {
       setSmallTo('')
       setSmallAmount('')
       setSmallDate(todayISO())
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const startEdit = (c: CharityExpense) => {
+    setEditId(c.id)
+    setEditAmount(formatAmountInput(String(c.amount)))
+    setEditDate(c.date)
+    setEditTo(c.description ?? '')
+    setError(null)
+  }
+
+  const cancelEdit = () => setEditId(null)
+
+  const submitEdit = async (e: FormEvent) => {
+    e.preventDefault()
+    if (!user || !editId) return
+    const ex = items.find((i) => i.id === editId)
+    if (!ex) return
+    const amount = parseAmount(editAmount)
+    if (!amount || amount <= 0) {
+      setError(t('common.enterPositive'))
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      const d = new Date(editDate + 'T00:00:00')
+      const m = await getOrCreateMonth(user.id, d.getFullYear(), d.getMonth() + 1)
+      const isBig = isCharityBigSubcategory(ex.subcategory)
+      const newTo = isBig ? ex.description : editTo.trim() || null
+      const { error } = await supabase
+        .from('expenses')
+        .update({ amount, date: editDate, month_id: m.id, description: newTo })
+        .eq('id', editId)
+      if (error) throw error
+      const delta = amount - Number(ex.amount)
+      setItems((prev) =>
+        prev.map((i) => (i.id === editId ? { ...i, amount, date: editDate, description: newTo } : i)),
+      )
+      if (!ex.paid_from_pot) {
+        if (isBig) setPots((p) => ({ ...p, big: p.big + delta, total: p.total + delta }))
+        else setPots((p) => ({ ...p, small: p.small + delta, total: p.total + delta }))
+      }
+      setEditId(null)
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -462,17 +516,48 @@ export default function Charity() {
                         {bigTopUps.map((c) => (
                           <div
                             key={c.id}
-                            className="flex items-center justify-between gap-3 rounded-lg bg-neutral-100 px-3 py-2.5 text-sm dark:bg-neutral-800/50"
+                            className="rounded-lg bg-neutral-100 px-3 py-2.5 text-sm dark:bg-neutral-800/50"
                           >
-                            <span className="text-neutral-700 dark:text-neutral-300">
-                              {formatDateHuman(c.date)} · {formatSum(Number(c.amount))}
-                            </span>
-                            <button
-                              onClick={() => removeItem(c.id)}
-                              className="shrink-0 text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
-                            >
-                              {t('common.delete')}
-                            </button>
+                            {editId === c.id ? (
+                              <form onSubmit={submitEdit} className="flex flex-col gap-2">
+                                <input
+                                  inputMode="decimal"
+                                  value={editAmount}
+                                  onChange={(e) => setEditAmount(formatAmountInput(e.target.value))}
+                                  placeholder={t('charity.topUpAmount')}
+                                  className={inputCls}
+                                />
+                                <DatePicker value={editDate} onChange={setEditDate} />
+                                <div className="flex gap-2">
+                                  <button type="submit" disabled={busy} className={btnPrimary}>
+                                    {busy ? t('common.saving') : t('common.save')}
+                                  </button>
+                                  <button type="button" onClick={cancelEdit} className={btnGhost}>
+                                    {t('common.cancel')}
+                                  </button>
+                                </div>
+                              </form>
+                            ) : (
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-neutral-700 dark:text-neutral-300">
+                                  {formatDateHuman(c.date)} · {formatSum(Number(c.amount))}
+                                </span>
+                                <div className="flex shrink-0 gap-3">
+                                  <button
+                                    onClick={() => startEdit(c)}
+                                    className="text-rose-600 transition hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
+                                  >
+                                    {t('common.edit')}
+                                  </button>
+                                  <button
+                                    onClick={() => removeItem(c.id)}
+                                    className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                                  >
+                                    {t('common.delete')}
+                                  </button>
+                                </div>
+                              </div>
+                            )}
                           </div>
                         ))}
                       </div>
@@ -528,21 +613,62 @@ export default function Charity() {
                   {smallDonations.map((c) => (
                     <div
                       key={c.id}
-                      className="flex items-center justify-between gap-3 rounded-lg bg-neutral-100 px-3 py-2.5 text-sm dark:bg-neutral-800/50"
+                      className="rounded-lg bg-neutral-100 px-3 py-2.5 text-sm dark:bg-neutral-800/50"
                     >
-                      <div className="min-w-0">
-                        <p className="font-medium text-rose-600 dark:text-rose-400">{formatSum(Number(c.amount))}</p>
-                        <p className="text-xs text-neutral-500">
-                          {c.description ? `${c.description} · ` : ''}
-                          {formatDateHuman(c.date)}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => removeItem(c.id)}
-                        className="shrink-0 text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
-                      >
-                        {t('common.delete')}
-                      </button>
+                      {editId === c.id ? (
+                        <form onSubmit={submitEdit} className="flex flex-col gap-2">
+                          <input
+                            value={editTo}
+                            onChange={(e) => setEditTo(e.target.value)}
+                            placeholder={t('charity.smallTo')}
+                            className={inputCls}
+                          />
+                          <div className="flex flex-col gap-2 sm:flex-row">
+                            <input
+                              inputMode="decimal"
+                              value={editAmount}
+                              onChange={(e) => setEditAmount(formatAmountInput(e.target.value))}
+                              placeholder={t('charity.smallAmount')}
+                              className={'flex-1 ' + fieldBase}
+                            />
+                            <div className="flex-1">
+                              <DatePicker value={editDate} onChange={setEditDate} />
+                            </div>
+                          </div>
+                          <div className="flex gap-2">
+                            <button type="submit" disabled={busy} className={btnPrimary}>
+                              {busy ? t('common.saving') : t('common.save')}
+                            </button>
+                            <button type="button" onClick={cancelEdit} className={btnGhost}>
+                              {t('common.cancel')}
+                            </button>
+                          </div>
+                        </form>
+                      ) : (
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="font-medium text-rose-600 dark:text-rose-400">{formatSum(Number(c.amount))}</p>
+                            <p className="text-xs text-neutral-500">
+                              {c.description ? `${c.description} · ` : ''}
+                              {formatDateHuman(c.date)}
+                            </p>
+                          </div>
+                          <div className="flex shrink-0 gap-3">
+                            <button
+                              onClick={() => startEdit(c)}
+                              className="text-rose-600 transition hover:text-rose-700 dark:text-rose-400 dark:hover:text-rose-300"
+                            >
+                              {t('common.edit')}
+                            </button>
+                            <button
+                              onClick={() => removeItem(c.id)}
+                              className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                            >
+                              {t('common.delete')}
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>

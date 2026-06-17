@@ -251,9 +251,9 @@ export default function Dashboard() {
                 onClick={() => navigate('/charity')}
                 className="flex flex-1 flex-col justify-center rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4 text-left transition hover:bg-rose-500/10 dark:border-rose-500/20"
               >
-                <p className="flex flex-wrap items-center gap-x-1 text-xs font-medium leading-tight">
-                  <span>{t('charity.title')}</span>
-                  <span className="text-rose-500" aria-hidden>›</span>
+                <p className="flex items-center gap-1 text-[11px] font-medium leading-tight">
+                  <span className="min-w-0 truncate">{t('charity.title')}</span>
+                  <span className="shrink-0 text-rose-500" aria-hidden>›</span>
                 </p>
                 <p className="mt-1 text-xl font-semibold text-rose-600 dark:text-rose-400">
                   {formatSum(pots.charity)}
