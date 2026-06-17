@@ -381,10 +381,18 @@ export function isDebtCategory(name: string | null | undefined): boolean {
   return !!name && DEBT_CATEGORY_NAMES.includes(name.trim())
 }
 
+// Благотворительность -- особая категория: отложенные 5% это «не твои» деньги,
+// они копятся в отдельной копилке и потом раздаются (см. loadSavingsPots).
+export const CHARITY_CATEGORY_NAMES = ['Благотворительность']
+
+export function isCharityCategory(name: string | null | undefined): boolean {
+  return !!name && CHARITY_CATEGORY_NAMES.includes(name.trim())
+}
+
 // Категории, которые НЕ учитываются при расчёте подушки безопасности:
-// накопления (остаются твоими) и долги (разовые/временные, не «жизнь на каждый месяц»).
+// накопления (остаются твоими), долги (разовые/временные) и благотворительность («не мои» деньги).
 export function isCushionExcludedCategory(name: string | null | undefined): boolean {
-  return isSavingsCategory(name) || isDebtCategory(name)
+  return isSavingsCategory(name) || isDebtCategory(name) || isCharityCategory(name)
 }
 
 // ===== Копилки: подушка безопасности и свободные накопления =====
@@ -396,7 +404,7 @@ export function isCushionExcludedCategory(name: string | null | undefined): bool
 //   Пополнение = расход в категории Сбережения/Инвестиции (paid_from_pot = null).
 //   Снятие     = любой расход с пометкой paid_from_pot (трата отложенных денег);
 //                он остаётся реальным расходом, но уменьшает баланс копилки.
-export type SavingsPot = 'cushion' | 'free'
+export type SavingsPot = 'cushion' | 'free' | 'charity'
 
 // Подкатегория, которая считается пополнением именно подушки безопасности.
 export const CUSHION_SUBCATEGORY = 'Подушка безопасности'
@@ -408,7 +416,8 @@ export function isCushionSubcategory(sub: string | null | undefined): boolean {
 export type SavingsPotsStats = {
   cushion: number // баланс подушки безопасности
   free: number    // баланс свободных накоплений
-  total: number   // cushion + free («Уже отложено» всего)
+  charity: number // баланс копилки благотворительности (не входит в total -- «не мои» деньги)
+  total: number   // cushion + free («Уже отложено» всего, без благотворительности)
 }
 
 // Считает реальные балансы копилок по всем расходам пользователя (за всё время).
@@ -423,6 +432,11 @@ export async function loadSavingsPots(userId: string): Promise<SavingsPotsStats>
       .filter((c) => isSavingsCategory(c.name))
       .map((c) => c.id),
   )
+  const charityIds = new Set(
+    ((cats ?? []) as { id: string; name: string }[])
+      .filter((c) => isCharityCategory(c.name))
+      .map((c) => c.id),
+  )
 
   const { data: exps, error } = await supabase
     .from('expenses')
@@ -432,6 +446,7 @@ export async function loadSavingsPots(userId: string): Promise<SavingsPotsStats>
 
   let cushion = 0
   let free = 0
+  let charity = 0
   for (const ex of (exps ?? []) as {
     amount: number
     category_id: string | null
@@ -443,13 +458,19 @@ export async function loadSavingsPots(userId: string): Promise<SavingsPotsStats>
       cushion -= a // снятие из подушки
     } else if (ex.paid_from_pot === 'free') {
       free -= a // снятие из накоплений
+    } else if (ex.paid_from_pot === 'charity') {
+      charity -= a // пожертвование: снятие из копилки благотворительности
     } else if (ex.category_id && savingsIds.has(ex.category_id)) {
       // пополнение: подушка — по подкатегории, остальные накопления — свободные
       if (isCushionSubcategory(ex.subcategory)) cushion += a
       else free += a
+    } else if (ex.category_id && charityIds.has(ex.category_id)) {
+      charity += a // пополнение копилки благотворительности (отложенные 5%)
     }
   }
-  return { cushion, free, total: cushion + free }
+  // total -- личные накопления (подушка + свободные). Благотворительность не входит:
+  // это «не мои» деньги, показываем их отдельной копилкой.
+  return { cushion, free, charity, total: cushion + free }
 }
 
 // ===== Подушка безопасности =====

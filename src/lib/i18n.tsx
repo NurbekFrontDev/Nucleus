@@ -89,6 +89,7 @@ const UI: Record<Lang, Record<string, string>> = {
     'cushion.noData': 'Цель появится, когда добавишь живые расходы за пару месяцев.',
     'cushion.progress': 'Цель на {n} мес: {rec}',
     'savings.freeTitle': '🐷 Накопления',
+    'charity.title': '❤️ Благотворительность',
 
     'budget.title': 'Бюджет / План',
     'budget.received': 'Получено в этом месяце',
@@ -130,6 +131,9 @@ const UI: Record<Lang, Record<string, string>> = {
     'exp.fromPotHint': 'Спишется из выбранной копилки — её баланс уменьшится.',
     'exp.fromCushion': 'из подушки',
     'exp.fromFree': 'из накоплений',
+    'exp.fromCharity': 'из благотворительности',
+    'exp.donate': 'Пожертвование (из копилки)',
+    'exp.donateHint': 'Спишется из копилки благотворительности — её баланс уменьшится.',
     'exp.totalSpent': 'Расходы:',
     'exp.totalToPots': 'в копилки:',
 
@@ -348,6 +352,7 @@ const UI: Record<Lang, Record<string, string>> = {
     'cushion.noData': 'The target appears once you add living expenses for a couple of months.',
     'cushion.progress': 'Target for {n} mo: {rec}',
     'savings.freeTitle': '🐷 Savings',
+    'charity.title': '❤️ Charity',
 
     'budget.title': 'Budget / Plan',
     'budget.received': 'Received this month',
@@ -389,6 +394,9 @@ const UI: Record<Lang, Record<string, string>> = {
     'exp.fromPotHint': 'It will be deducted from the chosen pot — its balance goes down.',
     'exp.fromCushion': 'from cushion',
     'exp.fromFree': 'from savings',
+    'exp.fromCharity': 'from charity',
+    'exp.donate': 'Donation (from the pot)',
+    'exp.donateHint': 'It will be deducted from the charity pot — its balance goes down.',
     'exp.totalSpent': 'Spent:',
     'exp.totalToPots': 'to savings:',
 

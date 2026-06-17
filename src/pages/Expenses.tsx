@@ -19,6 +19,7 @@ import {
   deletePreset,
   formatDateHuman,
   isSavingsCategory,
+  isCharityCategory,
 } from '../lib/db'
 
 type Category = { id: string; name: string; archived?: boolean }
@@ -29,7 +30,7 @@ type Expense = {
   description: string | null
   category_id: string | null
   subcategory: string | null
-  paid_from_pot: 'cushion' | 'free' | null
+  paid_from_pot: 'cushion' | 'free' | 'charity' | null
   created_at: string
 }
 
@@ -71,7 +72,7 @@ export default function Expenses() {
   const [categoryId, setCategoryId] = useState('')
   const [subcategory, setSubcategory] = useState('')
   const [description, setDescription] = useState('')
-  const [fromPot, setFromPot] = useState<'' | 'cushion' | 'free'>('')
+  const [fromPot, setFromPot] = useState<'' | 'cushion' | 'free' | 'charity'>('')
   const [busy, setBusy] = useState(false)
 
   const [editId, setEditId] = useState<string | null>(null)
@@ -80,7 +81,7 @@ export default function Expenses() {
   const [editCategoryId, setEditCategoryId] = useState('')
   const [editSubcategory, setEditSubcategory] = useState('')
   const [editDescription, setEditDescription] = useState('')
-  const [editFromPot, setEditFromPot] = useState<'' | 'cushion' | 'free'>('')
+  const [editFromPot, setEditFromPot] = useState<'' | 'cushion' | 'free' | 'charity'>('')
 
   // Категории грузим один раз.
   useEffect(() => {
@@ -138,7 +139,10 @@ export default function Expenses() {
   // Отложенное в Сбережения/Инвестиции — это не трата, а перенос в копилку.
   // Считаем отдельно, чтобы «Расходы» совпадали с дашбордом.
   const toSavings = items
-    .filter((i) => isSavingsCategory(categories.find((c) => c.id === i.category_id)?.name))
+    .filter((i) => {
+      const n = categories.find((c) => c.id === i.category_id)?.name
+      return isSavingsCategory(n) || isCharityCategory(n)
+    })
     .reduce((s, i) => s + Number(i.amount), 0)
   const realTotal = total - toSavings
 
@@ -258,7 +262,7 @@ export default function Expenses() {
     setEditCategoryId(i.category_id ?? '')
     setEditSubcategory(i.subcategory ?? '')
     setEditDescription(i.description ?? '')
-    setEditFromPot(i.paid_from_pot === 'cushion' || i.paid_from_pot === 'free' ? i.paid_from_pot : '')
+    setEditFromPot(i.paid_from_pot ?? '')
     setError(null)
   }
 
@@ -348,7 +352,10 @@ export default function Expenses() {
             <DatePicker value={date} onChange={setDate} />
             <Select
               value={categoryId}
-              onChange={setCategoryId}
+              onChange={(v) => {
+                setCategoryId(v)
+                setFromPot('')
+              }}
               options={categoryOptions}
               placeholder={t('common.category')}
             />
@@ -366,7 +373,22 @@ export default function Expenses() {
               placeholder={t('common.descOptional')}
               className={inputCls}
             />
-            {!isSavingsCategory(categories.find((c) => c.id === categoryId)?.name) && (
+            {isCharityCategory(categories.find((c) => c.id === categoryId)?.name) ? (
+              <div className="flex flex-col gap-2 rounded-lg border border-neutral-200 px-3 py-2 dark:border-neutral-700">
+                <label className="flex cursor-pointer items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={fromPot === 'charity'}
+                    onChange={(e) => setFromPot(e.target.checked ? 'charity' : '')}
+                    className="h-4 w-4 accent-rose-500"
+                  />
+                  {t('exp.donate')}
+                </label>
+                {fromPot === 'charity' && (
+                  <p className="text-xs text-neutral-500 dark:text-neutral-400">{t('exp.donateHint')}</p>
+                )}
+              </div>
+            ) : !isSavingsCategory(categories.find((c) => c.id === categoryId)?.name) ? (
               <div className="flex flex-col gap-2 rounded-lg border border-neutral-200 px-3 py-2 dark:border-neutral-700">
                 <label className="flex cursor-pointer items-center gap-2 text-sm">
                   <input
@@ -391,7 +413,7 @@ export default function Expenses() {
                   </>
                 )}
               </div>
-            )}
+            ) : null}
             {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
             <button
               type="submit"
@@ -438,7 +460,10 @@ export default function Expenses() {
                     <DatePicker value={editDate} onChange={setEditDate} />
                     <Select
                       value={editCategoryId}
-                      onChange={setEditCategoryId}
+                      onChange={(v) => {
+                        setEditCategoryId(v)
+                        setEditFromPot('')
+                      }}
                       options={categoryOptions}
                       placeholder={t('common.category')}
                     />
@@ -456,7 +481,19 @@ export default function Expenses() {
                       placeholder={t('common.desc')}
                       className={inputCls}
                     />
-                    {!isSavingsCategory(categories.find((c) => c.id === editCategoryId)?.name) && (
+                    {isCharityCategory(categories.find((c) => c.id === editCategoryId)?.name) ? (
+                      <div className="flex flex-col gap-2 rounded-lg border border-neutral-200 px-3 py-2 dark:border-neutral-700">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm">
+                          <input
+                            type="checkbox"
+                            checked={editFromPot === 'charity'}
+                            onChange={(e) => setEditFromPot(e.target.checked ? 'charity' : '')}
+                            className="h-4 w-4 accent-rose-500"
+                          />
+                          {t('exp.donate')}
+                        </label>
+                      </div>
+                    ) : !isSavingsCategory(categories.find((c) => c.id === editCategoryId)?.name) ? (
                       <div className="flex flex-col gap-2 rounded-lg border border-neutral-200 px-3 py-2 dark:border-neutral-700">
                         <label className="flex cursor-pointer items-center gap-2 text-sm">
                           <input
@@ -478,7 +515,7 @@ export default function Expenses() {
                           />
                         )}
                       </div>
-                    )}
+                    ) : null}
                     <div className="flex gap-2">
                       <button
                         onClick={() => saveEdit(i.id)}
@@ -505,7 +542,7 @@ export default function Expenses() {
                         {catName(i.category_id)}
                         {i.subcategory ? ` · ${tr(i.subcategory)}` : ''} · {formatDateHuman(i.date)}
                         {i.description ? ` · ${i.description}` : ''}
-                        {i.paid_from_pot ? ` · ${i.paid_from_pot === 'cushion' ? t('exp.fromCushion') : t('exp.fromFree')}` : ''}
+                        {i.paid_from_pot ? ` · ${i.paid_from_pot === 'cushion' ? t('exp.fromCushion') : i.paid_from_pot === 'charity' ? t('exp.fromCharity') : t('exp.fromFree')}` : ''}
                       </p>
                     </div>
                     <div className="flex shrink-0 gap-3 text-sm">

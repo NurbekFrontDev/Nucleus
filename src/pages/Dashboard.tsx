@@ -11,6 +11,7 @@ import {
   saveCushionMonths,
   loadSavingsPots,
   isSavingsCategory,
+  isCharityCategory,
   DEFAULT_CUSHION_MONTHS,
   type CushionStats,
   type SavingsPotsStats,
@@ -51,7 +52,7 @@ export default function Dashboard() {
   const [rows, setRows] = useState<Row[]>([])
   const [cushionMonths, setCushionMonths] = useState(DEFAULT_CUSHION_MONTHS)
   const [cushion, setCushion] = useState<CushionStats | null>(null)
-  const [pots, setPots] = useState<SavingsPotsStats>({ cushion: 0, free: 0, total: 0 })
+  const [pots, setPots] = useState<SavingsPotsStats>({ cushion: 0, free: 0, charity: 0, total: 0 })
 
   useEffect(() => {
     if (!user) return
@@ -68,7 +69,7 @@ export default function Dashboard() {
             .eq('archived', false)
             .order('sort_order'),
           supabase.from('incomes').select('amount').eq('month_id', m.id),
-          supabase.from('expenses').select('amount, category_id').eq('month_id', m.id),
+          supabase.from('expenses').select('amount, category_id, paid_from_pot').eq('month_id', m.id),
         ])
         if (!active) return
         if (catRes.error) throw catRes.error
@@ -85,13 +86,19 @@ export default function Dashboard() {
         const savingsCatIds = new Set(
           cats.filter((c) => isSavingsCategory(c.name)).map((c) => c.id),
         )
+        // Благотворительность тоже исключаем из карточки «Расходы»: это «не мои» деньги
+        // (отложенные 5% и пожертвования из копилки), а не личные траты на жизнь.
+        const charityCatIds = new Set(
+          cats.filter((c) => isCharityCategory(c.name)).map((c) => c.id),
+        )
         const factByCat: Record<string, number> = {}
-        for (const e of (expRes.data ?? []) as { amount: number; category_id: string | null }[]) {
+        for (const e of (expRes.data ?? []) as { amount: number; category_id: string | null; paid_from_pot: string | null }[]) {
           if (!e.category_id) continue
+          if (e.paid_from_pot === 'charity') continue // пожертвование из копилки — не пополнение бюджета «Благотворительность»
           factByCat[e.category_id] = (factByCat[e.category_id] ?? 0) + Number(e.amount)
         }
         const expenseSum = ((expRes.data ?? []) as { amount: number; category_id: string | null }[])
-          .filter((e) => !e.category_id || !savingsCatIds.has(e.category_id))
+          .filter((e) => !e.category_id || (!savingsCatIds.has(e.category_id) && !charityCatIds.has(e.category_id)))
           .reduce((s, e) => s + Number(e.amount), 0)
         const planned = Number(m.planned_income) || 0
         setPlannedIncome(planned)
@@ -153,7 +160,7 @@ export default function Dashboard() {
         const p = await loadSavingsPots(user.id)
         if (active) setPots(p)
       } catch {
-        if (active) setPots({ cushion: 0, free: 0, total: 0 })
+        if (active) setPots({ cushion: 0, free: 0, charity: 0, total: 0 })
       }
     })()
     return () => {
@@ -231,6 +238,13 @@ export default function Dashboard() {
               <p className="text-sm font-medium">{t('savings.freeTitle')}</p>
               <p className="mt-1 text-2xl font-semibold text-emerald-600 dark:text-emerald-400">
                 {formatSum(pots.free)}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-rose-500/30 bg-rose-500/5 p-4 dark:border-rose-500/20">
+              <p className="text-sm font-medium">{t('charity.title')}</p>
+              <p className="mt-1 text-2xl font-semibold text-rose-600 dark:text-rose-400">
+                {formatSum(pots.charity)}
               </p>
             </div>
           </div>
