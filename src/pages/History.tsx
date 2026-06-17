@@ -109,13 +109,13 @@ export default function History() {
         }
         for (const r of (expRes.data ?? []) as ExpenseRow[]) {
           if (!r.month_id) continue
-          // Копилка благотворительности считается как чистый остаток:
-          // пополнение (paid_from_pot === null) прибавляет, а пожертвование из копилки
-          // (paid_from_pot === 'charity') вычитает. Так цифра в истории совпадает
-          // с дашбордом и строкой «в копилки» во вкладке расходов.
+          // Благотворительность: пополнение копилки считаем тратой один раз -- отложенные
+          // деньги стали «не нашими» (это и есть благотворительная трата). Само
+          // пожертвование из копилки (paid_from_pot === 'charity') -- это выдача уже
+          // отложенного, повторно в историю НЕ добавляем, иначе сумма задвоится.
           const isCharity = !!r.category_id && isCharityCategory(catName[r.category_id])
-          const value = isCharity && r.paid_from_pot === 'charity' ? -Number(r.amount) : Number(r.amount)
-          ensure(r.month_id).expense += value
+          if (isCharity && r.paid_from_pot === 'charity') continue
+          ensure(r.month_id).expense += Number(r.amount)
           const sub = (r.subcategory ?? '').trim()
           let key: string
           let archived = false
@@ -126,7 +126,7 @@ export default function History() {
           } else key = '__OTHER__'
           expSub[r.month_id] = expSub[r.month_id] ?? {}
           const cur = expSub[r.month_id][key] ?? { amount: 0, archived }
-          cur.amount += value
+          cur.amount += Number(r.amount)
           cur.archived = cur.archived || archived
           expSub[r.month_id][key] = cur
         }
