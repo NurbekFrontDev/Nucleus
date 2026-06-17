@@ -3,7 +3,7 @@ import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import PeriodFilter, { type PeriodValue } from '../components/PeriodFilter'
 import { useLang } from '../lib/i18n'
-import { formatSum, monthName, isCharityCategory } from '../lib/db'
+import { formatSum, monthName, isCharityCategory, isSavingsCategory } from '../lib/db'
 
 type MonthRow = {
   id: string
@@ -114,7 +114,12 @@ export default function History() {
           // пожертвование из копилки (paid_from_pot === 'charity') -- это выдача уже
           // отложенного, повторно в историю НЕ добавляем, иначе сумма задвоится.
           const isCharity = !!r.category_id && isCharityCategory(catName[r.category_id])
+          const isSavings = !!r.category_id && isSavingsCategory(catName[r.category_id])
           if (isCharity && r.paid_from_pot === 'charity') continue
+          // Накопления (Сбережения/Инвестиции): пополнение копилки -- это перекладывание
+          // своих же денег, а не трата. В историю трат не включаем (как на дашборде).
+          // Покупка из копилки идёт обычной категорией с paid_from_pot и остаётся тратой.
+          if (isSavings && !r.paid_from_pot) continue
           ensure(r.month_id).expense += Number(r.amount)
           const sub = (r.subcategory ?? '').trim()
           let key: string
