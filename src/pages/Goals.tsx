@@ -938,6 +938,7 @@ export default function Goals() {
                     {t('common.sortOld')}
                   </button>
                 </div>
+                <hr className="border-neutral-200 dark:border-neutral-800" />
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-xs text-neutral-500">{t('goals.filterCat')}:</span>
                   <button
@@ -964,6 +965,7 @@ export default function Goals() {
                     </button>
                   ))}
                 </div>
+                <hr className="border-neutral-200 dark:border-neutral-800" />
                 {wishFilterSubs.length > 0 && (
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-xs text-neutral-500">{t('goals.filterSub')}:</span>
