@@ -480,19 +480,8 @@ export default function Budget() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <div className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-sm text-neutral-500 dark:text-neutral-400">{t('budget.catsPercents')}</span>
-              <button
-                type="button"
-                onClick={() => setReorder((v) => !v)}
-                className={`w-28 shrink-0 whitespace-nowrap rounded-lg px-2.5 py-1 text-center text-xs font-medium transition ${
-                  reorder
-                    ? 'bg-emerald-500 text-neutral-950 hover:bg-emerald-400'
-                    : 'border border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
-                }`}
-              >
-                {reorder ? t('common.reorderDone') : t('common.reorder')}
-              </button>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-sm text-neutral-500 dark:text-neutral-400">{t('budget.catsPercents')}</span>
               <span
                 className={`shrink-0 whitespace-nowrap text-sm ${
                   totalPercent === 100 ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'
@@ -501,6 +490,17 @@ export default function Budget() {
                 {t('budget.total', { p: totalPercent })}
               </span>
             </div>
+            <button
+              type="button"
+              onClick={() => setReorder((v) => !v)}
+              className={`self-start whitespace-nowrap rounded-lg px-3 py-1 text-xs font-medium transition ${
+                reorder
+                  ? 'bg-emerald-500 text-neutral-950 hover:bg-emerald-400'
+                  : 'border border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
+              }`}
+            >
+              {reorder ? t('common.reorderDone') : t('common.reorder')}
+            </button>
 
             {categories.map((c, index) =>
               editingId === c.id ? (
