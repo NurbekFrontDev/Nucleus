@@ -181,41 +181,43 @@ export default function Combobox({
                     {it.label}
                   </button>
                   {manageable && (
-                    <button
-                      type="button"
-                      onClick={() => setMenuFor(menuFor === it.raw ? null : it.raw)}
-                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-neutral-400 transition hover:bg-neutral-500/10 hover:text-neutral-600 dark:hover:text-neutral-200"
-                      aria-label={t('common.edit')}
-                    >
-                      ⋯
-                    </button>
+                    <div className="relative shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setMenuFor(menuFor === it.raw ? null : it.raw)}
+                        className="flex h-8 w-8 items-center justify-center rounded-md text-neutral-400 transition hover:bg-neutral-500/10 hover:text-neutral-600 dark:hover:text-neutral-200"
+                        aria-label={t('common.edit')}
+                      >
+                        ⋯
+                      </button>
+                      {menuFor === it.raw && (
+                        <div className="absolute right-0 top-full z-40 mt-1 w-36 overflow-hidden rounded-lg border border-neutral-200 bg-white shadow-lg dark:border-neutral-700 dark:bg-neutral-900">
+                          {onRenameOption && (
+                            <button
+                              type="button"
+                              onClick={() => startEdit(it.raw, it.label)}
+                              className="block w-full px-3 py-2 text-left text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                            >
+                              {t('common.edit')}
+                            </button>
+                          )}
+                          {onDeleteOption && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setConfirmDel(it.raw)
+                                setMenuFor(null)
+                              }}
+                              className="block w-full px-3 py-2 text-left text-sm text-red-500 transition hover:bg-red-500/10 dark:text-red-400"
+                            >
+                              {t('common.delete')}
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </div>
                   )}
                 </div>
-                {menuFor === it.raw && (
-                  <div className="flex gap-1 px-2 pb-1.5">
-                    {onRenameOption && (
-                      <button
-                        type="button"
-                        onClick={() => startEdit(it.raw, it.label)}
-                        className="flex-1 rounded-md border border-neutral-200 px-2 py-1 text-xs transition hover:bg-emerald-500/10 dark:border-neutral-700"
-                      >
-                        ✏️ {t('common.edit')}
-                      </button>
-                    )}
-                    {onDeleteOption && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setConfirmDel(it.raw)
-                          setMenuFor(null)
-                        }}
-                        className="flex-1 rounded-md border border-neutral-200 px-2 py-1 text-xs text-red-500 transition hover:bg-red-500/10 dark:border-neutral-700 dark:text-red-400"
-                      >
-                        🗑 {t('common.delete')}
-                      </button>
-                    )}
-                  </div>
-                )}
               </div>
             )
           })}
