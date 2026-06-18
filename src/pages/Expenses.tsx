@@ -67,6 +67,7 @@ export default function Expenses() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sortOrder, setSortOrder] = useState<'new' | 'old'>('new')
+  const [filterCat, setFilterCat] = useState('')
 
   const [amount, setAmount] = useState('')
   const [date, setDate] = useState(todayISO)
@@ -170,6 +171,9 @@ export default function Expenses() {
               : 0
     return sortOrder === 'new' ? -cmp : cmp
   })
+
+  // Фильтр по категории (чипы). Пустая строка = все категории.
+  const shownItems = filterCat ? sortedItems.filter((i) => i.category_id === filterCat) : sortedItems
 
   const subOptions = (catId: string): string[] => {
     const name = categories.find((c) => c.id === catId)?.name ?? ''
@@ -437,7 +441,7 @@ export default function Expenses() {
           ) : (
             <div className="flex flex-col gap-2">
               <div className="flex items-center gap-2">
-                <span className="text-xs text-neutral-500">{t('common.sort')}:</span>
+                <span className="text-xs text-neutral-500">{t('common.sort')}</span>
                 <button type="button" onClick={() => setSortOrder('new')} className={chipCls(sortOrder === 'new')}>
                   {t('common.sortNew')}
                 </button>
@@ -445,10 +449,29 @@ export default function Expenses() {
                   {t('common.sortOld')}
                 </button>
               </div>
-              {sortedItems.map((i, idx) => {
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-neutral-500">{t('common.category')}:</span>
+                <button type="button" onClick={() => setFilterCat('')} className={chipCls(filterCat === '')}>
+                  {t('common.all')}
+                </button>
+                {categoryOptions.map((c) => (
+                  <button
+                    key={c.value}
+                    type="button"
+                    onClick={() => setFilterCat(c.value)}
+                    className={chipCls(filterCat === c.value)}
+                  >
+                    {c.label}
+                  </button>
+                ))}
+              </div>
+              {shownItems.length === 0 ? (
+                <p className="text-sm text-neutral-500">{t('goals.nothingFound')}</p>
+              ) : null}
+              {shownItems.map((i, idx) => {
                 const showMonthHeader =
                   period?.groupByMonth &&
-                  (idx === 0 || sortedItems[idx - 1].date.slice(0, 7) !== i.date.slice(0, 7))
+                  (idx === 0 || shownItems[idx - 1].date.slice(0, 7) !== i.date.slice(0, 7))
                 const dd = new Date(i.date + 'T00:00:00')
                 const row =
                   editId === i.id ? (

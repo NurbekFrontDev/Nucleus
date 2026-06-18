@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import { supabase } from '../lib/supabase'
 import DatePicker from '../components/DatePicker'
+import IconButton from '../components/IconButton'
 import { useLang } from '../lib/i18n'
 import {
   formatSum,
@@ -497,15 +498,19 @@ export default function Charity() {
                       </div>
                     </form>
                   ) : (
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       {charityCat && (
                         <button type="button" onClick={openBigForm} className={btnPrimary}>
                           {t('charity.topUp')}
                         </button>
                       )}
-                      <button type="button" onClick={openGoalForm} className={btnGhost}>
-                        {hasGoal ? t('charity.editGoal') : t('charity.setGoal')}
-                      </button>
+                      {hasGoal ? (
+                        <IconButton icon="edit" title={t('charity.editGoal')} onClick={openGoalForm} />
+                      ) : (
+                        <button type="button" onClick={openGoalForm} className={btnGhost}>
+                          {t('charity.setGoal')}
+                        </button>
+                      )}
                     </div>
                   )}
 
