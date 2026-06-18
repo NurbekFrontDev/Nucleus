@@ -16,7 +16,7 @@ const ICONS: Record<IconName, ReactNode> = {
 
 const colorCls: Record<IconName, string> = {
   edit: 'text-neutral-500 hover:bg-emerald-500/10 hover:text-emerald-600 dark:text-neutral-400 dark:hover:text-emerald-400',
-  delete: 'text-neutral-500 hover:bg-red-500/10 hover:text-red-600 dark:text-neutral-400 dark:hover:text-red-400',
+  delete: 'text-red-500 hover:bg-red-500/10 hover:text-red-600 dark:text-red-400 dark:hover:text-red-300',
 }
 
 type IconButtonProps = {

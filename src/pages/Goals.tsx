@@ -139,6 +139,12 @@ export default function Goals() {
   const [editWishPrice, setEditWishPrice] = useState('')
   const [editWishNote, setEditWishNote] = useState('')
 
+  // Правка активной цели прямо в карточке: название, сумма цели, дата.
+  const [editGoalId, setEditGoalId] = useState<string | null>(null)
+  const [editGoalName, setEditGoalName] = useState('')
+  const [editGoalTarget, setEditGoalTarget] = useState('')
+  const [editGoalDate, setEditGoalDate] = useState('')
+
   useEffect(() => {
     if (!user) return
     let active = true
@@ -328,6 +334,34 @@ export default function Goals() {
     }
     setGoals(goals.map((x) => (x.id === id ? (data as Goal) : x)))
     setEditWishId(null)
+  }
+
+  const startEditGoal = (g: Goal) => {
+    setEditGoalId(g.id)
+    setEditGoalName(g.name)
+    setEditGoalTarget(g.target_amount ? formatAmountInput(String(g.target_amount)) : '')
+    setEditGoalDate(g.target_date ?? '')
+    setError(null)
+  }
+
+  const saveGoal = async (id: string) => {
+    if (!editGoalName.trim()) return
+    const { data, error } = await supabase
+      .from('goals')
+      .update({
+        name: editGoalName.trim(),
+        target_amount: parseAmount(editGoalTarget),
+        target_date: editGoalDate || null,
+      })
+      .eq('id', id)
+      .select(GOAL_COLS)
+      .single()
+    if (error || !data) {
+      setError(error?.message ?? t('common.error'))
+      return
+    }
+    setGoals(goals.map((x) => (x.id === id ? (data as Goal) : x)))
+    setEditGoalId(null)
   }
 
   const openGoalForm = (g: Goal) => {
@@ -733,6 +767,31 @@ export default function Goals() {
               </button>
             </div>
           </div>
+        ) : editGoalId === g.id ? (
+          <div className="flex flex-col gap-2">
+            <input
+              value={editGoalName}
+              onChange={(e) => setEditGoalName(e.target.value)}
+              placeholder={t('goals.wishName')}
+              className={inputCls}
+            />
+            <input
+              inputMode="decimal"
+              value={editGoalTarget}
+              onChange={(e) => setEditGoalTarget(formatAmountInput(e.target.value))}
+              placeholder={t('goals.goalAmount')}
+              className={inputCls}
+            />
+            <DatePicker value={editGoalDate} onChange={setEditGoalDate} />
+            <div className="flex gap-2">
+              <button onClick={() => saveGoal(g.id)} className={btnPrimary}>
+                {t('common.save')}
+              </button>
+              <button onClick={() => setEditGoalId(null)} className={btnGhost}>
+                {t('common.cancel')}
+              </button>
+            </div>
+          </div>
         ) : (
           <div className="flex flex-wrap items-center gap-3">
             <button
@@ -763,6 +822,7 @@ export default function Goals() {
                 {t('goals.makePrimary')}
               </button>
             )}
+            <IconButton icon="edit" title={t('common.edit')} onClick={() => startEditGoal(g)} />
             <IconButton icon="delete" title={t('common.delete')} onClick={() => removeGoal(g.id)} />
           </div>
         )}
