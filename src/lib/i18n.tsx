@@ -230,8 +230,6 @@ const UI: Record<Lang, Record<string, string>> = {
     'goals.noGoalsCat': 'Чтобы считать распределение, добавь категорию «Цели» с процентом в разделе «Бюджет».',
     'goals.setAsideThisMonth': 'Отложено в этом месяце: {v} из {b}',
     'goals.canSetAside': 'Можно отложить ещё: {v}',
-    'goals.setAsideThisMonth': 'Отложено в этом месяце: {v} из {b}',
-    'goals.canSetAside': 'Можно отложить ещё: {v}',
 
     'debts.title': 'Долги',
     'debts.add': '➕ Добавить долг',
@@ -305,15 +303,6 @@ const UI: Record<Lang, Record<string, string>> = {
     'set.errRate': 'Укажи курс в сумах (вручную или кнопкой «Курс сейчас»)',
     'set.errAddFail': 'Не удалось добавить',
     'set.errRefreshFail': 'Не удалось обновить курс автоматически',
-
-    'conv.title': '💱 Конвертер валют',
-    'conv.hint': 'Быстрый пересчёт между долларом, сумом и рублём.',
-    'conv.refresh': '↻ Обновить курс',
-    'conv.updating': 'Обновление курса…',
-    'conv.rateInfo': '1 $ ≈ {usd} сум · 1 ₽ ≈ {rub} сум',
-    'conv.usd': 'Доллар США',
-    'conv.uzs': 'Узбекский сум',
-    'conv.rub': 'Российский рубль',
 
     'conv.title': '💱 Конвертер валют',
     'conv.hint': 'Быстрый пересчёт между долларом, сумом и рублём.',
@@ -556,8 +545,6 @@ const UI: Record<Lang, Record<string, string>> = {
     'goals.noGoalsCat': 'To compute the split, add a “Goals” category with a percentage in the Budget tab.',
     'goals.setAsideThisMonth': 'Set aside this month: {v} of {b}',
     'goals.canSetAside': 'You can still set aside: {v}',
-    'goals.setAsideThisMonth': 'Set aside this month: {v} of {b}',
-    'goals.canSetAside': 'You can still set aside: {v}',
 
     'debts.title': 'Debts',
     'debts.add': '➕ Add a debt',
@@ -631,15 +618,6 @@ const UI: Record<Lang, Record<string, string>> = {
     'set.errRate': "Enter the rate in so'm (manually or via the “Get rate” button)",
     'set.errAddFail': 'Could not add',
     'set.errRefreshFail': 'Could not refresh the rate automatically',
-
-    'conv.title': '💱 Currency converter',
-    'conv.hint': "Quick conversion between dollar, so'm and ruble.",
-    'conv.refresh': '↻ Refresh rate',
-    'conv.updating': 'Updating rate…',
-    'conv.rateInfo': "1 $ ≈ {usd} so'm · 1 ₽ ≈ {rub} so'm",
-    'conv.usd': 'US Dollar',
-    'conv.uzs': "Uzbek so'm",
-    'conv.rub': 'Russian ruble',
 
     'conv.title': '💱 Currency converter',
     'conv.hint': "Quick conversion between dollar, so'm and ruble.",
