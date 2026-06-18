@@ -131,6 +131,11 @@ export default function Expenses() {
     }
   }, [user, period?.start, period?.end])
 
+  // Если выбранной в фильтре категории нет среди расходов текущего периода — сбрасываем на «Все».
+  useEffect(() => {
+    if (filterCat && !items.some((i) => i.category_id === filterCat)) setFilterCat('')
+  }, [items, filterCat])
+
   const catName = (id: string | null) => {
     const c = categories.find((x) => x.id === id)
     if (!c) return '—'
@@ -174,6 +179,12 @@ export default function Expenses() {
 
   // Фильтр по категории (чипы). Пустая строка = все категории.
   const shownItems = filterCat ? sortedItems.filter((i) => i.category_id === filterCat) : sortedItems
+
+  // В фильтре показываем только те категории, по которым есть расходы в текущем периоде.
+  const usedCategoryIds = new Set(
+    items.map((i) => i.category_id).filter((id): id is string => !!id),
+  )
+  const filterCategoryOptions = categoryOptions.filter((c) => usedCategoryIds.has(c.value))
 
   const subOptions = (catId: string): string[] => {
     const name = categories.find((c) => c.id === catId)?.name ?? ''
@@ -449,22 +460,24 @@ export default function Expenses() {
                   {t('common.sortOld')}
                 </button>
               </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs text-neutral-500">{t('common.category')}:</span>
-                <button type="button" onClick={() => setFilterCat('')} className={chipCls(filterCat === '')}>
-                  {t('common.all')}
-                </button>
-                {categoryOptions.map((c) => (
-                  <button
-                    key={c.value}
-                    type="button"
-                    onClick={() => setFilterCat(c.value)}
-                    className={chipCls(filterCat === c.value)}
-                  >
-                    {c.label}
+              {filterCategoryOptions.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs text-neutral-500">{t('common.category')}:</span>
+                  <button type="button" onClick={() => setFilterCat('')} className={chipCls(filterCat === '')}>
+                    {t('common.all')}
                   </button>
-                ))}
-              </div>
+                  {filterCategoryOptions.map((c) => (
+                    <button
+                      key={c.value}
+                      type="button"
+                      onClick={() => setFilterCat(c.value)}
+                      className={chipCls(filterCat === c.value)}
+                    >
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              )}
               {shownItems.length === 0 ? (
                 <p className="text-sm text-neutral-500">{t('goals.nothingFound')}</p>
               ) : null}
