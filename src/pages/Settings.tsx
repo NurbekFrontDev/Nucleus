@@ -83,7 +83,6 @@ export default function Settings() {
       <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50">
         <div className="min-w-0">
           <p className="font-medium">🪙 {t('set.cryptoAuto')}</p>
-          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{t('set.cryptoAutoHint')}</p>
         </div>
         <button
           onClick={toggleCryptoAuto}

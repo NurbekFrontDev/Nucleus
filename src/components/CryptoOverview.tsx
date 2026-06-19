@@ -212,9 +212,6 @@ export default function CryptoOverview() {
               </div>
             </div>
           </div>
-          <div className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
-            {t('ov.liveNote')}
-          </div>
         </div>
       )}
 
