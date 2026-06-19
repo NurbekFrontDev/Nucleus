@@ -108,7 +108,9 @@ const UI: Record<Lang, Record<string, string>> = {
     'inv.deleteTradeMsg': 'Сделка будет удалена, статистика пересчитается.',
     'inv.totalInvested': 'Всего вложено',
     'inv.totalValue': 'Текущая стоимость',
-    'inv.priceHint': 'Оценка по живым ценам появится позже.',
+    'inv.priceHint': 'Живую цену этой монеты пока не нашли. Оценка появится, когда биржа её поддержит.',
+    'inv.refreshPrices': '↻ Обновить',
+    'inv.pricedAt': 'Цены обновлены: {t}',
     'inv.errSymbol': 'Укажи тикер',
     'inv.errQtyPrice': 'Укажи количество и цену больше нуля',
 
@@ -541,7 +543,9 @@ const UI: Record<Lang, Record<string, string>> = {
     'inv.deleteTradeMsg': 'The trade will be deleted and stats recalculated.',
     'inv.totalInvested': 'Total invested',
     'inv.totalValue': 'Current value',
-    'inv.priceHint': 'Live-price valuation is coming later.',
+    'inv.priceHint': 'Could not fetch a live price for this coin yet. Valuation appears once it is supported.',
+    'inv.refreshPrices': '↻ Refresh',
+    'inv.pricedAt': 'Prices updated: {t}',
     'inv.errSymbol': 'Enter a ticker',
     'inv.errQtyPrice': 'Enter quantity and price greater than zero',
 

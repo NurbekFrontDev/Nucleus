@@ -83,6 +83,9 @@ export default function CryptoPortfolio({ portfolio }: Props) {
   // Авто-расход при покупке крипты (настройка из app_settings, синк между устройствами).
   const [autoExpense, setAutoExpense] = useState(true)
 
+  // Время последнего обновления живых цен (для индикатора «Цены обновлены: HH:MM»).
+  const [pricedAt, setPricedAt] = useState<string | null>(null)
+
   const reload = useCallback(async () => {
     if (!user) return
     setLoading(true)
@@ -93,11 +96,17 @@ export default function CryptoPortfolio({ portfolio }: Props) {
         .filter((a) => a.status === 'open')
         .map((a) => a.symbol)
       const prices = await loadCryptoPrices(symbols)
-      setAssets(
-        Object.keys(prices).length > 0
-          ? await loadPortfolio(user.id, portfolio, prices)
-          : data,
-      )
+      if (Object.keys(prices).length > 0) {
+        setAssets(await loadPortfolio(user.id, portfolio, prices))
+        setPricedAt(
+          new Date().toLocaleTimeString('ru-RU', {
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+        )
+      } else {
+        setAssets(data)
+      }
     } catch {
       setError(t('common.error'))
     } finally {
@@ -284,9 +293,26 @@ export default function CryptoPortfolio({ portfolio }: Props) {
 
   return (
     <div className="space-y-4">
-      <h2 className="text-base font-semibold">
-        {t(portfolio === 'meme' ? 'inv.memeTitle' : 'inv.spotTitle')}
-      </h2>
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="text-base font-semibold">
+          {t(portfolio === 'meme' ? 'inv.memeTitle' : 'inv.spotTitle')}
+        </h2>
+        <div className="flex items-center gap-2">
+          {pricedAt && (
+            <span className="text-xs text-neutral-400 dark:text-neutral-500">
+              {t('inv.pricedAt', { t: pricedAt })}
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => void reload()}
+            disabled={loading}
+            className={btnGhost}
+          >
+            {t('inv.refreshPrices')}
+          </button>
+        </div>
+      </div>
 
       {error && (
         <div className="rounded-lg border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-600 dark:border-red-900 dark:bg-red-950/40 dark:text-red-400">
