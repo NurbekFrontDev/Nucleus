@@ -156,11 +156,12 @@ export default function CryptoPortfolio({ portfolio }: Props) {
       return
     }
     const qty = parseNum(aQty)
-    const price = parseNum(aPrice)
-    if (qty <= 0 || price <= 0) {
+    const total = parseNum(aPrice)
+    if (qty <= 0 || total <= 0) {
       setError(t('inv.errQtyPrice'))
       return
     }
+    const price = total / qty
     setAdding(true)
     try {
       const date = aDate || todayISO()
@@ -173,7 +174,7 @@ export default function CryptoPortfolio({ portfolio }: Props) {
       })
       const expenseId = autoExpense
         ? await createCryptoExpense(user.id, {
-            amountUsd: qty * price,
+            amountUsd: total,
             date,
             note: t('inv.buyNote').replace('{s}', symbol.toUpperCase()),
           })
@@ -204,11 +205,12 @@ export default function CryptoPortfolio({ portfolio }: Props) {
   async function handleAddTrade(assetId: string) {
     if (!user) return
     const qty = parseNum(tQty)
-    const price = parseNum(tPrice)
-    if (qty <= 0 || price <= 0) {
+    const total = parseNum(tPrice)
+    if (qty <= 0 || total <= 0) {
       setError(t('inv.errQtyPrice'))
       return
     }
+    const price = total / qty
     setSavingTrade(true)
     try {
       const txDate = tDate || todayISO()
@@ -216,7 +218,7 @@ export default function CryptoPortfolio({ portfolio }: Props) {
       const expenseId =
         autoExpense && tType === 'buy'
           ? await createCryptoExpense(user.id, {
-              amountUsd: qty * price,
+              amountUsd: total,
               date: txDate,
               note: t('inv.buyNote').replace('{s}', sym),
             })
@@ -461,11 +463,6 @@ export default function CryptoPortfolio({ portfolio }: Props) {
                               value={tQty}
                               onChange={(e) => setTQty(e.target.value)}
                             />
-                            {parseNum(tQty) > 0 && (
-                              <div className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
-                                = {fmtQty(parseNum(tQty))}
-                              </div>
-                            )}
                           </div>
                           <div>
                             <label className={labelCls}>{t('inv.price')}</label>
@@ -647,11 +644,6 @@ export default function CryptoPortfolio({ portfolio }: Props) {
               value={aQty}
               onChange={(e) => setAQty(e.target.value)}
             />
-            {parseNum(aQty) > 0 && (
-              <div className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
-                = {fmtQty(parseNum(aQty))}
-              </div>
-            )}
           </div>
           <div>
             <label className={labelCls}>{t('inv.price')}</label>
