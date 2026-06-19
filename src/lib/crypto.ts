@@ -262,8 +262,16 @@ export async function addTransaction(
 }
 
 export async function deleteTransaction(id: string): Promise<void> {
+  // Если к сделке привязан авто-расход — удаляем и его, чтобы не оставлять «висячий» расход.
+  const { data: tx } = await supabase
+    .from('crypto_transactions')
+    .select('expense_id')
+    .eq('id', id)
+    .maybeSingle()
   const { error } = await supabase.from('crypto_transactions').delete().eq('id', id)
   if (error) throw error
+  const expenseId = (tx as { expense_id?: string | null } | null)?.expense_id
+  if (expenseId) await supabase.from('expenses').delete().eq('id', expenseId)
 }
 
 export async function closeAsset(
@@ -295,6 +303,17 @@ export async function updateAsset(
 }
 
 export async function deleteAsset(id: string): Promise<void> {
+  // Сначала удаляем связанные авто-расходы по сделкам актива (сами сделки уйдут каскадом).
+  const { data: txs } = await supabase
+    .from('crypto_transactions')
+    .select('expense_id')
+    .eq('asset_id', id)
+  const expenseIds = ((txs ?? []) as { expense_id: string | null }[])
+    .map((t) => t.expense_id)
+    .filter((e): e is string => !!e)
+  if (expenseIds.length > 0) {
+    await supabase.from('expenses').delete().in('id', expenseIds)
+  }
   const { error } = await supabase.from('crypto_assets').delete().eq('id', id)
   if (error) throw error
 }

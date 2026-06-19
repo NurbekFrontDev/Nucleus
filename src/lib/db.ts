@@ -713,3 +713,82 @@ export async function loadCharityPots(userId: string): Promise<CharityPotsStats>
   }
   return { big, small, total: big + small }
 }
+
+// ===== Крипто-инвестиции: связь с финансами =====
+// Авто-создание расхода в категории «Инвестиции / Криптовалюта» при покупке монеты.
+// Настройка хранится в app_settings.crypto_auto_expense (по умолчанию включена),
+// чтобы синхронизировалась между устройствами.
+export const CRYPTO_EXPENSE_CATEGORY = 'Инвестиции'
+export const CRYPTO_EXPENSE_SUBCATEGORY = 'Криптовалюта'
+
+export async function loadCryptoAutoExpense(userId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from('app_settings')
+    .select('crypto_auto_expense')
+    .eq('user_id', userId)
+    .maybeSingle()
+  if (error) return true
+  const v = (data as { crypto_auto_expense?: boolean | null } | null)?.crypto_auto_expense
+  return v == null ? true : !!v
+}
+
+export async function saveCryptoAutoExpense(userId: string, value: boolean): Promise<void> {
+  await supabase
+    .from('app_settings')
+    .upsert(
+      { user_id: userId, crypto_auto_expense: value, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' },
+    )
+}
+
+// Создаёт расход в сумах для покупки крипты: переводит сумму из долларов в сумы по
+// курсу USD (берём настроенный курс пользователя, иначе подтягиваем актуальный),
+// кладёт в категорию «Инвестиции» (если есть) с подкатегорией «Криптовалюта».
+// Возвращает id расхода или null при ошибке (покупка всё равно сохранится).
+export async function createCryptoExpense(
+  userId: string,
+  input: { amountUsd: number; date: string; note?: string | null },
+): Promise<string | null> {
+  try {
+    if (!input.amountUsd || input.amountUsd <= 0) return null
+    const currencies = await loadCurrencies(userId)
+    let rate = rateOf(currencies, 'USD')
+    if (!rate || rate <= 1) {
+      const fetched = await fetchRate('USD')
+      if (fetched && fetched > 0) rate = fetched
+    }
+    if (!rate || rate <= 0) return null
+    const amount = Math.round(input.amountUsd * rate)
+    if (amount <= 0) return null
+
+    const { data: cats } = await supabase
+      .from('categories')
+      .select('id, name')
+      .eq('user_id', userId)
+    const invCat = ((cats ?? []) as { id: string; name: string }[]).find(
+      (c) => c.name?.trim() === CRYPTO_EXPENSE_CATEGORY,
+    )
+
+    const d = new Date(input.date + 'T00:00:00')
+    const m = await getOrCreateMonth(userId, d.getFullYear(), d.getMonth() + 1)
+
+    const { data, error } = await supabase
+      .from('expenses')
+      .insert({
+        user_id: userId,
+        month_id: m.id,
+        category_id: invCat?.id ?? null,
+        subcategory: CRYPTO_EXPENSE_SUBCATEGORY,
+        amount,
+        date: input.date,
+        description: input.note?.trim() || null,
+        paid_from_pot: null,
+      })
+      .select('id')
+      .single()
+    if (error || !data) return null
+    return (data as { id: string }).id
+  } catch {
+    return null
+  }
+}

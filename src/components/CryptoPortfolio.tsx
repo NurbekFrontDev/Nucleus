@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
-import { formatDateHuman } from '../lib/db'
+import { formatDateHuman, loadCryptoAutoExpense, createCryptoExpense } from '../lib/db'
 import DatePicker from './DatePicker'
 import IconButton from './IconButton'
 import ConfirmDialog from './ConfirmDialog'
@@ -79,6 +79,9 @@ export default function CryptoPortfolio({ portfolio }: Props) {
   const [assetToDelete, setAssetToDelete] = useState<AssetStats | null>(null)
   const [txToDelete, setTxToDelete] = useState<string | null>(null)
 
+  // Авто-расход при покупке крипты (настройка из app_settings, синк между устройствами).
+  const [autoExpense, setAutoExpense] = useState(true)
+
   const reload = useCallback(async () => {
     if (!user) return
     setLoading(true)
@@ -110,6 +113,19 @@ export default function CryptoPortfolio({ portfolio }: Props) {
       active = false
     }
   }, [user, portfolio, t])
+
+  useEffect(() => {
+    if (!user) return
+    let active = true
+    loadCryptoAutoExpense(user.id)
+      .then((v) => {
+        if (active) setAutoExpense(v)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+  }, [user])
 
   function resetTradeForm() {
     setTType('buy')
@@ -146,12 +162,20 @@ export default function CryptoPortfolio({ portfolio }: Props) {
         portfolio,
         opened_at: date,
       })
+      const expenseId = autoExpense
+        ? await createCryptoExpense(user.id, {
+            amountUsd: qty * price,
+            date,
+            note: t('inv.buyNote').replace('{s}', symbol.toUpperCase()),
+          })
+        : null
       await addTransaction(user.id, {
         asset_id: asset.id,
         type: 'buy',
         quantity: qty,
         price_usd: price,
         date,
+        expense_id: expenseId,
       })
       setASymbol('')
       setAName('')
@@ -177,12 +201,23 @@ export default function CryptoPortfolio({ portfolio }: Props) {
     }
     setSavingTrade(true)
     try {
+      const txDate = tDate || todayISO()
+      const sym = assets.find((x) => x.id === assetId)?.symbol ?? ''
+      const expenseId =
+        autoExpense && tType === 'buy'
+          ? await createCryptoExpense(user.id, {
+              amountUsd: qty * price,
+              date: txDate,
+              note: t('inv.buyNote').replace('{s}', sym),
+            })
+          : null
       await addTransaction(user.id, {
         asset_id: assetId,
         type: tType,
         quantity: qty,
         price_usd: price,
-        date: tDate || todayISO(),
+        date: txDate,
+        expense_id: expenseId,
       })
       resetTradeForm()
       setError(null)
