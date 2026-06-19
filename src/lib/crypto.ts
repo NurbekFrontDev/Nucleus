@@ -10,6 +10,7 @@ export type CryptoAsset = {
   user_id: string
   symbol: string
   name: string | null
+  contract_address: string | null
   portfolio: Portfolio
   status: AssetStatus
   opened_at: string
@@ -186,9 +187,13 @@ export async function loadPortfolio(
     byAsset.set(tx.asset_id, arr)
   }
 
-  return list.map((a) =>
-    computeStats(a, byAsset.get(a.id) ?? [], prices?.[a.symbol.toUpperCase()]),
-  )
+  return list.map((a) => {
+    // Цену ищем сначала по адресу контракта (мемкоины Solana), затем по тикеру.
+    const live =
+      (a.contract_address ? prices?.[a.contract_address.trim()] : undefined) ??
+      prices?.[a.symbol.toUpperCase()]
+    return computeStats(a, byAsset.get(a.id) ?? [], live)
+  })
 }
 
 export async function createAsset(
@@ -196,6 +201,7 @@ export async function createAsset(
   input: {
     symbol: string
     name?: string | null
+    contract_address?: string | null
     portfolio: Portfolio
     opened_at: string
     note?: string | null
@@ -217,6 +223,7 @@ export async function createAsset(
       user_id: userId,
       symbol: input.symbol.trim().toUpperCase(),
       name: input.name?.trim() || null,
+      contract_address: input.contract_address?.trim() || null,
       portfolio: input.portfolio,
       status: 'open',
       opened_at: input.opened_at,
@@ -296,7 +303,9 @@ export async function reopenAsset(id: string): Promise<void> {
 
 export async function updateAsset(
   id: string,
-  patch: Partial<Pick<CryptoAsset, 'symbol' | 'name' | 'note' | 'opened_at'>>,
+  patch: Partial<
+    Pick<CryptoAsset, 'symbol' | 'name' | 'contract_address' | 'note' | 'opened_at'>
+  >,
 ): Promise<void> {
   const { error } = await supabase.from('crypto_assets').update(patch).eq('id', id)
   if (error) throw error
@@ -585,22 +594,36 @@ export async function loadCryptoSnapshot(
 // Возвращаем карту СИМВОЛ(в верхнем регистре) -> цена в USD. При любой ошибке --
 // пустая карта (тогда стоимость и прибыль по открытым позициям просто не считаются).
 export async function loadCryptoPrices(
-  symbols: string[],
+  input: { symbols?: string[]; contracts?: string[] },
 ): Promise<Record<string, number>> {
-  const unique = Array.from(
-    new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean)),
+  const symbols = Array.from(
+    new Set((input.symbols ?? []).map((s) => s.trim().toUpperCase()).filter(Boolean)),
   )
-  if (unique.length === 0) return {}
+  const contracts = Array.from(
+    new Set((input.contracts ?? []).map((s) => s.trim()).filter(Boolean)),
+  )
+  if (symbols.length === 0 && contracts.length === 0) return {}
   try {
     const { data, error } = await supabase.functions.invoke('get-crypto-prices', {
-      body: { symbols: unique },
+      body: { symbols, contracts },
     })
     if (error) return {}
-    const raw = (data as { prices?: Record<string, number> } | null)?.prices ?? {}
+    const res = data as {
+      prices?: Record<string, number>
+      contracts?: Record<string, number>
+    } | null
     const out: Record<string, number> = {}
-    for (const key of Object.keys(raw)) {
-      const n = Number(raw[key])
+    // Цены по тикеру: ключ -- символ в верхнем регистре.
+    const bySymbol = res?.prices ?? {}
+    for (const key of Object.keys(bySymbol)) {
+      const n = Number(bySymbol[key])
       if (n > 0) out[key.toUpperCase()] = n
+    }
+    // Цены по адресу контракта: ключ -- адрес токена как есть (регистр важен).
+    const byContract = res?.contracts ?? {}
+    for (const key of Object.keys(byContract)) {
+      const n = Number(byContract[key])
+      if (n > 0) out[key] = n
     }
     return out
   } catch {
@@ -608,27 +631,32 @@ export async function loadCryptoPrices(
   }
 }
 
-// Символы открытых спот-активов пользователя (нужны, чтобы запросить живые цены).
-export async function loadOpenCryptoSymbols(userId: string): Promise<string[]> {
+// Тикеры и адреса контрактов открытых спот-активов (нужны, чтобы запросить живые цены).
+export async function loadOpenCryptoPriceKeys(
+  userId: string,
+): Promise<{ symbols: string[]; contracts: string[] }> {
   const { data, error } = await supabase
     .from('crypto_assets')
-    .select('symbol')
+    .select('symbol, contract_address')
     .eq('user_id', userId)
     .eq('status', 'open')
-  if (error) return []
-  return Array.from(
+  if (error) return { symbols: [], contracts: [] }
+  const rows = (data ?? []) as { symbol: string; contract_address: string | null }[]
+  const symbols = Array.from(
+    new Set(rows.map((a) => a.symbol?.toUpperCase()).filter((s): s is string => !!s)),
+  )
+  const contracts = Array.from(
     new Set(
-      ((data ?? []) as { symbol: string }[])
-        .map((a) => a.symbol?.toUpperCase())
-        .filter((s): s is string => !!s),
+      rows.map((a) => a.contract_address?.trim()).filter((s): s is string => !!s),
     ),
   )
+  return { symbols, contracts }
 }
 
 // Снимок портфеля с живыми ценами: подтягивает цены открытых монет и считает
 // стоимость и прибыль. Если цены недоступны -- ведёт себя как loadCryptoSnapshot без цен.
 export async function loadCryptoSnapshotLive(userId: string): Promise<CryptoSnapshot> {
-  const symbols = await loadOpenCryptoSymbols(userId)
-  const prices = await loadCryptoPrices(symbols)
+  const { symbols, contracts } = await loadOpenCryptoPriceKeys(userId)
+  const prices = await loadCryptoPrices({ symbols, contracts })
   return loadCryptoSnapshot(userId, prices)
 }

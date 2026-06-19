@@ -59,6 +59,7 @@ export default function CryptoPortfolio({ portfolio }: Props) {
   // Форма добавления актива.
   const [aSymbol, setASymbol] = useState('')
   const [aName, setAName] = useState('')
+  const [aContract, setAContract] = useState('')
   const [aQty, setAQty] = useState('')
   const [aPrice, setAPrice] = useState('')
   const [aDate, setADate] = useState(todayISO())
@@ -91,11 +92,14 @@ export default function CryptoPortfolio({ portfolio }: Props) {
     setLoading(true)
     try {
       const data = await loadPortfolio(user.id, portfolio)
-      // Подтягиваем живые цены по открытым монетам и пересчитываем стоимость и прибыль.
-      const symbols = data
-        .filter((a) => a.status === 'open')
-        .map((a) => a.symbol)
-      const prices = await loadCryptoPrices(symbols)
+      // Подтягиваем живые цены по открытым монетам (по тикеру и по адресу контракта)
+      // и пересчитываем стоимость и прибыль.
+      const open = data.filter((a) => a.status === 'open')
+      const symbols = open.map((a) => a.symbol)
+      const contracts = open
+        .map((a) => a.contract_address)
+        .filter((c): c is string => !!c)
+      const prices = await loadCryptoPrices({ symbols, contracts })
       if (Object.keys(prices).length > 0) {
         setAssets(await loadPortfolio(user.id, portfolio, prices))
         setPricedAt(
@@ -163,6 +167,7 @@ export default function CryptoPortfolio({ portfolio }: Props) {
       const asset = await createAsset(user.id, {
         symbol,
         name: aName,
+        contract_address: aContract,
         portfolio,
         opened_at: date,
       })
@@ -183,6 +188,7 @@ export default function CryptoPortfolio({ portfolio }: Props) {
       })
       setASymbol('')
       setAName('')
+      setAContract('')
       setAQty('')
       setAPrice('')
       setADate(todayISO())
@@ -617,6 +623,15 @@ export default function CryptoPortfolio({ portfolio }: Props) {
               className={inputCls}
               value={aName}
               onChange={(e) => setAName(e.target.value)}
+            />
+          </div>
+          <div className="sm:col-span-2">
+            <label className={labelCls}>{t('inv.contract')}</label>
+            <input
+              className={inputCls}
+              value={aContract}
+              onChange={(e) => setAContract(e.target.value)}
+              placeholder={t('inv.contractPh')}
             />
           </div>
           <div>
