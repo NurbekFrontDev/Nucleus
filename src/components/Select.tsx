@@ -8,6 +8,7 @@ type Props = {
   options: Option[]
   onChange: (v: string) => void
   placeholder?: string
+  className?: string
 }
 
 const triggerCls =
@@ -15,7 +16,7 @@ const triggerCls =
 
 // Выпадающий список в стиле приложения (emerald-акцент, тёмная тема).
 // Заменяет браузерный <select>, чтобы вид был единым на всех устройствах.
-export default function Select({ value, options, onChange, placeholder }: Props) {
+export default function Select({ value, options, onChange, placeholder, className }: Props) {
   const [open, setOpen] = useState(false)
   const show = useAnimatedMount(open)
   const ref = useRef<HTMLDivElement>(null)
@@ -31,7 +32,7 @@ export default function Select({ value, options, onChange, placeholder }: Props)
   const selected = options.find((o) => String(o.value) === String(value))
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className={`relative ${className ?? ''}`}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
