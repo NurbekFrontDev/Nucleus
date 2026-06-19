@@ -2,17 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
 import { monthName } from '../lib/db'
-import IconButton from './IconButton'
-import ConfirmDialog from './ConfirmDialog'
 import Select from './Select'
 import {
   loadCryptoSnapshotLive,
   loadMonthly,
   loadNetDepositByMonth,
   upsertMonthly,
-  deleteMonthly,
   fmtUsd,
-  fmtPct,
   parseNum,
   type CryptoSnapshot,
   type MonthlyStats,
@@ -49,8 +45,6 @@ export default function CryptoOverview() {
   const [aNote, setANote] = useState('')
   const [errValue, setErrValue] = useState(false)
   const [saving, setSaving] = useState(false)
-
-  const [toDelete, setToDelete] = useState<MonthlyStats | null>(null)
 
   // Время последнего обновления живых цен (для индикатора «Цены обновлены: HH:MM»).
   const [pricedAt, setPricedAt] = useState<string | null>(null)
@@ -150,18 +144,6 @@ export default function CryptoOverview() {
     }
   }
 
-  async function handleDelete() {
-    if (!toDelete) return
-    setError(null)
-    try {
-      await deleteMonthly(toDelete.id)
-      setToDelete(null)
-      await reload()
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e))
-    }
-  }
-
   const pnlColor = (n: number | null | undefined) =>
     n == null
       ? 'text-neutral-500 dark:text-neutral-400'
@@ -170,8 +152,6 @@ export default function CryptoOverview() {
         : n < 0
           ? 'text-red-600 dark:text-red-400'
           : 'text-neutral-500 dark:text-neutral-400'
-
-  const monthLabel = (m: MonthlyStats) => monthName(m.month - 1) + ' ' + m.year
 
   // Всего внесено своих денег = сумма всех депозитов за все месяцы (без прибыли).
   const netDeposited = monthly.reduce((s, m) => s + Number(m.deposit_usd), 0)
@@ -279,54 +259,10 @@ export default function CryptoOverview() {
         </div>
       )}
 
-      {/* Помесячная сводка */}
+      {/* Добавление / обновление месяца (стоимость на начало, депозит, конец).
+          Подробная картина по месяцам теперь живёт во вкладке «История». */}
       <div className={cardCls}>
-        <div className="mb-3 text-sm font-medium">{t('ov.monthly')}</div>
-        {monthly.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-neutral-300 p-4 text-center text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
-            {t('ov.empty')}
-          </div>
-        ) : (
-          <div className="space-y-2">
-            <div className="flex items-center gap-1 px-2 text-xs text-neutral-500 dark:text-neutral-400">
-              <span className="h-8 w-8 shrink-0" />
-              <div className="grid flex-1 grid-cols-12 gap-2">
-                <div className="col-span-4">{t('ov.month')}</div>
-                <div className="col-span-2 text-right">{t('ov.startCol')}</div>
-                <div className="col-span-2 text-right">{t('ov.depositCol')}</div>
-                <div className="col-span-2 text-right">{t('ov.endCol')}</div>
-                <div className="col-span-2 text-right">{t('ov.pnlCol')}</div>
-              </div>
-            </div>
-            {monthly.map((m) => (
-              <div
-                key={m.id}
-                className="flex items-center gap-1 rounded-xl border border-neutral-200 px-2 py-2 text-sm dark:border-neutral-800"
-              >
-                <IconButton
-                  icon="delete"
-                  onClick={() => setToDelete(m)}
-                  title={t('common.delete')}
-                />
-                <div className="grid flex-1 grid-cols-12 items-center gap-2">
-                  <span className="col-span-4 min-w-0 truncate font-medium">
-                    {monthLabel(m)}
-                  </span>
-                  <div className="col-span-2 text-right">{fmtUsd(m.start_value_usd)}</div>
-                  <div className="col-span-2 text-right">{fmtUsd(m.deposit_usd)}</div>
-                  <div className="col-span-2 text-right">{fmtUsd(m.end_value_usd)}</div>
-                  <div className={'col-span-2 text-right font-medium ' + pnlColor(m.pnl)}>
-                    {fmtUsd(m.pnl)}
-                    <span className="block text-xs">{fmtPct(m.pnlPct)}</span>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Форма добавления / обновления месяца */}
-        <div className="mt-4 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+        <div>
           <div className="mb-3 text-sm font-medium">{t('ov.addMonth')}</div>
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
@@ -438,17 +374,6 @@ export default function CryptoOverview() {
           </div>
         </div>
       </div>
-
-      <ConfirmDialog
-        open={toDelete !== null}
-        title={t('ov.deleteMonth')}
-        message={t('ov.deleteMonthMsg', { m: toDelete ? monthLabel(toDelete) : '' })}
-        confirmLabel={t('common.delete')}
-        cancelLabel={t('common.cancel')}
-        danger
-        onConfirm={handleDelete}
-        onCancel={() => setToDelete(null)}
-      />
     </div>
   )
 }

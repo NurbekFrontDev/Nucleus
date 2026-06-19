@@ -3,16 +3,18 @@ import { useLang } from '../lib/i18n'
 import CryptoPortfolio from '../components/CryptoPortfolio'
 import CryptoFutures from '../components/CryptoFutures'
 import CryptoOverview from '../components/CryptoOverview'
+import CryptoHistory from '../components/CryptoHistory'
 
 // Под-вкладки раздела «Инвестиции». Наполнение добавляем по этапам:
 // overview -- обзор портфеля и месячная сводка; spot/meme -- активы и сделки; futures -- фьючерсы.
-type SubTab = 'overview' | 'spot' | 'meme' | 'futures'
+type SubTab = 'overview' | 'spot' | 'meme' | 'futures' | 'history'
 
 const SUB_TABS: { id: SubTab; key: string; icon: string }[] = [
   { id: 'overview', key: 'inv.tab.overview', icon: '📊' },
   { id: 'spot', key: 'inv.tab.spot', icon: '🪙' },
   { id: 'meme', key: 'inv.tab.meme', icon: '🐸' },
   { id: 'futures', key: 'inv.tab.futures', icon: '⚡' },
+  { id: 'history', key: 'inv.tab.history', icon: '🕑' },
 ]
 
 export default function Investments() {
@@ -51,6 +53,8 @@ export default function Investments() {
         <CryptoPortfolio portfolio="meme" />
       ) : tab === 'futures' ? (
         <CryptoFutures />
+      ) : tab === 'history' ? (
+        <CryptoHistory />
       ) : (
         <CryptoOverview />
       )}

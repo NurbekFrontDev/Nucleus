@@ -730,3 +730,237 @@ export async function loadCryptoSnapshotLive(userId: string): Promise<CryptoSnap
   const prices = await loadCryptoPrices({ symbols, contracts })
   return loadCryptoSnapshot(userId, prices)
 }
+
+// ===== Подробная история по месяцам (вкладка «История») =====
+// Для каждого месяца собираем спот-сделки по монетам и фьючерсы, чтобы видеть,
+// что покупалось и продавалось и сколько это принесло (реализованный P/L и %).
+
+export type HistorySpotEntry = {
+  assetId: string
+  symbol: string
+  name: string | null
+  portfolio: Portfolio
+  buyQty: number
+  buyCost: number
+  sellQty: number
+  sellProceeds: number
+  // Реализованная прибыль по продажам/закрытию этого месяца (по средней цене покупки).
+  realizedPnl: number | null
+  realizedPct: number | null
+  // Позиция была закрыта в этом месяце (остаток продан по цене закрытия).
+  closedInMonth: boolean
+}
+
+export type HistoryFutureEntry = {
+  id: string
+  symbol: string
+  direction: FutureDirection
+  margin: number
+  exit: number | null
+  pnl: number | null
+  pnlPct: number | null
+  // true -- закрыт в этом месяце (есть итог); false -- открыт в этом месяце.
+  closed: boolean
+  date: string
+}
+
+export type HistoryMonth = {
+  key: string // `${year}-${month}`, month 1..12
+  year: number
+  month: number // 1..12
+  monthly: MonthlyStats | null
+  spot: HistorySpotEntry[]
+  futures: HistoryFutureEntry[]
+  // Итоги месяца:
+  spotRealized: number // сумма реализованного P/L по споту
+  spotNet: number // чистый поток по споту (покупки минус продажи)
+  futuresPnl: number // сумма итогов по закрытым фьючерсам
+}
+
+export async function loadCryptoHistory(userId: string): Promise<HistoryMonth[]> {
+  const [assetsRes, monthly, futures] = await Promise.all([
+    supabase.from('crypto_assets').select('*').eq('user_id', userId),
+    loadMonthly(userId),
+    loadFutures(userId),
+  ])
+  const assets = (assetsRes.data ?? []) as CryptoAsset[]
+
+  let txs: CryptoTransaction[] = []
+  if (assets.length > 0) {
+    const ids = assets.map((a) => a.id)
+    const { data } = await supabase
+      .from('crypto_transactions')
+      .select('*')
+      .in('asset_id', ids)
+      .order('date', { ascending: true })
+    txs = (data ?? []) as CryptoTransaction[]
+  }
+
+  const assetById = new Map<string, CryptoAsset>(
+    assets.map((a) => [a.id, a] as [string, CryptoAsset]),
+  )
+
+  // Средняя цена покупки за всё время по каждому активу (для реализованного P/L).
+  const lifetimeBuy = new Map<string, { qty: number; cost: number }>()
+  for (const tx of txs) {
+    if (tx.type !== 'buy') continue
+    const cur = lifetimeBuy.get(tx.asset_id) ?? { qty: 0, cost: 0 }
+    cur.qty += Number(tx.quantity)
+    cur.cost += Number(tx.amount_usd)
+    lifetimeBuy.set(tx.asset_id, cur)
+  }
+  const avgBuyPrice = (id: string) => {
+    const l = lifetimeBuy.get(id)
+    return l && l.qty > 0 ? l.cost / l.qty : 0
+  }
+
+  const months = new Map<string, HistoryMonth>()
+  const ensureMonth = (year: number, month: number) => {
+    const key = year + '-' + month
+    let m = months.get(key)
+    if (!m) {
+      m = {
+        key,
+        year,
+        month,
+        monthly: null,
+        spot: [],
+        futures: [],
+        spotRealized: 0,
+        spotNet: 0,
+        futuresPnl: 0,
+      }
+      months.set(key, m)
+    }
+    return m
+  }
+
+  // Спот: группируем сделки по месяцу и активу.
+  const spotByMonth = new Map<string, Map<string, HistorySpotEntry>>()
+  const ensureSpot = (year: number, month: number, a: CryptoAsset) => {
+    ensureMonth(year, month)
+    const key = year + '-' + month
+    let byAsset = spotByMonth.get(key)
+    if (!byAsset) {
+      byAsset = new Map()
+      spotByMonth.set(key, byAsset)
+    }
+    let e = byAsset.get(a.id)
+    if (!e) {
+      e = {
+        assetId: a.id,
+        symbol: a.symbol,
+        name: a.name,
+        portfolio: a.portfolio,
+        buyQty: 0,
+        buyCost: 0,
+        sellQty: 0,
+        sellProceeds: 0,
+        realizedPnl: null,
+        realizedPct: null,
+        closedInMonth: false,
+      }
+      byAsset.set(a.id, e)
+    }
+    return e
+  }
+
+  for (const tx of txs) {
+    const d = tx.date
+    if (!d || d.length < 7) continue
+    const year = Number(d.slice(0, 4))
+    const month = Number(d.slice(5, 7))
+    if (!year || !month) continue
+    const a = assetById.get(tx.asset_id)
+    if (!a) continue
+    const e = ensureSpot(year, month, a)
+    if (tx.type === 'buy') {
+      e.buyQty += Number(tx.quantity)
+      e.buyCost += Number(tx.amount_usd)
+    } else {
+      e.sellQty += Number(tx.quantity)
+      e.sellProceeds += Number(tx.amount_usd)
+    }
+  }
+
+  // Закрытие позиции: остаток продаётся по цене закрытия в месяц закрытия
+  // (closeAsset не создаёт сделку-продажу, поэтому добавляем её сюда вручную).
+  for (const a of assets) {
+    if (a.status !== 'closed' || !a.closed_at || a.close_price_usd == null) continue
+    let soldQty = 0
+    for (const tx of txs) {
+      if (tx.asset_id === a.id && tx.type === 'sell') soldQty += Number(tx.quantity)
+    }
+    const boughtQty = lifetimeBuy.get(a.id)?.qty ?? 0
+    const remaining = Math.max(0, boughtQty - soldQty)
+    const d = a.closed_at
+    if (d.length < 7) continue
+    const year = Number(d.slice(0, 4))
+    const month = Number(d.slice(5, 7))
+    if (!year || !month) continue
+    const e = ensureSpot(year, month, a)
+    e.closedInMonth = true
+    if (remaining > 0) {
+      e.sellQty += remaining
+      e.sellProceeds += remaining * Number(a.close_price_usd)
+    }
+  }
+
+  // Реализованный P/L по каждому спот-входу + сбор в месяцы.
+  for (const [key, byAsset] of spotByMonth) {
+    const m = months.get(key)
+    if (!m) continue
+    for (const e of byAsset.values()) {
+      if (e.sellQty > 0) {
+        const cost = avgBuyPrice(e.assetId) * e.sellQty
+        e.realizedPnl = round2(e.sellProceeds - cost)
+        e.realizedPct = cost > 0 ? (e.realizedPnl / cost) * 100 : null
+        m.spotRealized += e.realizedPnl
+      }
+      e.buyCost = round2(e.buyCost)
+      e.sellProceeds = round2(e.sellProceeds)
+      m.spotNet += e.buyCost - e.sellProceeds
+      m.spot.push(e)
+    }
+    m.spotRealized = round2(m.spotRealized)
+    m.spotNet = round2(m.spotNet)
+    m.spot.sort((a, b) => a.symbol.localeCompare(b.symbol))
+  }
+
+  // Фьючерсы: закрытые -> месяц закрытия (с итогом), открытые -> месяц открытия.
+  for (const f of futures) {
+    const closed = f.status === 'closed' && !!f.closed_at
+    const d = closed ? (f.closed_at as string) : f.opened_at
+    if (!d || d.length < 7) continue
+    const year = Number(d.slice(0, 4))
+    const month = Number(d.slice(5, 7))
+    if (!year || !month) continue
+    const m = ensureMonth(year, month)
+    m.futures.push({
+      id: f.id,
+      symbol: f.symbol,
+      direction: f.direction,
+      margin: Number(f.margin_usd),
+      exit: f.exit_usd == null ? null : Number(f.exit_usd),
+      pnl: f.pnl,
+      pnlPct: f.pnlPct,
+      closed,
+      date: d,
+    })
+    if (closed && f.pnl != null) m.futuresPnl = round2(m.futuresPnl + f.pnl)
+  }
+  for (const m of months.values()) {
+    m.futures.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0))
+  }
+
+  // Месячные показатели (начало/депозит/конец/итог) прикрепляем к месяцу.
+  for (const ms of monthly) {
+    const m = ensureMonth(ms.year, ms.month)
+    m.monthly = ms
+  }
+
+  // Сортируем месяцы от новых к старым.
+  return Array.from(months.values()).sort(
+    (a, b) => b.year * 12 + b.month - (a.year * 12 + a.month),
+  )
+}
