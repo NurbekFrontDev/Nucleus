@@ -741,9 +741,9 @@ export async function saveCryptoAutoExpense(userId: string, value: boolean): Pro
     )
 }
 
-// Создаёт расход в сумах для покупки крипты: переводит сумму из долларов в сумы по
-// курсу USD (берём настроенный курс пользователя, иначе подтягиваем актуальный),
-// кладёт в категорию «Инвестиции» (если есть) с подкатегорией «Криптовалюта».
+// Создаёт расход за покупку крипты в категории «Инвестиции» (если есть) с подкатегорией
+// «Криптовалюта». Весь учёт в приложении ведётся в долларах (formatSum добавляет «$»),
+// поэтому сумму расхода сохраняем напрямую в USD, без конвертации в базовую валюту.
 // Возвращает id расхода или null при ошибке (покупка всё равно сохранится).
 export async function createCryptoExpense(
   userId: string,
@@ -751,14 +751,8 @@ export async function createCryptoExpense(
 ): Promise<string | null> {
   try {
     if (!input.amountUsd || input.amountUsd <= 0) return null
-    const currencies = await loadCurrencies(userId)
-    let rate = rateOf(currencies, 'USD')
-    if (!rate || rate <= 1) {
-      const fetched = await fetchRate('USD')
-      if (fetched && fetched > 0) rate = fetched
-    }
-    if (!rate || rate <= 0) return null
-    const amount = Math.round(input.amountUsd * rate)
+    // Сумма уже в долларах -- округляем до центов и сохраняем как есть.
+    const amount = Math.round(input.amountUsd * 100) / 100
     if (amount <= 0) return null
 
     const { data: cats } = await supabase
