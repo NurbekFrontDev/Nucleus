@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useLang } from '../lib/i18n'
+import CryptoPortfolio from '../components/CryptoPortfolio'
 
 // Под-вкладки раздела «Инвестиции». Наполнение добавляем по этапам:
 // overview -- обзор портфеля и месячная сводка; spot/meme -- активы и сделки; futures -- фьючерсы.
@@ -41,10 +42,16 @@ export default function Investments() {
         ))}
       </div>
 
-      {/* Контент под-вкладки (каркас; наполнение в следующих этапах) */}
-      <div className="rounded-2xl border border-neutral-200 bg-white p-6 text-center text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/50 dark:text-neutral-400">
-        {t('inv.wip')}
-      </div>
+      {/* Контент под-вкладки */}
+      {tab === 'spot' ? (
+        <CryptoPortfolio portfolio="main" />
+      ) : tab === 'meme' ? (
+        <CryptoPortfolio portfolio="meme" />
+      ) : (
+        <div className="rounded-2xl border border-neutral-200 bg-white p-6 text-center text-sm text-neutral-500 dark:border-neutral-800 dark:bg-neutral-900/50 dark:text-neutral-400">
+          {t('inv.wip')}
+        </div>
+      )}
     </div>
   )
 }
