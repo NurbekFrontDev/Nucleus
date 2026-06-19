@@ -576,3 +576,59 @@ export async function loadCryptoSnapshot(
     openFuturesCount,
   }
 }
+
+// ===== Живые цены (этап 7) =====
+// Берём актуальные цены монет в USD через серверную функцию Supabase
+// «get-crypto-prices» (источники: Coinbase + CoinGecko). Браузеру эти источники
+// напрямую дёргать неудобно (CORS и лимиты), поэтому ходим через Edge Function --
+// тот же подход, что и с курсами валют (get-rate).
+// Возвращаем карту СИМВОЛ(в верхнем регистре) -> цена в USD. При любой ошибке --
+// пустая карта (тогда стоимость и прибыль по открытым позициям просто не считаются).
+export async function loadCryptoPrices(
+  symbols: string[],
+): Promise<Record<string, number>> {
+  const unique = Array.from(
+    new Set(symbols.map((s) => s.trim().toUpperCase()).filter(Boolean)),
+  )
+  if (unique.length === 0) return {}
+  try {
+    const { data, error } = await supabase.functions.invoke('get-crypto-prices', {
+      body: { symbols: unique },
+    })
+    if (error) return {}
+    const raw = (data as { prices?: Record<string, number> } | null)?.prices ?? {}
+    const out: Record<string, number> = {}
+    for (const key of Object.keys(raw)) {
+      const n = Number(raw[key])
+      if (n > 0) out[key.toUpperCase()] = n
+    }
+    return out
+  } catch {
+    return {}
+  }
+}
+
+// Символы открытых спот-активов пользователя (нужны, чтобы запросить живые цены).
+export async function loadOpenCryptoSymbols(userId: string): Promise<string[]> {
+  const { data, error } = await supabase
+    .from('crypto_assets')
+    .select('symbol')
+    .eq('user_id', userId)
+    .eq('status', 'open')
+  if (error) return []
+  return Array.from(
+    new Set(
+      ((data ?? []) as { symbol: string }[])
+        .map((a) => a.symbol?.toUpperCase())
+        .filter((s): s is string => !!s),
+    ),
+  )
+}
+
+// Снимок портфеля с живыми ценами: подтягивает цены открытых монет и считает
+// стоимость и прибыль. Если цены недоступны -- ведёт себя как loadCryptoSnapshot без цен.
+export async function loadCryptoSnapshotLive(userId: string): Promise<CryptoSnapshot> {
+  const symbols = await loadOpenCryptoSymbols(userId)
+  const prices = await loadCryptoPrices(symbols)
+  return loadCryptoSnapshot(userId, prices)
+}

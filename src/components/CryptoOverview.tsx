@@ -5,7 +5,7 @@ import { monthName } from '../lib/db'
 import IconButton from './IconButton'
 import ConfirmDialog from './ConfirmDialog'
 import {
-  loadCryptoSnapshot,
+  loadCryptoSnapshotLive,
   loadMonthly,
   upsertMonthly,
   deleteMonthly,
@@ -52,7 +52,7 @@ export default function CryptoOverview() {
     setError(null)
     try {
       const [snap, months] = await Promise.all([
-        loadCryptoSnapshot(user.id),
+        loadCryptoSnapshotLive(user.id),
         loadMonthly(user.id),
       ])
       setSnapshot(snap)
@@ -185,7 +185,7 @@ export default function CryptoOverview() {
             </div>
           </div>
           <div className="mt-3 text-xs text-neutral-500 dark:text-neutral-400">
-            {t('ov.liveSoon')}
+            {t('ov.liveNote')}
           </div>
         </div>
       )}

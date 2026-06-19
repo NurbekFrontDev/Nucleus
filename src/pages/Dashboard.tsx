@@ -17,7 +17,7 @@ import {
   type CushionStats,
   type SavingsPotsStats,
 } from '../lib/db'
-import { loadCryptoSnapshot, fmtUsd, type CryptoSnapshot } from '../lib/crypto'
+import { loadCryptoSnapshotLive, fmtUsd, type CryptoSnapshot } from '../lib/crypto'
 
 type Category = { id: string; name: string; percent: number; sort_order: number }
 type Row = { id: string; name: string; percent: number; plan: number; fact: number }
@@ -209,7 +209,7 @@ export default function Dashboard() {
     let active = true
     ;(async () => {
       try {
-        const snap = await loadCryptoSnapshot(user.id)
+        const snap = await loadCryptoSnapshotLive(user.id)
         if (active) setCryptoSnap(snap)
       } catch {
         if (active) setCryptoSnap(null)

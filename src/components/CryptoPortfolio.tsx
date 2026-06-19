@@ -7,6 +7,7 @@ import IconButton from './IconButton'
 import ConfirmDialog from './ConfirmDialog'
 import {
   loadPortfolio,
+  loadCryptoPrices,
   createAsset,
   addTransaction,
   deleteTransaction,
@@ -87,7 +88,16 @@ export default function CryptoPortfolio({ portfolio }: Props) {
     setLoading(true)
     try {
       const data = await loadPortfolio(user.id, portfolio)
-      setAssets(data)
+      // Подтягиваем живые цены по открытым монетам и пересчитываем стоимость и прибыль.
+      const symbols = data
+        .filter((a) => a.status === 'open')
+        .map((a) => a.symbol)
+      const prices = await loadCryptoPrices(symbols)
+      setAssets(
+        Object.keys(prices).length > 0
+          ? await loadPortfolio(user.id, portfolio, prices)
+          : data,
+      )
     } catch {
       setError(t('common.error'))
     } finally {
@@ -96,23 +106,8 @@ export default function CryptoPortfolio({ portfolio }: Props) {
   }, [user, portfolio, t])
 
   useEffect(() => {
-    let active = true
-    if (!user) return
-    setLoading(true)
-    loadPortfolio(user.id, portfolio)
-      .then((data) => {
-        if (active) setAssets(data)
-      })
-      .catch(() => {
-        if (active) setError(t('common.error'))
-      })
-      .finally(() => {
-        if (active) setLoading(false)
-      })
-    return () => {
-      active = false
-    }
-  }, [user, portfolio, t])
+    void reload()
+  }, [reload])
 
   useEffect(() => {
     if (!user) return
