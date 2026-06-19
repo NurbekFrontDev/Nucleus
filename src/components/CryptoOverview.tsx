@@ -297,9 +297,6 @@ export default function CryptoOverview() {
                   onChange={(e) => setAStart(e.target.value)}
                   placeholder="0"
                 />
-                <div className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
-                  {t('ov.startHint')}
-                </div>
               </div>
               <div>
                 <label className={labelCls}>{t('ov.deposit')}</label>
@@ -310,9 +307,6 @@ export default function CryptoOverview() {
                   onChange={(e) => setADeposit(e.target.value)}
                   placeholder="0"
                 />
-                <div className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
-                  {t('ov.depositAutoHint')}
-                </div>
               </div>
             </div>
             <div className="rounded-lg bg-neutral-50 px-3 py-2 text-xs dark:bg-neutral-800/40">
@@ -322,9 +316,6 @@ export default function CryptoOverview() {
               <span className="font-semibold">
                 {fmtUsd(parseNum(aStart) + parseNum(aDeposit))}
               </span>
-              <div className="mt-0.5 text-neutral-400 dark:text-neutral-500">
-                {t('ov.investedHint')}
-              </div>
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -336,9 +327,6 @@ export default function CryptoOverview() {
                   onChange={(e) => setAEnd(e.target.value)}
                   placeholder="0"
                 />
-                <div className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
-                  {t('ov.endHint')}
-                </div>
               </div>
               <div>
                 <label className={labelCls}>{t('ov.resultPreview')}</label>
@@ -349,9 +337,6 @@ export default function CryptoOverview() {
                   }
                 >
                   {fmtUsd(parseNum(aEnd) - parseNum(aStart) - parseNum(aDeposit))}
-                </div>
-                <div className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
-                  {t('ov.resultHint')}
                 </div>
               </div>
             </div>
