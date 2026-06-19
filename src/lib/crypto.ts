@@ -431,3 +431,129 @@ export async function saveFuturesOrder(ids: string[]): Promise<void> {
     ),
   )
 }
+
+// ===== Месячная сводка =====
+export type CryptoMonthly = {
+  id: string
+  user_id: string
+  year: number
+  month: number
+  deposit_usd: number
+  end_value_usd: number
+  note: string | null
+  created_at: string
+}
+
+// Месяц с посчитанным итогом: pnl = end_value - deposit, % = pnl / deposit * 100.
+export type MonthlyStats = CryptoMonthly & {
+  pnl: number
+  pnlPct: number | null
+}
+
+export function computeMonthlyStats(m: CryptoMonthly): MonthlyStats {
+  const pnl = round2(Number(m.end_value_usd) - Number(m.deposit_usd))
+  const pnlPct =
+    Number(m.deposit_usd) > 0 ? (pnl / Number(m.deposit_usd)) * 100 : null
+  return { ...m, pnl, pnlPct }
+}
+
+export async function loadMonthly(userId: string): Promise<MonthlyStats[]> {
+  const { data, error } = await supabase
+    .from('crypto_monthly')
+    .select('*')
+    .eq('user_id', userId)
+    .order('year', { ascending: false })
+    .order('month', { ascending: false })
+  if (error) throw error
+  return ((data ?? []) as CryptoMonthly[]).map(computeMonthlyStats)
+}
+
+export async function upsertMonthly(
+  userId: string,
+  input: {
+    year: number
+    month: number
+    deposit_usd: number
+    end_value_usd: number
+    note?: string | null
+  },
+): Promise<CryptoMonthly> {
+  const { data, error } = await supabase
+    .from('crypto_monthly')
+    .upsert(
+      {
+        user_id: userId,
+        year: input.year,
+        month: input.month,
+        deposit_usd: input.deposit_usd,
+        end_value_usd: input.end_value_usd,
+        note: input.note?.trim() || null,
+      },
+      { onConflict: 'user_id,year,month' },
+    )
+    .select('*')
+    .single()
+  if (error || !data) throw error ?? new Error('Upsert failed')
+  return data as CryptoMonthly
+}
+
+export async function deleteMonthly(id: string): Promise<void> {
+  const { error } = await supabase.from('crypto_monthly').delete().eq('id', id)
+  if (error) throw error
+}
+
+// ===== Агрегатный снимок (для вкладки «Обзор») =====
+export type CryptoSnapshot = {
+  spotInvested: number
+  spotValue: number | null
+  spotPnl: number | null
+  futuresMargin: number
+  futuresClosedPnl: number
+  openSpotCount: number
+  openFuturesCount: number
+}
+
+// Сводный снимок по обоим спот-портфелям и фьючерсам.
+// Стоимость и P/L по открытым позициям считаются только при наличии живой цены (появится позже).
+export async function loadCryptoSnapshot(
+  userId: string,
+  prices?: Record<string, number>,
+): Promise<CryptoSnapshot> {
+  const [main, meme, futures] = await Promise.all([
+    loadPortfolio(userId, 'main', prices),
+    loadPortfolio(userId, 'meme', prices),
+    loadFutures(userId),
+  ])
+  const assets = [...main, ...meme]
+  let spotInvested = 0
+  let spotValue = 0
+  let spotPnl = 0
+  let hasValue = false
+  let openSpotCount = 0
+  for (const a of assets) {
+    spotInvested += a.invested
+    if (a.marketValue != null) {
+      spotValue += a.marketValue
+      hasValue = true
+    }
+    if (a.pnl != null) spotPnl += a.pnl
+    if (a.status === 'open') openSpotCount++
+  }
+  let futuresMargin = 0
+  let futuresClosedPnl = 0
+  let openFuturesCount = 0
+  for (const f of futures) {
+    futuresMargin += Number(f.margin_usd)
+    if (f.pnl != null) futuresClosedPnl += f.pnl
+    if (f.status === 'open') openFuturesCount++
+  }
+  return {
+    spotInvested: round2(spotInvested),
+    spotValue: hasValue ? round2(spotValue) : null,
+    spotPnl: hasValue ? round2(spotPnl) : null,
+    futuresMargin: round2(futuresMargin),
+    futuresClosedPnl: round2(futuresClosedPnl),
+    openSpotCount,
+    openFuturesCount,
+  }
+}
