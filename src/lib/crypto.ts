@@ -306,3 +306,128 @@ export async function saveAssetsOrder(ids: string[]): Promise<void> {
     ),
   )
 }
+
+// ===== Фьючерсы =====
+export type FutureDirection = 'long' | 'short'
+export type FutureStatus = 'open' | 'closed'
+
+export type CryptoFuture = {
+  id: string
+  user_id: string
+  symbol: string
+  direction: FutureDirection
+  opened_at: string
+  margin_usd: number
+  closed_at: string | null
+  exit_usd: number | null
+  status: FutureStatus
+  note: string | null
+  sort_order: number
+  created_at: string
+}
+
+// Фьючерс с посчитанным итогом: pnl = exit_usd - margin_usd, % = pnl / margin * 100.
+export type FutureStats = CryptoFuture & {
+  pnl: number | null
+  pnlPct: number | null
+}
+
+export function computeFutureStats(f: CryptoFuture): FutureStats {
+  let pnl: number | null = null
+  let pnlPct: number | null = null
+  if (f.status === 'closed' && f.exit_usd != null) {
+    pnl = round2(Number(f.exit_usd) - Number(f.margin_usd))
+    pnlPct = Number(f.margin_usd) > 0 ? (pnl / Number(f.margin_usd)) * 100 : null
+  }
+  return { ...f, pnl, pnlPct }
+}
+
+export async function loadFutures(userId: string): Promise<FutureStats[]> {
+  const { data, error } = await supabase
+    .from('crypto_futures')
+    .select('*')
+    .eq('user_id', userId)
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true })
+  if (error) throw error
+  return ((data ?? []) as CryptoFuture[]).map(computeFutureStats)
+}
+
+export async function createFuture(
+  userId: string,
+  input: {
+    symbol: string
+    direction: FutureDirection
+    opened_at: string
+    margin_usd: number
+    note?: string | null
+  },
+): Promise<CryptoFuture> {
+  const { data: last } = await supabase
+    .from('crypto_futures')
+    .select('sort_order')
+    .eq('user_id', userId)
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+  const nextOrder = (last?.sort_order ?? 0) + 1
+  const { data, error } = await supabase
+    .from('crypto_futures')
+    .insert({
+      user_id: userId,
+      symbol: input.symbol.trim().toUpperCase(),
+      direction: input.direction,
+      opened_at: input.opened_at,
+      margin_usd: input.margin_usd,
+      status: 'open',
+      note: input.note?.trim() || null,
+      sort_order: nextOrder,
+    })
+    .select('*')
+    .single()
+  if (error || !data) throw error ?? new Error('Insert failed')
+  return data as CryptoFuture
+}
+
+export async function closeFuture(
+  id: string,
+  closed_at: string,
+  exit_usd: number,
+): Promise<void> {
+  const { error } = await supabase
+    .from('crypto_futures')
+    .update({ status: 'closed', closed_at, exit_usd })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function reopenFuture(id: string): Promise<void> {
+  const { error } = await supabase
+    .from('crypto_futures')
+    .update({ status: 'open', closed_at: null, exit_usd: null })
+    .eq('id', id)
+  if (error) throw error
+}
+
+export async function updateFuture(
+  id: string,
+  patch: Partial<
+    Pick<CryptoFuture, 'symbol' | 'direction' | 'margin_usd' | 'note' | 'opened_at'>
+  >,
+): Promise<void> {
+  const { error } = await supabase.from('crypto_futures').update(patch).eq('id', id)
+  if (error) throw error
+}
+
+export async function deleteFuture(id: string): Promise<void> {
+  const { error } = await supabase.from('crypto_futures').delete().eq('id', id)
+  if (error) throw error
+}
+
+export async function saveFuturesOrder(ids: string[]): Promise<void> {
+  await Promise.all(
+    ids.map((id, i) =>
+      supabase.from('crypto_futures').update({ sort_order: i + 1 }).eq('id', id),
+    ),
+  )
+}
