@@ -461,6 +461,11 @@ export default function CryptoPortfolio({ portfolio }: Props) {
                               value={tQty}
                               onChange={(e) => setTQty(e.target.value)}
                             />
+                            {parseNum(tQty) > 0 && (
+                              <div className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
+                                = {fmtQty(parseNum(tQty))}
+                              </div>
+                            )}
                           </div>
                           <div>
                             <label className={labelCls}>{t('inv.price')}</label>
@@ -642,6 +647,11 @@ export default function CryptoPortfolio({ portfolio }: Props) {
               value={aQty}
               onChange={(e) => setAQty(e.target.value)}
             />
+            {parseNum(aQty) > 0 && (
+              <div className="mt-1 text-xs text-neutral-400 dark:text-neutral-500">
+                = {fmtQty(parseNum(aQty))}
+              </div>
+            )}
           </div>
           <div>
             <label className={labelCls}>{t('inv.price')}</label>

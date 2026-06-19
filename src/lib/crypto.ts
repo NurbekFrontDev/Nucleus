@@ -80,11 +80,27 @@ export function fmtPct(n: number | null | undefined): string {
   return sign + n.toFixed(2) + '%'
 }
 
-// Парсинг ввода: убираем пробелы, заменяем запятую на точку, оставляем число.
+// Парсинг ввода количества/цены. Понимает оба формата:
+//  - разделитель тысяч запятыми + точка-десятичная (как в Phantom): 15,272.87724
+//  - запятая как десятичный разделитель (европейский ввод): 0,005
+// Возвращает корректное число; при мусоре -- 0.
 export function parseNum(input: string): number {
   if (!input) return 0
-  const cleaned = input.replace(/\s/g, '').replace(',', '.').replace(/[^\d.]/g, '')
-  const n = Number(cleaned)
+  let s = input.replace(/\s/g, '')
+  if (s.includes(',') && s.includes('.')) {
+    // Есть и запятая, и точка -> запятая это разделитель тысяч, убираем её.
+    s = s.replace(/,/g, '')
+  } else if (s.includes(',')) {
+    // Только запятая -> считаем её десятичным разделителем.
+    s = s.replace(/,/g, '.')
+  }
+  s = s.replace(/[^\d.]/g, '')
+  // Если случайно осталось несколько точек -- оставляем первую как десятичную.
+  const firstDot = s.indexOf('.')
+  if (firstDot !== -1) {
+    s = s.slice(0, firstDot + 1) + s.slice(firstDot + 1).replace(/\./g, '')
+  }
+  const n = Number(s)
   return Number.isFinite(n) ? n : 0
 }
 
