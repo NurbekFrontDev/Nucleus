@@ -21,6 +21,7 @@ import {
   WISH_SUBCATEGORY_PRESETS,
   loadGoalsSplit,
   saveGoalsSplit,
+  saveGoalsOrder,
   DEFAULT_GOALS_SPLIT,
 } from '../lib/db'
 
@@ -36,13 +37,14 @@ type Goal = {
   category: string | null
   subcategory: string | null
   expense_id: string | null
+  sort_order: number
   created_at: string
 }
 type Contribution = { id: string; goal_id: string; amount: number; date: string }
 type Category = { id: string; name: string; percent?: number; archived?: boolean }
 
 const GOAL_COLS =
-  'id, name, note, target_amount, target_date, is_goal, is_primary, done, category, subcategory, expense_id, created_at'
+  'id, name, note, target_amount, target_date, is_goal, is_primary, done, category, subcategory, expense_id, sort_order, created_at'
 
 // Базовый стиль поля без ширины (чтобы не конфликтовало с flex-1 в строках).
 const fieldBase =
@@ -146,9 +148,9 @@ export default function Goals() {
   const [editGoalDate, setEditGoalDate] = useState('')
 
   // Перемещение второстепенных целей (тот же стиль, что в «Бюджете»).
-  // Порядок храним локально (в goals нет sort_order), чтобы не менять схему БД.
+  // Порядок храним в базе (поле sort_order у goals), чтобы он синхронизировался
+  // между телефоном и компьютером.
   const [reorderGoals, setReorderGoals] = useState(false)
-  const [secOrder, setSecOrder] = useState<string[]>([])
   type DragState = {
     id: string
     fromIndex: number
@@ -168,16 +170,6 @@ export default function Goals() {
       if (settleTimer.current) window.clearTimeout(settleTimer.current)
     }
   }, [])
-  useEffect(() => {
-    if (!user) return
-    try {
-      const raw = localStorage.getItem('finlit-sec-order-' + user.id)
-      if (raw) setSecOrder(JSON.parse(raw) as string[])
-    } catch {
-      // повреждённое значение — игнорируем
-    }
-  }, [user])
-
   useEffect(() => {
     if (!user) return
     let active = true
@@ -648,25 +640,27 @@ export default function Goals() {
   const primaryGoal = activeGoals.find((g) => g.is_primary) ?? null
   const secondaryGoals = activeGoals.filter((g) => g.id !== primaryGoal?.id)
 
-  // Второстепенные цели в сохранённом порядке (новые — в конец).
+  // Второстепенные цели в сохранённом порядке: сначала расставленные вручную
+  // (sort_order > 0) по возрастанию, затем новые (sort_order = 0) по дате создания.
   const orderedSecondary = [...secondaryGoals].sort((a, b) => {
-    const ia = secOrder.indexOf(a.id)
-    const ib = secOrder.indexOf(b.id)
-    if (ia === -1 && ib === -1) return 0
-    if (ia === -1) return 1
-    if (ib === -1) return -1
-    return ia - ib
+    const ao = a.sort_order || 0
+    const bo = b.sort_order || 0
+    if (ao && bo) return ao - bo
+    if (ao) return -1
+    if (bo) return 1
+    return a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0
   })
 
+  // Сохраняем новый порядок в базу (sort_order = позиция, начиная с 1) и в локальное
+  // состояние, чтобы он сразу синхронизировался между устройствами.
   const persistSecOrder = (ids: string[]) => {
-    setSecOrder(ids)
-    if (user) {
-      try {
-        localStorage.setItem('finlit-sec-order-' + user.id, JSON.stringify(ids))
-      } catch {
-        // localStorage недоступен — порядок останется только на время сессии
-      }
-    }
+    setGoals((prev) =>
+      prev.map((g) => {
+        const i = ids.indexOf(g.id)
+        return i === -1 ? g : { ...g, sort_order: i + 1 }
+      }),
+    )
+    if (user) saveGoalsOrder(user.id, ids)
   }
 
   const startDrag = (e: React.PointerEvent, id: string, index: number) => {

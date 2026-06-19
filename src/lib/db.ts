@@ -372,6 +372,20 @@ export async function saveGoalsSplit(userId: string, value: number): Promise<voi
     )
 }
 
+// Сохраняет ручной порядок целей в базе: sort_order = позиция в списке (начиная с 1),
+// чтобы порядок второстепенных целей синхронизировался между устройствами.
+export async function saveGoalsOrder(userId: string, orderedIds: string[]): Promise<void> {
+  await Promise.all(
+    orderedIds.map((id, i) =>
+      supabase
+        .from('goals')
+        .update({ sort_order: i + 1 })
+        .eq('id', id)
+        .eq('user_id', userId),
+    ),
+  )
+}
+
 // ===== Накопительные категории =====
 // Деньги, отложенные в Сбережения/Инвестиции, — это не «трата», а перекладывание
 // в копилку: они остаются твоими. Поэтому их НЕ считаем расходом ни при расчёте
