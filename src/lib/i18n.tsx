@@ -95,6 +95,8 @@ const UI: Record<Lang, Record<string, string>> = {
     'ai.open': 'Открыть ассистента',
     'ai.close': 'Закрыть',
     'ai.disclaimer': 'Подсказки ассистента носят образовательный характер и не являются финансовой консультацией. Решения ты принимаешь сам.',
+    'ai.privacy': 'Чтобы советовать по делу, ассистент видит сводку твоих финансов (доходы, расходы, цели, долги). Эти данные уходят только ИИ-модели для ответа и не передаются третьим лицам.',
+    'ai.errLimit': 'На сегодня лимит обращений к ассистенту исчерпан. Попробуй завтра - так мы бережём расходы на ИИ.',
 
     'inv.title': 'Инвестиции',
     'inv.tab.overview': 'Обзор',
@@ -604,6 +606,8 @@ const UI: Record<Lang, Record<string, string>> = {
     'ai.open': 'Open assistant',
     'ai.close': 'Close',
     'ai.disclaimer': 'The assistant shares educational tips, not financial advice. Final decisions are yours.',
+    'ai.privacy': 'To give useful advice, the assistant sees a summary of your finances (income, expenses, goals, debts). This data goes only to the AI model for the reply and is not shared with anyone else.',
+    'ai.errLimit': "You've reached today's assistant request limit. Try again tomorrow - this keeps AI costs in check.",
 
     'inv.title': 'Investments',
     'inv.tab.overview': 'Overview',

@@ -374,6 +374,50 @@ export type AskResult = {
   error?: string
 }
 
+// ===== ИИ-8: мягкий дневной лимит обращений (бережёт расходы на API) =====
+// Считаем обращения к ИИ за сегодня в app_settings (ai_usage_day + ai_usage_count).
+// Это «мягкая» защита на стороне клиента: помогает не сжечь бюджет на ИИ случайной
+// серией запросов. При смене дня счётчик начинается заново.
+export const AI_DAILY_LIMIT = 50
+
+function todayStr(): string {
+  return new Date().toISOString().slice(0, 10)
+}
+
+// Сколько обращений к ИИ уже сделано сегодня. Ошибки не блокируют пользователя (возвращаем 0).
+export async function getAiUsageToday(userId: string): Promise<number> {
+  try {
+    const { data } = await supabase
+      .from('app_settings')
+      .select('ai_usage_day, ai_usage_count')
+      .eq('user_id', userId)
+      .maybeSingle()
+    const d = data as { ai_usage_day?: string | null; ai_usage_count?: number | null } | null
+    if (!d || d.ai_usage_day !== todayStr()) return 0
+    return Number(d.ai_usage_count) || 0
+  } catch {
+    return 0
+  }
+}
+
+// Увеличивает дневной счётчик обращений на 1 (со сбросом при новом дне).
+async function bumpAiUsage(userId: string): Promise<void> {
+  try {
+    const used = await getAiUsageToday(userId)
+    await supabase.from('app_settings').upsert(
+      {
+        user_id: userId,
+        ai_usage_day: todayStr(),
+        ai_usage_count: used + 1,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'user_id' },
+    )
+  } catch {
+    // не критично: лимит мягкий, ошибку счётчика тихо игнорируем
+  }
+}
+
 // Сколько последних сообщений истории отправляем модели (бережём токены).
 const HISTORY_WINDOW = 12
 
@@ -387,6 +431,12 @@ export async function askAssistant(
   history: AiMessage[],
   options?: { skill?: string | null },
 ): Promise<AskResult> {
+  // ИИ-8: мягкий дневной лимит обращений (бережёт расходы на API).
+  const usedToday = await getAiUsageToday(userId)
+  if (usedToday >= AI_DAILY_LIMIT) {
+    return { reply: '', provider: null, model: null, error: 'limit' }
+  }
+
   // Живая сводка финансов. Если собрать не удалось - продолжаем без неё.
   let context = ''
   try {
@@ -407,6 +457,9 @@ export async function askAssistant(
 
   const tail = history.slice(-HISTORY_WINDOW).map((m) => ({ role: m.role, content: m.content }))
   const messages = [...tail, { role: 'user' as const, content: userText }]
+
+  // ИИ-8: учитываем обращение в дневном лимите (счётчик в app_settings).
+  void bumpAiUsage(userId)
 
   const { data, error } = await supabase.functions.invoke('ai-chat', {
     body: { messages, system },

@@ -26,7 +26,7 @@ export default function AssistantWidget() {
 
       {/* Окно диалога с ассистентом. */}
       {open && (
-        <div className="fixed inset-x-3 bottom-20 z-30 mx-auto flex h-[70vh] max-h-[600px] max-w-md flex-col overflow-hidden rounded-2xl border border-neutral-200 bg-white shadow-2xl dark:border-neutral-800 dark:bg-neutral-950 md:inset-x-auto md:bottom-6 md:right-6 md:h-[600px] md:w-[400px]">
+        <div className="fixed inset-x-3 bottom-24 z-30 mx-auto flex h-[66vh] max-h-[560px] max-w-md flex-col overflow-hidden rounded-3xl border border-neutral-200 bg-white shadow-2xl dark:border-neutral-800 dark:bg-neutral-950 md:inset-x-auto md:bottom-6 md:right-6 md:h-[600px] md:w-[400px]">
           <AssistantChat onClose={() => setOpen(false)} />
         </div>
       )}

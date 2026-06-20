@@ -21,11 +21,13 @@ import {
   type AiAction,
 } from '../lib/assistant'
 
+// Основная «зелёная» кнопка в формах помощника (разбор покупки / быстрый ввод).
 const btnPrimary =
   'rounded-lg bg-emerald-500 px-4 py-2.5 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-60'
 
-const chipBtn =
-  'rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-700 transition hover:bg-emerald-500/20 disabled:opacity-60 dark:text-emerald-400'
+// Пункт всплывающего меню кнопки «+» (быстрые действия ассистента).
+const menuItem =
+  'flex w-full items-center rounded-xl px-3 py-2.5 text-left text-sm text-neutral-700 transition hover:bg-neutral-100 disabled:opacity-60 dark:text-neutral-200 dark:hover:bg-neutral-800'
 
 // Короткая подпись провайдера под ответом ассистента (какой мозг ответил).
 function providerLabel(provider: string | null): string | null {
@@ -35,9 +37,6 @@ function providerLabel(provider: string | null): string | null {
   return provider
 }
 
-// Чат с ассистентом «FinLit Бухгалтер». Заполняет контейнер по высоте, поэтому одинаково
-// хорошо работает и на всю страницу, и внутри плавающего окна-виджета (ИИ-7 / виджет).
-// onClose, если передан, показывает крестик закрытия в шапке (для окна-виджета).
 export default function AssistantChat({ onClose }: { onClose?: () => void }) {
   const { user } = useAuth()
   const { t, lang } = useLang()
@@ -48,8 +47,10 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
-  // Действие (ИИ-5), предложенное ассистентом и ждущее подтверждения.
   const [pendingAction, setPendingAction] = useState<AiAction | null>(null)
+
+  // Меню быстрых действий (кнопка «+» в поле ввода).
+  const [plusOpen, setPlusOpen] = useState(false)
 
   // Разбор покупки (ИИ-4): мини-форма помощника.
   const [showPurchase, setShowPurchase] = useState(false)
@@ -66,6 +67,7 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
   const dictationRef = useRef<Dictation | null>(null)
 
   const endRef = useRef<HTMLDivElement | null>(null)
+  const taRef = useRef<HTMLTextAreaElement | null>(null)
 
   // Загружаем историю чата при входе.
   useEffect(() => {
@@ -92,6 +94,14 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
 
+  // Поле ввода растёт под текст (до предела), затем прокручивается внутри себя.
+  useEffect(() => {
+    const ta = taRef.current
+    if (!ta) return
+    ta.style.height = 'auto'
+    ta.style.height = Math.min(ta.scrollHeight, 160) + 'px'
+  }, [input])
+
   // Останавливаем диктовку при размонтировании (закрытии окна).
   useEffect(() => {
     return () => {
@@ -116,20 +126,24 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
     setMessages((prev) => [...prev, userMsg])
     setSending(true)
     try {
-      // Сохраняем вопрос пользователя (не блокируем ответ ожиданием записи).
       void saveAiMessage(user.id, { role: 'user', content: text })
       const res = await askAssistant(user.id, text, history, options)
       if (res.error) {
-        setError(res.error === 'network' ? t('ai.errNetwork') : t('ai.errGeneric'))
+        const msg =
+          res.error === 'network'
+            ? t('ai.errNetwork')
+            : res.error === 'limit'
+              ? t('ai.errLimit')
+              : t('ai.errGeneric')
+        setError(msg)
         return
       }
-      // ИИ-5: вытаскиваем возможное действие и показываем чистый текст без служебного блока.
       const { text: cleanText, action } = extractAction(res.reply)
       const display =
         cleanText.length > 0
           ? cleanText
           : action
-            ? 'Готов записать операцию, подтвердите ниже 👇'
+            ? 'Готов записать операцию, подтверди ниже 👇'
             : res.reply
       const aiMsg: AiMessage = {
         id: crypto.randomUUID(),
@@ -161,7 +175,6 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
     await sendMessage(text)
   }
 
-  // Разбор покупки: собираем читаемый вопрос и шлём с навыком PURCHASE_SKILL.
   const submitPurchase = async () => {
     const item = pItem.trim()
     if (!item || sending) return
@@ -172,19 +185,15 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
     await sendMessage(text, { skill: PURCHASE_SKILL })
   }
 
-  // Голос: запуск/остановка диктовки. Распознанный текст добавляем в поле быстрого ввода.
+  // Голос: общий запуск/остановка диктовки. append говорит, куда дописывать текст.
   const stopVoice = () => {
     dictationRef.current?.stop()
     dictationRef.current = null
     setListening(false)
   }
-  const toggleVoice = () => {
-    if (listening) {
-      stopVoice()
-      return
-    }
+  const beginDictation = (append: (text: string) => void) => {
     const d = startDictation(lang === 'en' ? 'en-US' : 'ru-RU', {
-      onText: (text) => setQText((prev) => (prev ? prev + ' ' : '') + text),
+      onText: (text) => append(text),
       onEnd: () => {
         dictationRef.current = null
         setListening(false)
@@ -199,8 +208,23 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
       setListening(true)
     }
   }
+  // Микрофон в основном поле ввода: диктуем прямо в строку запроса.
+  const toggleMainVoice = () => {
+    if (listening) {
+      stopVoice()
+      return
+    }
+    beginDictation((text) => setInput((prev) => (prev ? prev + ' ' : '') + text))
+  }
+  // Микрофон в форме быстрого ввода: диктуем в её поле.
+  const toggleQuickVoice = () => {
+    if (listening) {
+      stopVoice()
+      return
+    }
+    beginDictation((text) => setQText((prev) => (prev ? prev + ' ' : '') + text))
+  }
 
-  // Быстрый ввод (ИИ-6): шлём фразу с навыком авто-категоризации.
   const submitQuick = async () => {
     const text = qText.trim()
     if (!text || sending) return
@@ -210,12 +234,27 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
     await sendMessage(text, { skill: AUTOCAT_SKILL })
   }
 
-  // Разбор месяца (ИИ-7): одной кнопкой просим анализ и инсайты по сводке.
   const submitAnalysis = async () => {
     if (sending) return
     setShowPurchase(false)
     setShowQuick(false)
     await sendMessage(buildMonthlyReviewQuestion(), { skill: ANALYSIS_SKILL })
+  }
+
+  // Кнопка «+»: пункты открывают нужную форму или сразу запускают разбор месяца.
+  const openPurchase = () => {
+    setPlusOpen(false)
+    setShowQuick(false)
+    setShowPurchase(true)
+  }
+  const openQuick = () => {
+    setPlusOpen(false)
+    setShowPurchase(false)
+    setShowQuick(true)
+  }
+  const openAnalysis = () => {
+    setPlusOpen(false)
+    void submitAnalysis()
   }
 
   const onSubmit = (e: FormEvent) => {
@@ -224,6 +263,7 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    // Enter отправляет, Shift+Enter переносит строку (поле растёт вниз).
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       void submit()
@@ -243,7 +283,6 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
     }
   }
 
-  // ИИ-5: пользователь подтвердил действие - выполняем запись и пишем результат в чат.
   const doAction = async () => {
     if (!user || !pendingAction) return
     const action = pendingAction
@@ -260,6 +299,8 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
     setMessages((prev) => [...prev, note])
     void saveAiMessage(user.id, { role: 'assistant', content: note.content })
   }
+
+  const canSend = !!input.trim() && !sending
 
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -295,34 +336,8 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
         </div>
       </header>
 
-      {/* Прокручиваемая область: быстрые кнопки, формы и сообщения. */}
+      {/* Прокручиваемая область: формы и сообщения. */}
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-4 py-3">
-        <div className="flex flex-wrap gap-2">
-          <button
-            type="button"
-            onClick={() => {
-              setShowPurchase((v) => !v)
-              setShowQuick(false)
-            }}
-            className={chipBtn}
-          >
-            {t('ai.purchase')}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setShowQuick((v) => !v)
-              setShowPurchase(false)
-            }}
-            className={chipBtn}
-          >
-            {t('ai.quick')}
-          </button>
-          <button type="button" onClick={() => void submitAnalysis()} disabled={sending} className={chipBtn}>
-            {t('ai.analysis')}
-          </button>
-        </div>
-
         {showPurchase && (
           <div className="flex flex-col gap-2 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50">
             <p className="text-sm font-medium">{t('ai.purchaseTitle')}</p>
@@ -380,7 +395,7 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
               {voiceSupported && (
                 <button
                   type="button"
-                  onClick={toggleVoice}
+                  onClick={toggleQuickVoice}
                   title={t('ai.voice')}
                   className={
                     listening
@@ -424,7 +439,8 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
           <div className="flex flex-col gap-3">
             {messages.length === 0 && (
               <div className="rounded-2xl border border-neutral-200 bg-white p-4 text-sm text-neutral-600 dark:border-neutral-800 dark:bg-neutral-900/50 dark:text-neutral-300">
-                {t('ai.empty')}
+                <p>{t('ai.empty')}</p>
+                <p className="mt-2 text-xs text-neutral-500 dark:text-neutral-400">{t('ai.privacy')}</p>
               </div>
             )}
             {messages.map((m) => (
@@ -460,26 +476,103 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
         {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
       </div>
 
-      {/* Поле ввода внизу окна. */}
-      <form
-        onSubmit={onSubmit}
-        className="flex shrink-0 items-end gap-2 border-t border-neutral-200 px-4 py-3 dark:border-neutral-800"
-      >
-        <textarea
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          rows={1}
-          placeholder={t('ai.placeholder')}
-          className="max-h-40 min-h-[44px] flex-1 resize-none rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
-        />
-        <button type="submit" disabled={sending || !input.trim()} className={btnPrimary}>
-          {t('ai.send')}
-        </button>
-      </form>
+      {/* Поле ввода (минималистичное, в стиле ChatGPT): текст сверху, кнопки снизу. */}
+      <div className="relative shrink-0 px-3 pt-1">
+        {plusOpen && (
+          <>
+            {/* Невидимый слой: клик мимо меню закрывает его. */}
+            <button
+              type="button"
+              aria-hidden="true"
+              tabIndex={-1}
+              onClick={() => setPlusOpen(false)}
+              className="fixed inset-0 z-10 cursor-default"
+            />
+            <div className="absolute bottom-full left-3 z-20 mb-2 w-64 overflow-hidden rounded-2xl border border-neutral-200 bg-white p-1 shadow-xl dark:border-neutral-800 dark:bg-neutral-900">
+              <button type="button" onClick={openPurchase} className={menuItem}>
+                {t('ai.purchase')}
+              </button>
+              <button type="button" onClick={openQuick} className={menuItem}>
+                {t('ai.quick')}
+              </button>
+              <button type="button" onClick={openAnalysis} disabled={sending} className={menuItem}>
+                {t('ai.analysis')}
+              </button>
+            </div>
+          </>
+        )}
 
-      {/* ИИ-8: дисклеймер - ассистент даёт образовательные подсказки, а не финансовую консультацию. */}
-      <p className="shrink-0 px-4 pb-2 text-center text-[10px] leading-tight text-neutral-400 dark:text-neutral-500">
+        {listening && (
+          <p className="mb-1 px-2 text-xs text-emerald-600 dark:text-emerald-400">{t('ai.voiceListening')}</p>
+        )}
+
+        <form
+          onSubmit={onSubmit}
+          className="flex flex-col gap-2 rounded-3xl border border-neutral-300 bg-white px-3 py-2 transition focus-within:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-900"
+        >
+          <textarea
+            ref={taRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            rows={1}
+            placeholder={t('ai.placeholder')}
+            className="max-h-40 w-full resize-none bg-transparent px-1 pt-1 text-sm outline-none placeholder:text-neutral-400 dark:placeholder:text-neutral-500"
+          />
+          <div className="flex items-center justify-between">
+            <button
+              type="button"
+              onClick={() => setPlusOpen((v) => !v)}
+              title={t('common.add')}
+              aria-label={t('common.add')}
+              aria-expanded={plusOpen}
+              className="flex h-9 w-9 items-center justify-center rounded-full border border-neutral-300 text-neutral-600 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+            >
+              <span className={`text-xl leading-none transition-transform ${plusOpen ? 'rotate-45' : ''}`}>+</span>
+            </button>
+            <div className="flex items-center gap-1">
+              {voiceSupported && (
+                <button
+                  type="button"
+                  onClick={toggleMainVoice}
+                  title={t('ai.voice')}
+                  aria-label={t('ai.voice')}
+                  className={
+                    listening
+                      ? 'flex h-9 w-9 items-center justify-center rounded-full bg-red-500/10 text-base text-red-600 transition dark:text-red-400'
+                      : 'flex h-9 w-9 items-center justify-center rounded-full text-base text-neutral-500 transition hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                  }
+                >
+                  {listening ? '⏹' : '🎤'}
+                </button>
+              )}
+              <button
+                type="submit"
+                disabled={!canSend}
+                aria-label={t('ai.send')}
+                title={t('ai.send')}
+                className="flex h-9 w-9 items-center justify-center rounded-full bg-emerald-500 text-neutral-950 transition hover:bg-emerald-400 disabled:cursor-not-allowed disabled:bg-neutral-200 disabled:text-neutral-400 dark:disabled:bg-neutral-800 dark:disabled:text-neutral-600"
+              >
+                <svg
+                  viewBox="0 0 24 24"
+                  className="h-5 w-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth={2.5}
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                >
+                  <path d="M12 19V5" />
+                  <path d="M5 12l7-7 7 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
+        </form>
+      </div>
+
+      {/* ИИ-8: дисклеймер - подсказки образовательные, а не финансовая консультация. */}
+      <p className="shrink-0 px-4 pb-2 pt-1.5 text-center text-[10px] leading-tight text-neutral-400 dark:text-neutral-500">
         {t('ai.disclaimer')}
       </p>
 

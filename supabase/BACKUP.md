@@ -11,7 +11,7 @@
 ## ✅ Способ 1 — экспорт в CSV (рекомендуется, ничего устанавливать не нужно)
 1. Открой Supabase -> Table Editor.
 2. Для каждой таблицы нажми Export -> Export to CSV:
-   `incomes`, `expenses`, `goals`, `goal_contributions`, `currencies`, `months`, `categories`.
+   `categories`, `months`, `incomes`, `expenses`, `goals`, `goal_contributions`, `debts`, `debt_payments`, `currencies`, `app_settings`, `ai_messages`, а также все таблицы `crypto_*` (если пользуешься инвестициями).
 3. Сохрани файлы в личный Google Drive / на компьютер.
 
 ## Способ 2 — Supabase CLI (ТРЕБУЕТ Docker Desktop)
@@ -31,6 +31,19 @@ supabase db dump --data-only -f finlit-backup.sql
 pg_dump "CONNECTION_STRING" --data-only --no-owner -f finlit-backup.sql
 ```
 - ⚠️ Пароль от базы в строке подключения — только на твоём компьютере, никому не показывай.
+
+## Способ 4 — бэкап СХЕМЫ (структуры базы, без данных)
+Структура (таблицы, колонки, RLS-политики, триггеры) уже описана в `schema.sql` и файлах `migration-*.sql` в этой папке - они лежат в Git, поэтому схема не потеряется. Но полезно иногда снимать свежий слепок прямо с боевой базы (вдруг что-то правили руками в SQL Editor):
+
+- Через Supabase CLI (нужен Docker):
+```
+supabase db dump --schema public -f finlit-schema.sql
+```
+- Или напрямую через pg_dump (без Docker, PostgreSQL 17):
+```
+pg_dump "CONNECTION_STRING" --schema-only --no-owner -f finlit-schema.sql
+```
+Файл схемы НЕ содержит твоих данных (только структуру), поэтому его, в отличие от бэкапа данных, можно спокойно хранить рядом с кодом.
 
 ## Восстановление
 Примени `schema.sql` + миграции на новый проект, затем залей данные из `finlit-backup.sql` (или импортируй CSV по таблицам).
