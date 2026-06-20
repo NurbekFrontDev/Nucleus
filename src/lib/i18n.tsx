@@ -94,6 +94,7 @@ const UI: Record<Lang, Record<string, string>> = {
     'ai.analysis': '📊 Разбор месяца',
     'ai.open': 'Открыть ассистента',
     'ai.close': 'Закрыть',
+    'ai.disclaimer': 'Подсказки ассистента носят образовательный характер и не являются финансовой консультацией. Решения ты принимаешь сам.',
 
     'inv.title': 'Инвестиции',
     'inv.tab.overview': 'Обзор',
@@ -602,6 +603,7 @@ const UI: Record<Lang, Record<string, string>> = {
     'ai.analysis': '📊 Monthly review',
     'ai.open': 'Open assistant',
     'ai.close': 'Close',
+    'ai.disclaimer': 'The assistant shares educational tips, not financial advice. Final decisions are yours.',
 
     'inv.title': 'Investments',
     'inv.tab.overview': 'Overview',

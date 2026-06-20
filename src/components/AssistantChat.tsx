@@ -478,6 +478,11 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
         </button>
       </form>
 
+      {/* ИИ-8: дисклеймер - ассистент даёт образовательные подсказки, а не финансовую консультацию. */}
+      <p className="shrink-0 px-4 pb-2 text-center text-[10px] leading-tight text-neutral-400 dark:text-neutral-500">
+        {t('ai.disclaimer')}
+      </p>
+
       <ConfirmDialog
         open={confirmClear}
         title={t('ai.clearTitle')}
