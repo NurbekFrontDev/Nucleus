@@ -242,6 +242,64 @@ export function extractAction(reply: string): ParsedReply {
   return { text, action }
 }
 
+// ===== Авто-память (ИИ-9.1): ассистент сам запоминает важные факты =====
+// По примеру «памяти» агентов вроде Hermes: модель может в конце ответа добавить
+// один или несколько блоков memory с короткими фактами, которые стоит помнить
+// долго (имя, цели, привычки, повторяющиеся доходы и т. п.). Приложение вырезает
+// эти блоки из видимого ответа и дописывает факты в ai_memory_md. Так память
+// пополняется сама, но остаётся обычным markdown-документом, который пользователь
+// в любой момент видит и правит во вкладке «Память».
+const MEMORY_BLOCK_RE = /```memory\s*\n?([\s\S]*?)```/gi
+
+// Навык всегда в системном промпте: объясняет модели, как и что запоминать.
+export const MEMORY_SKILL = `НАВЫК: «Память» (запоминай важные факты о пользователе сам).
+У тебя есть долговременная память - markdown-список фактов в блоке «ПАМЯТЬ» выше. Ты можешь дописывать в неё новое.
+
+Когда пользователь сообщает факт, который полезно помнить и в будущих разговорах (имя, возраст, город, состав семьи, постоянные цели, привычки и предпочтения по деньгам, повторяющиеся доходы и платежи, важные даты) - сохрани его. Для этого в САМОМ КОНЦЕ ответа добавь блок памяти ровно в таком формате (тройные кавычки с меткой memory):
+
+\`\`\`memory
+короткий факт одной строкой
+\`\`\`
+
+Правила:
+- Только устойчивые, полезные надолго факты. НЕ запоминай разовые мелочи, сиюминутные суммы или то, что и так видно в сводке финансов.
+- Не дублируй то, что уже есть в блоках «ПАМЯТЬ» и «О ПОЛЬЗОВАТЕЛЕ».
+- Один факт - одна строка, коротко и по делу. Максимум 2 блока memory на ответ.
+- Блок memory не показывается пользователю и не требует подтверждения, поэтому пиши факт аккуратно и нейтрально.
+- Сначала обычный полезный ответ пользователю, и только потом, если нужно, блоки memory в самом конце.
+- Без длинного тире, только дефис и двоеточие.`
+
+// Вырезает все блоки memory из ответа и возвращает чистый текст и список фактов.
+export function extractMemories(reply: string): { text: string; memories: string[] } {
+  const memories: string[] = []
+  const text = reply
+    .replace(MEMORY_BLOCK_RE, (_full, body: string) => {
+      const fact = String(body).trim()
+      if (fact) memories.push(fact)
+      return ''
+    })
+    .trim()
+  return { text, memories }
+}
+
+// Дописывает новые факты в ai_memory_md (по строке на факт, с датой). Пропускает
+// факты, которые уже есть в памяти (без учёта регистра). Возвращает обновлённый
+// текст памяти или null, если добавлять было нечего.
+export async function appendAiMemory(userId: string, notes: string[]): Promise<string | null> {
+  const clean = notes.map((n) => n.trim()).filter((n) => n.length > 0)
+  if (clean.length === 0) return null
+  const profile = await loadAiProfile(userId)
+  const existing = profile.memoryMd.trim()
+  const existingLower = existing.toLowerCase()
+  const today = new Date().toISOString().slice(0, 10)
+  const toAdd = clean.filter((n) => !existingLower.includes(n.toLowerCase()))
+  if (toAdd.length === 0) return null
+  const lines = toAdd.map((n) => `- [${today}] ${n}`)
+  const next = existing ? `${existing}\n${lines.join('\n')}` : lines.join('\n')
+  await saveAiProfileField(userId, 'memoryMd', next)
+  return next
+}
+
 // Человеческое описание действия для окна подтверждения.
 export function describeAction(a: AiAction): string {
   if (a.summary) return a.summary
@@ -419,6 +477,8 @@ export type AskResult = {
   provider: string | null
   model: string | null
   error?: string
+  // Факты, которые ассистент сам сохранил в память в этом ответе (для UI-уведомления).
+  memorySaved?: string[]
 }
 
 // ===== ИИ-8: мягкий дневной лимит обращений (бережёт расходы на API) =====
@@ -499,7 +559,7 @@ export async function askAssistant(
 
   // Системный промпт собираем слоями: душа (своя или встроенная) + навыки + память + данные.
   const soul = profile.soul.trim() || SOUL
-  const parts: string[] = [soul, ACTIONS_SKILL, buildCategoryGuide()]
+  const parts: string[] = [soul, ACTIONS_SKILL, MEMORY_SKILL, buildCategoryGuide()]
   if (profile.userMd.trim()) {
     parts.push(`===== О ПОЛЬЗОВАТЕЛЕ (заметки, которые он задал сам) =====\n${profile.userMd.trim()}`)
   }
@@ -531,5 +591,23 @@ export async function askAssistant(
   if (d.error || !d.reply) {
     return { reply: '', provider: null, model: null, error: d.error || 'empty' }
   }
-  return { reply: d.reply, provider: d.provider ?? null, model: d.model ?? null }
+
+  // Авто-память: вырезаем блоки memory из ответа и дописываем новые факты в профиль.
+  const { text: cleanReply, memories } = extractMemories(d.reply)
+  let memorySaved: string[] = []
+  if (memories.length > 0) {
+    try {
+      const updated = await appendAiMemory(userId, memories)
+      if (updated) memorySaved = memories
+    } catch {
+      // память не критична: ошибку записи тихо игнорируем
+    }
+  }
+
+  return {
+    reply: cleanReply || d.reply,
+    provider: d.provider ?? null,
+    model: d.model ?? null,
+    memorySaved: memorySaved.length ? memorySaved : undefined,
+  }
 }

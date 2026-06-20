@@ -173,6 +173,18 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
         provider: res.provider,
         model: res.model,
       })
+      // Авто-память: если ассистент сам что-то запомнил, покажем ненавязчивую отметку.
+      if (res.memorySaved?.length) {
+        const memNote: AiMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: t('ai.memorySaved'),
+          provider: null,
+          model: null,
+          created_at: new Date().toISOString(),
+        }
+        setMessages((prev) => [...prev, memNote])
+      }
       if (action) setPendingAction(action)
     } catch {
       setError(t('ai.errNetwork'))
@@ -464,7 +476,7 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
               onClick={() => setPlusOpen(false)}
               className="fixed inset-0 z-10 cursor-default"
             />
-            <div className="absolute bottom-full left-3 z-20 mb-2 w-64 overflow-hidden rounded-2xl border border-neutral-200 bg-white p-1 shadow-xl dark:border-neutral-800 dark:bg-neutral-900">
+            <div className="animate-pop absolute bottom-full left-3 z-20 mb-2 w-64 overflow-hidden rounded-2xl border border-neutral-200 bg-white p-1 shadow-xl dark:border-neutral-800 dark:bg-neutral-900">
               <button type="button" onClick={openPurchase} className={menuItem}>
                 {t('ai.purchase')}
               </button>
@@ -487,7 +499,7 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
               onClick={() => setShowPurchase(false)}
               className="fixed inset-0 z-10 cursor-default"
             />
-            <div className="absolute bottom-full left-3 right-3 z-20 mb-2 flex flex-col gap-2 rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-800 dark:bg-neutral-900">
+            <div className="animate-pop absolute bottom-full left-3 right-3 z-20 mb-2 flex flex-col gap-2 rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-800 dark:bg-neutral-900">
               <p className="text-sm font-medium">{t('ai.purchaseTitle')}</p>
               <input
                 value={pItem}
@@ -535,7 +547,7 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
               }}
               className="fixed inset-0 z-10 cursor-default"
             />
-            <div className="absolute bottom-full left-3 right-3 z-20 mb-2 flex flex-col gap-2 rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-800 dark:bg-neutral-900">
+            <div className="animate-pop absolute bottom-full left-3 right-3 z-20 mb-2 flex flex-col gap-2 rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-800 dark:bg-neutral-900">
               <p className="text-sm font-medium">{t('ai.quickTitle')}</p>
               <div className="flex gap-2">
                 <input
@@ -662,7 +674,7 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
       </div>
 
       {showSettings && (
-        <div className="absolute inset-0 z-30 flex flex-col bg-white dark:bg-neutral-950">
+        <div className="animate-fade absolute inset-0 z-30 flex flex-col bg-white dark:bg-neutral-950">
           <header className="flex shrink-0 items-center justify-between gap-3 border-b border-neutral-200 px-4 py-3 dark:border-neutral-800">
             <h2 className="truncate text-base font-semibold">{t('ai.settings')}</h2>
             <button
