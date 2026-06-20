@@ -8,6 +8,8 @@ import {
   loadAiMessages,
   saveAiMessage,
   clearAiMessages,
+  buildPurchaseQuestion,
+  PURCHASE_SKILL,
   type AiMessage,
 } from '../lib/assistant'
 
@@ -32,6 +34,11 @@ export default function Assistant() {
   const [sending, setSending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+
+  // Разбор покупки (ИИ-4): мини-форма помощника.
+  const [showPurchase, setShowPurchase] = useState(false)
+  const [pItem, setPItem] = useState('')
+  const [pPrice, setPPrice] = useState('')
 
   const endRef = useRef<HTMLDivElement | null>(null)
 
@@ -60,8 +67,8 @@ export default function Assistant() {
     endRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, sending])
 
-  const submit = async () => {
-    const text = input.trim()
+  // Общая отправка сообщения ассистенту. options.skill подмешивает нужный навык.
+  const sendMessage = async (text: string, options?: { skill?: string }) => {
     if (!text || sending || !user) return
     setError(null)
     const history = messages
@@ -74,12 +81,11 @@ export default function Assistant() {
       created_at: new Date().toISOString(),
     }
     setMessages((prev) => [...prev, userMsg])
-    setInput('')
     setSending(true)
     try {
       // Сохраняем вопрос пользователя (не блокируем ответ ожиданием записи).
       void saveAiMessage(user.id, { role: 'user', content: text })
-      const res = await askAssistant(user.id, text, history)
+      const res = await askAssistant(user.id, text, history, options)
       if (res.error) {
         setError(res.error === 'network' ? t('ai.errNetwork') : t('ai.errGeneric'))
         return
@@ -104,6 +110,24 @@ export default function Assistant() {
     } finally {
       setSending(false)
     }
+  }
+
+  const submit = async () => {
+    const text = input.trim()
+    if (!text || sending) return
+    setInput('')
+    await sendMessage(text)
+  }
+
+  // Разбор покупки: собираем читаемый вопрос и шлём с навыком PURCHASE_SKILL.
+  const submitPurchase = async () => {
+    const item = pItem.trim()
+    if (!item || sending) return
+    const text = buildPurchaseQuestion(item, pPrice)
+    setShowPurchase(false)
+    setPItem('')
+    setPPrice('')
+    await sendMessage(text, { skill: PURCHASE_SKILL })
   }
 
   const onSubmit = (e: FormEvent) => {
@@ -148,6 +172,53 @@ export default function Assistant() {
           </button>
         )}
       </div>
+
+      <div className="flex flex-wrap gap-2">
+        <button
+          type="button"
+          onClick={() => setShowPurchase((v) => !v)}
+          className="rounded-full border border-emerald-500/40 bg-emerald-500/10 px-3 py-1.5 text-sm text-emerald-700 transition hover:bg-emerald-500/20 dark:text-emerald-400"
+        >
+          {t('ai.purchase')}
+        </button>
+      </div>
+
+      {showPurchase && (
+        <div className="flex flex-col gap-2 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50">
+          <p className="text-sm font-medium">{t('ai.purchaseTitle')}</p>
+          <p className="text-xs text-neutral-500">{t('ai.purchaseHint')}</p>
+          <input
+            value={pItem}
+            onChange={(e) => setPItem(e.target.value)}
+            placeholder={t('ai.purchaseItem')}
+            className="rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
+          />
+          <input
+            value={pPrice}
+            onChange={(e) => setPPrice(e.target.value)}
+            inputMode="decimal"
+            placeholder={t('ai.purchasePrice')}
+            className="rounded-lg border border-neutral-300 bg-white px-3 py-2.5 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
+          />
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={() => void submitPurchase()}
+              disabled={sending || !pItem.trim()}
+              className={btnPrimary}
+            >
+              {t('ai.purchaseGo')}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowPurchase(false)}
+              className="rounded-lg border border-neutral-300 px-4 py-2.5 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            >
+              {t('common.cancel')}
+            </button>
+          </div>
+        </div>
+      )}
 
       {loading ? (
         <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
