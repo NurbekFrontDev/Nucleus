@@ -97,10 +97,10 @@ export default function Assistant() {
         return
       }
       // ИИ-5: вытаскиваем возможное действие и показываем чистый текст без служебного блока.
-      const { text, action } = extractAction(res.reply)
+      const { text: cleanText, action } = extractAction(res.reply)
       const display =
-        text.length > 0
-          ? text
+        cleanText.length > 0
+          ? cleanText
           : action
             ? 'Готов записать операцию, подтвердите ниже 👇'
             : res.reply
