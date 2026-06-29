@@ -66,6 +66,16 @@ const UI: Record<Lang, Record<string, string>> = {
     'nav.assistant': 'Ассистент',
     'nav.tagline': 'Личный помощник по финансам',
 
+    'mod.finlit': 'FinLit',
+    'mod.planner': 'Планировщик',
+    'pnav.today': 'Сегодня',
+    'pnav.items': 'Мои дела',
+    'pnav.habits': 'Привычки',
+    'pnav.calendar': 'Календарь',
+    'pnav.focus': 'Фокус',
+    'pnav.stats': 'Статистика',
+    'planner.soon': 'Этот раздел в разработке - скоро здесь появится планировщик.',
+
     'ai.title': '🤖 Ассистент',
     'ai.placeholder': 'Спроси про свои финансы…',
     'ai.send': 'Отправить',
@@ -588,6 +598,16 @@ const UI: Record<Lang, Record<string, string>> = {
     'nav.settings': 'Settings',
     'nav.assistant': 'Assistant',
     'nav.tagline': 'Your personal finance assistant',
+
+    'mod.finlit': 'FinLit',
+    'mod.planner': 'Planner',
+    'pnav.today': 'Today',
+    'pnav.items': 'My tasks',
+    'pnav.habits': 'Habits',
+    'pnav.calendar': 'Calendar',
+    'pnav.focus': 'Focus',
+    'pnav.stats': 'Stats',
+    'planner.soon': 'This section is under construction - the planner is coming soon.',
 
     'ai.title': '🤖 Assistant',
     'ai.placeholder': 'Ask about your finances…',
