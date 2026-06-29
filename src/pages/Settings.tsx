@@ -5,6 +5,7 @@ import Select from '../components/Select'
 import CurrencyConverter from '../components/CurrencyConverter'
 import { useLang } from '../lib/i18n'
 import { loadCryptoAutoExpense, saveCryptoAutoExpense } from '../lib/db'
+import { loadDaySections, saveDaySections } from '../lib/planner'
 
 export default function Settings() {
   const { user, signOut } = useAuth()
@@ -12,14 +13,21 @@ export default function Settings() {
   const { t, lang, setLang } = useLang()
 
   const [cryptoAuto, setCryptoAuto] = useState(true)
+  const [daySections, setDaySections] = useState(false)
 
   useEffect(() => {
     if (!user) return
     let active = true
     ;(async () => {
       try {
-        const v = await loadCryptoAutoExpense(user.id)
-        if (active) setCryptoAuto(v)
+        const [v, sections] = await Promise.all([
+          loadCryptoAutoExpense(user.id),
+          loadDaySections(user.id),
+        ])
+        if (active) {
+          setCryptoAuto(v)
+          setDaySections(sections)
+        }
       } catch {
         if (active) setCryptoAuto(true)
       }
@@ -37,6 +45,17 @@ export default function Settings() {
       await saveCryptoAutoExpense(user.id, next)
     } catch {
       setCryptoAuto(!next)
+    }
+  }
+
+  const toggleDaySections = async () => {
+    if (!user) return
+    const next = !daySections
+    setDaySections(next)
+    try {
+      await saveDaySections(user.id, next)
+    } catch {
+      setDaySections(!next)
     }
   }
 
@@ -94,6 +113,25 @@ export default function Settings() {
           }`}
         >
           {cryptoAuto ? t('set.cryptoAutoOn') : t('set.cryptoAutoOff')}
+        </button>
+      </div>
+
+      {/* Планировщик: делить день на Утро / День / Вечер */}
+      <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50">
+        <div className="min-w-0">
+          <p className="font-medium">✅ {t('set.daySections')}</p>
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{t('set.daySectionsHint')}</p>
+        </div>
+        <button
+          onClick={toggleDaySections}
+          disabled={!user}
+          className={`shrink-0 rounded-lg px-4 py-2 text-sm font-medium transition disabled:opacity-50 ${
+            daySections
+              ? 'bg-emerald-500 text-neutral-950 hover:bg-emerald-400'
+              : 'border border-neutral-300 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800'
+          }`}
+        >
+          {daySections ? t('set.on') : t('set.off')}
         </button>
       </div>
 
