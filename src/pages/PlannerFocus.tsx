@@ -42,31 +42,75 @@ const mmss = (sec: number): string => {
 const clamp = (n: number, lo: number, hi: number): number =>
   Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : lo
 
-// Тихий двойной сигнал через Web Audio (без звуковых файлов).
-function beep() {
+// Доступные сигналы окончания фазы (id должны совпадать с ключами i18n focus.sound_*).
+const POMO_SOUNDS = ['double', 'notification', 'bell', 'digital', 'chime'] as const
+type PomoSound = (typeof POMO_SOUNDS)[number]
+
+type ToneSpec = { freq: number; start: number; dur: number; type?: OscillatorType; gain?: number }
+
+// Каждый сигнал — набор коротких тонов (чистый синтез через Web Audio, без файлов).
+// 'notification' — несколько «пиков» подряд, как пачка уведомлений на телефоне.
+const SOUND_SPECS: Record<PomoSound, ToneSpec[]> = {
+  double: [
+    { freq: 880, start: 0, dur: 0.25 },
+    { freq: 1175, start: 0.28, dur: 0.35 },
+  ],
+  notification: [
+    { freq: 1318, start: 0, dur: 0.16, type: 'triangle' },
+    { freq: 1568, start: 0.15, dur: 0.2, type: 'triangle' },
+    { freq: 1318, start: 0.42, dur: 0.16, type: 'triangle' },
+    { freq: 1568, start: 0.57, dur: 0.2, type: 'triangle' },
+    { freq: 1318, start: 0.84, dur: 0.16, type: 'triangle' },
+    { freq: 1568, start: 0.99, dur: 0.28, type: 'triangle' },
+  ],
+  bell: [
+    { freq: 1046, start: 0, dur: 1.4 },
+    { freq: 1568, start: 0, dur: 1.4 },
+  ],
+  digital: [
+    { freq: 988, start: 0, dur: 0.12, type: 'square' },
+    { freq: 988, start: 0.18, dur: 0.12, type: 'square' },
+    { freq: 988, start: 0.36, dur: 0.12, type: 'square' },
+    { freq: 988, start: 0.6, dur: 0.12, type: 'square' },
+    { freq: 988, start: 0.78, dur: 0.12, type: 'square' },
+    { freq: 988, start: 0.96, dur: 0.12, type: 'square' },
+  ],
+  chime: [
+    { freq: 523, start: 0, dur: 0.55, gain: 1.7 },
+    { freq: 659, start: 0.2, dur: 0.55, gain: 1.7 },
+    { freq: 784, start: 0.4, dur: 0.8, gain: 1.7 },
+  ],
+}
+
+// Проигрывает выбранный сигнал с заданной громкостью (0-100) через Web Audio.
+function playPomoSound(sound: string, volume: number) {
   try {
     const Ctx =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
     if (!Ctx) return
+    const vol = Math.max(0, Math.min(1, volume / 100))
+    if (vol <= 0) return
     const ac = new Ctx()
-    const play = (freq: number, start: number, dur: number) => {
+    const specs = SOUND_SPECS[(sound as PomoSound)] ?? SOUND_SPECS.double
+    let end = 0
+    for (const n of specs) {
       const o = ac.createOscillator()
       const g = ac.createGain()
       o.connect(g)
       g.connect(ac.destination)
-      o.type = 'sine'
-      o.frequency.value = freq
-      const t0 = ac.currentTime + start
+      o.type = n.type ?? 'sine'
+      o.frequency.value = n.freq
+      const t0 = ac.currentTime + n.start
+      const peak = Math.max(0.0005, Math.min(1, 0.75 * (n.gain ?? 1) * vol))
       g.gain.setValueAtTime(0.0001, t0)
-      g.gain.exponentialRampToValueAtTime(0.3, t0 + 0.02)
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur)
+      g.gain.exponentialRampToValueAtTime(peak, t0 + 0.02)
+      g.gain.exponentialRampToValueAtTime(0.0001, t0 + n.dur)
       o.start(t0)
-      o.stop(t0 + dur + 0.02)
+      o.stop(t0 + n.dur + 0.03)
+      end = Math.max(end, n.start + n.dur)
     }
-    play(880, 0, 0.25)
-    play(1175, 0.28, 0.35)
-    window.setTimeout(() => ac.close(), 1200)
+    window.setTimeout(() => ac.close(), (end + 0.4) * 1000)
   } catch {
     // звук недоступен — не критично
   }
@@ -127,7 +171,7 @@ export default function PlannerFocus() {
   completeRef.current = () => {
     setRunning(false)
     endRef.current = null
-    beep()
+    playPomoSound(settings.sound, settings.volume)
     if (mode === 'focus') {
       const mins = settings.focusMin
       if (user) {
@@ -201,11 +245,16 @@ export default function PlannerFocus() {
   }
 
   const saveSettings = async () => {
+    const sound = (POMO_SOUNDS as readonly string[]).includes(draft.sound)
+      ? draft.sound
+      : 'double'
     const clean: PomoSettings = {
       focusMin: clamp(draft.focusMin, 1, 180),
       breakMin: clamp(draft.breakMin, 1, 60),
       longBreakMin: clamp(draft.longBreakMin, 1, 90),
       cycles: clamp(draft.cycles, 1, 12),
+      sound,
+      volume: clamp(draft.volume, 0, 100),
     }
     setSettings(clean)
     setDraft(clean)
@@ -437,6 +486,57 @@ export default function PlannerFocus() {
               />
             </label>
           </div>
+
+          {/* Звук сигнала + громкость */}
+          <div className="flex flex-col gap-2">
+            <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+              {t('focus.sound')}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {POMO_SOUNDS.map((s) => (
+                <div
+                  key={s}
+                  className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm transition ${
+                    draft.sound === s
+                      ? 'border-emerald-500 bg-emerald-500/10'
+                      : 'border-neutral-300 dark:border-neutral-700'
+                  }`}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setDraft({ ...draft, sound: s })}
+                    className="flex flex-1 items-center gap-2 text-left"
+                  >
+                    <span>{draft.sound === s ? '🔘' : '⚪'}</span>
+                    {t(`focus.sound_${s}`)}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => playPomoSound(s, draft.volume)}
+                    className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+                    title={t('focus.preview')}
+                  >
+                    ▶
+                  </button>
+                </div>
+              ))}
+            </div>
+            <label className="mt-1 flex flex-col gap-1 text-xs text-neutral-500 dark:text-neutral-400">
+              {t('focus.volume')}: {draft.volume}%
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={5}
+                value={draft.volume}
+                onChange={(e) => setDraft({ ...draft, volume: Number(e.target.value) })}
+                onMouseUp={() => playPomoSound(draft.sound, draft.volume)}
+                onTouchEnd={() => playPomoSound(draft.sound, draft.volume)}
+                className="w-full accent-emerald-500"
+              />
+            </label>
+          </div>
+
           <div className="flex justify-end gap-2">
             <button type="button" onClick={() => setShowSettings(false)} className={btnGhost}>
               {t('common.cancel')}

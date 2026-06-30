@@ -769,6 +769,8 @@ export type PomoSettings = {
   breakMin: number // короткий перерыв, мин
   longBreakMin: number // длинный перерыв, мин
   cycles: number // сколько фокусов до длинного перерыва
+  sound: string // идентификатор звука сигнала окончания фазы
+  volume: number // громкость сигнала, 0-100
 }
 
 export const POMO_DEFAULTS: PomoSettings = {
@@ -776,13 +778,15 @@ export const POMO_DEFAULTS: PomoSettings = {
   breakMin: 5,
   longBreakMin: 15,
   cycles: 4,
+  sound: 'double',
+  volume: 100,
 }
 
 // Загружает настройки таймера; при отсутствии строки — значения по умолчанию.
 export async function loadPomoSettings(userId: string): Promise<PomoSettings> {
   const { data, error } = await supabase
     .from('app_settings')
-    .select('pomo_focus_min, pomo_break_min, pomo_long_break_min, pomo_cycles')
+    .select('pomo_focus_min, pomo_break_min, pomo_long_break_min, pomo_cycles, pomo_sound, pomo_volume')
     .eq('user_id', userId)
     .maybeSingle()
   if (error || !data) return { ...POMO_DEFAULTS }
@@ -791,12 +795,16 @@ export async function loadPomoSettings(userId: string): Promise<PomoSettings> {
     pomo_break_min?: number | null
     pomo_long_break_min?: number | null
     pomo_cycles?: number | null
+    pomo_sound?: string | null
+    pomo_volume?: number | null
   }
   return {
     focusMin: row.pomo_focus_min ?? POMO_DEFAULTS.focusMin,
     breakMin: row.pomo_break_min ?? POMO_DEFAULTS.breakMin,
     longBreakMin: row.pomo_long_break_min ?? POMO_DEFAULTS.longBreakMin,
     cycles: row.pomo_cycles ?? POMO_DEFAULTS.cycles,
+    sound: row.pomo_sound ?? POMO_DEFAULTS.sound,
+    volume: row.pomo_volume ?? POMO_DEFAULTS.volume,
   }
 }
 
@@ -809,6 +817,8 @@ export async function savePomoSettings(userId: string, s: PomoSettings): Promise
       pomo_break_min: s.breakMin,
       pomo_long_break_min: s.longBreakMin,
       pomo_cycles: s.cycles,
+      pomo_sound: s.sound,
+      pomo_volume: s.volume,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'user_id' },
