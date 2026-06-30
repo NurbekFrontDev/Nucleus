@@ -14,6 +14,7 @@ import Settings from './pages/Settings'
 import PlannerStub from './pages/PlannerStub'
 import PlannerToday from './pages/PlannerToday'
 import PlannerItems from './pages/PlannerItems'
+import PlannerMatrix from './pages/PlannerMatrix'
 import PlannerFocus from './pages/PlannerFocus'
 
 function App() {
@@ -51,6 +52,7 @@ function App() {
         <Route path="/settings" element={<Settings />} />
         <Route path="/planner" element={<PlannerToday />} />
         <Route path="/planner/items" element={<PlannerItems />} />
+        <Route path="/planner/matrix" element={<PlannerMatrix />} />
         <Route path="/planner/habits" element={<Navigate to="/planner/items" replace />} />
         <Route path="/planner/calendar" element={<Navigate to="/planner" replace />} />
         <Route path="/planner/focus" element={<PlannerFocus />} />

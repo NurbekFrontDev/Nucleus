@@ -41,6 +41,7 @@ type FormState = {
   weekdays: number[]
   start_date: string
   priority: Priority
+  important: boolean
   time_of_day: TimeOfDay
   at_time_start: string
   at_time_end: string
@@ -58,6 +59,7 @@ const emptyForm: FormState = {
   weekdays: [],
   start_date: '',
   priority: 'none',
+  important: false,
   time_of_day: null,
   at_time_start: '',
   at_time_end: '',
@@ -118,6 +120,7 @@ export default function PlannerItems() {
       weekdays: it.weekdays ?? [],
       start_date: it.start_date ?? '',
       priority: it.priority,
+      important: it.important,
       time_of_day: it.time_of_day,
       at_time_start: it.at_time_start ?? '',
       at_time_end: it.at_time_end ?? '',
@@ -176,6 +179,7 @@ export default function PlannerItems() {
         weekdays: form.repeat_rule === 'weekly' ? form.weekdays : null,
         start_date: form.start_date || null,
         priority: form.priority,
+        important: form.important,
         time_of_day: form.time_of_day,
         at_time_start: form.at_time_start || null,
         at_time_end: form.at_time_end || null,
@@ -427,6 +431,22 @@ export default function PlannerItems() {
           </div>
 
           <div>
+            <button
+              type="button"
+              onClick={() => setForm((f) => ({ ...f, important: !f.important }))}
+              className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+                form.important
+                  ? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-300'
+                  : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800'
+              }`}
+            >
+              <span>{form.important ? '⭐' : '☆'}</span>
+              <span>{t('items.important')}</span>
+            </button>
+            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{t('items.importantHint')}</p>
+          </div>
+
+          <div>
             <label className={labelCls}>{t('items.section')}</label>
             <Select
               value={form.time_of_day ?? 'none'}
@@ -514,6 +534,9 @@ export default function PlannerItems() {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <p className="truncate text-sm font-medium">{it.title}</p>
+                    {it.important && (
+                      <span className="shrink-0 text-xs" title={t('items.important')}>⭐</span>
+                    )}
                     {isHabitItem && (
                       <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
                         🔁 {t('items.typeHabit')}

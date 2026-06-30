@@ -43,7 +43,7 @@ const clamp = (n: number, lo: number, hi: number): number =>
   Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : lo
 
 // Доступные сигналы окончания фазы (id должны совпадать с ключами i18n focus.sound_*).
-const POMO_SOUNDS = ['double', 'notification', 'bell', 'digital', 'chime'] as const
+const POMO_SOUNDS = ['chime', 'bell', 'double'] as const
 type PomoSound = (typeof POMO_SOUNDS)[number]
 
 type ToneSpec = { freq: number; start: number; dur: number; type?: OscillatorType; gain?: number }
@@ -51,34 +51,18 @@ type ToneSpec = { freq: number; start: number; dur: number; type?: OscillatorTyp
 // Каждый сигнал — набор коротких тонов (чистый синтез через Web Audio, без файлов).
 // 'notification' — несколько «пиков» подряд, как пачка уведомлений на телефоне.
 const SOUND_SPECS: Record<PomoSound, ToneSpec[]> = {
-  double: [
-    { freq: 880, start: 0, dur: 0.25 },
-    { freq: 1175, start: 0.28, dur: 0.35 },
-  ],
-  notification: [
-    { freq: 1318, start: 0, dur: 0.16, type: 'triangle' },
-    { freq: 1568, start: 0.15, dur: 0.2, type: 'triangle' },
-    { freq: 1318, start: 0.42, dur: 0.16, type: 'triangle' },
-    { freq: 1568, start: 0.57, dur: 0.2, type: 'triangle' },
-    { freq: 1318, start: 0.84, dur: 0.16, type: 'triangle' },
-    { freq: 1568, start: 0.99, dur: 0.28, type: 'triangle' },
-  ],
-  bell: [
-    { freq: 1046, start: 0, dur: 1.4 },
-    { freq: 1568, start: 0, dur: 1.4 },
-  ],
-  digital: [
-    { freq: 988, start: 0, dur: 0.12, type: 'square' },
-    { freq: 988, start: 0.18, dur: 0.12, type: 'square' },
-    { freq: 988, start: 0.36, dur: 0.12, type: 'square' },
-    { freq: 988, start: 0.6, dur: 0.12, type: 'square' },
-    { freq: 988, start: 0.78, dur: 0.12, type: 'square' },
-    { freq: 988, start: 0.96, dur: 0.12, type: 'square' },
-  ],
   chime: [
     { freq: 523, start: 0, dur: 0.55, gain: 1.7 },
     { freq: 659, start: 0.2, dur: 0.55, gain: 1.7 },
     { freq: 784, start: 0.4, dur: 0.8, gain: 1.7 },
+  ],
+  bell: [
+    { freq: 1046, start: 0, dur: 1.4, gain: 1.2 },
+    { freq: 1568, start: 0, dur: 1.4, gain: 1.2 },
+  ],
+  double: [
+    { freq: 880, start: 0, dur: 0.25, gain: 1.7 },
+    { freq: 1175, start: 0.28, dur: 0.35, gain: 1.7 },
   ],
 }
 

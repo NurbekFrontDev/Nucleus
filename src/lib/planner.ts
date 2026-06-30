@@ -44,6 +44,7 @@ export type PlannerItem = {
   start_date: string | null
   icon: string | null
   color: string | null
+  important: boolean
   archived: boolean
   sort_order: number
   // поля привычек (по «Атомным привычкам»), значимы только для type='habit'
@@ -63,7 +64,7 @@ export type PlannerLog = {
 
 // Набор колонок для запросов (держим в одном месте, чтобы не расходились).
 export const ITEM_COLS =
-  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, priority, start_date, icon, color, archived, sort_order, cue, identity, two_min'
+  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min'
 export const LOG_COLS = 'id, item_id, date, status, value, note'
 
 // Эмодзи-кружок важности для UI. Для none -- пусто.
@@ -80,6 +81,26 @@ export const PRIORITY_RANK: Record<Priority, number> = {
   medium: 1,
   low: 2,
   none: 3,
+}
+
+// ===== Матрица Эйзенхауэра (П-8): срочность × важность =====
+// Срочность берём из метки важности-цвета (🔴 high = срочно), а «важность»
+// для матрицы — это отдельная отметка important (двигает к большой цели).
+export type Quadrant = 'q1' | 'q2' | 'q3' | 'q4'
+
+// Срочное дело = помечено красным (high). Остальное считаем несрочным.
+export function isUrgent(item: PlannerItem): boolean {
+  return item.priority === 'high'
+}
+
+// Квадрант дела: q1 срочно+важно, q2 важно (рост), q3 срочная суета, q4 мелочь.
+export function itemQuadrant(item: PlannerItem): Quadrant {
+  const urgent = isUrgent(item)
+  const important = !!item.important
+  if (important && urgent) return 'q1'
+  if (important && !urgent) return 'q2'
+  if (!important && urgent) return 'q3'
+  return 'q4'
 }
 
 // ===== Даты в локальном часовом поясе (без UTC-сдвига) =====
@@ -274,6 +295,7 @@ export type ItemInput = {
   priority: Priority
   start_date: string | null
   icon: string | null
+  important?: boolean
   // поля привычек (только для type='habit'; для обычных дел остаются пустыми)
   cue?: string | null
   identity?: string | null
@@ -307,6 +329,7 @@ function itemRow(input: ItemInput) {
     priority: input.priority,
     start_date: input.start_date || todayStr(),
     icon: input.icon,
+    important: input.important ?? false,
     // поля привычек: для обычных дел приходят пустыми -> null
     cue: input.cue ?? null,
     identity: input.identity ?? null,
@@ -778,7 +801,7 @@ export const POMO_DEFAULTS: PomoSettings = {
   breakMin: 5,
   longBreakMin: 15,
   cycles: 4,
-  sound: 'double',
+  sound: 'chime',
   volume: 100,
 }
 

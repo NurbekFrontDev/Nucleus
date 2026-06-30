@@ -398,6 +398,7 @@ export default function PlannerToday() {
           {done ? '\u2713' : ''}
         </button>
         {dot && <span className="shrink-0 text-xs leading-none">{dot}</span>}
+        {item.important && <span className="shrink-0 text-xs leading-none">⭐</span>}
         {item.icon && <span className="shrink-0">{item.icon}</span>}
         {isHabit ? (
           <button
