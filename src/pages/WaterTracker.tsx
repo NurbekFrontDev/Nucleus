@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useId, useMemo, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
 import { addDays, todayStr } from '../lib/planner'
@@ -7,8 +7,9 @@ import {
   saveWaterGoal,
   addWaterLog,
   removeWaterLog,
-  loadWaterWeek,
+  loadWaterRange,
   type WaterDay,
+  type WaterLog,
 } from '../lib/water'
 
 const cardCls =
@@ -19,57 +20,161 @@ const QUICK_STEPS = [150, 200, 250, 300, 350, 400, 450, 500, 550, 600]
 const R = 100
 const C = 2 * Math.PI * R
 
+const WD_SHORT_RU = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+const iso = (y: number, m: number, d: number) => `${y}-${pad2(m + 1)}-${pad2(d)}`
+const dm = (date: string) => `${date.slice(8, 10)}.${date.slice(5, 7)}`
+
+// Стакан с уровнем воды (по референсу Mi «Drink water»).
+function GlassIcon({
+  fill,
+  active,
+  plus,
+}: {
+  fill: number
+  active: boolean
+  plus?: boolean
+}) {
+  const uid = useId().replace(/[:]/g, '')
+  const clip = `glass-${uid}`
+  const grad = `glassg-${uid}`
+  const top = 7
+  const bottom = 45
+  const level = Math.max(0, Math.min(1, fill))
+  const waterTop = bottom - (bottom - top) * level
+  const path = 'M10 7 L30 7 L27 43 Q27 45 25 45 L15 45 Q13 45 13 43 Z'
+  return (
+    <svg
+      viewBox="0 0 40 50"
+      className={`h-16 w-12 transition-colors ${
+        active ? 'text-sky-400' : 'text-neutral-300 dark:text-neutral-600'
+      }`}
+    >
+      <defs>
+        <clipPath id={clip}>
+          <path d={path} />
+        </clipPath>
+        <linearGradient id={grad} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor="#7dd3fc" />
+          <stop offset="100%" stopColor="#2563eb" />
+        </linearGradient>
+      </defs>
+      {level > 0 && (
+        <rect
+          x="6"
+          y={waterTop}
+          width="28"
+          height={bottom - waterTop}
+          fill={`url(#${grad})`}
+          clipPath={`url(#${clip})`}
+          className="transition-all duration-300"
+        />
+      )}
+      <path
+        d={path}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      {plus && (
+        <text
+          x="20"
+          y="31"
+          textAnchor="middle"
+          fontSize="15"
+          className="fill-sky-400 font-bold"
+        >
+          +
+        </text>
+      )}
+    </svg>
+  )
+}
+
 export default function WaterTracker() {
   const { user } = useAuth()
   const { t } = useLang()
   const today = todayStr()
 
   const [day, setDay] = useState<WaterDay | null>(null)
-  const [weekData, setWeekData] = useState<Record<string, number>>({})
+  const [trend, setTrend] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [selMl, setSelMl] = useState(250)
   const [goalEdit, setGoalEdit] = useState(false)
   const [goalDraft, setGoalDraft] = useState('')
-  const [viewMode, setViewMode] = useState<'today' | 'history'>('today')
-  const [histOffset, setHistOffset] = useState(0)
+  const [statMode, setStatMode] = useState<'week' | 'month'>('week')
+  const [statOffset, setStatOffset] = useState(0)
 
+  // Загрузка дня (сегодня)
   useEffect(() => {
     if (!user) {
       setDay(null)
-      setWeekData({})
       setLoading(false)
       return
     }
-
     let active = true
     setLoading(true)
-
     ;(async () => {
       try {
-        const [d, w] = await Promise.all([
-          loadWaterDay(user.id, today),
-          loadWaterWeek(user.id, addDays(today, histOffset * 7)),
-        ])
+        const d = await loadWaterDay(user.id, today)
         if (!active) return
         setDay(d)
         setGoalDraft(String(d.goal))
-        const nextWeek: Record<string, number> = {}
-        for (const [date, ml] of Object.entries(w)) nextWeek[date] = ml
-        setWeekData(nextWeek)
       } finally {
         if (active) setLoading(false)
       }
     })()
-
     return () => {
       active = false
     }
-  }, [user, today, histOffset])
+  }, [user, today])
 
   const drunk = day?.drunk ?? 0
   const goal = day?.goal ?? 2000
   const pct = goal > 0 ? Math.min(100, Math.round((drunk / goal) * 100)) : 0
   const left = Math.max(0, goal - drunk)
+
+  // Диапазон статистики (неделя или месяц) с учётом смещения
+  const period = useMemo(() => {
+    if (statMode === 'week') {
+      const anchor = addDays(today, statOffset * 7)
+      const ad = new Date(anchor + 'T00:00:00')
+      const wd = (ad.getDay() + 6) % 7
+      const start = addDays(anchor, -wd)
+      const days = Array.from({ length: 7 }, (_, i) => addDays(start, i))
+      return { start: days[0], end: days[6], days }
+    }
+    const base = new Date(today + 'T00:00:00')
+    base.setDate(1)
+    base.setMonth(base.getMonth() + statOffset)
+    const y = base.getFullYear()
+    const m = base.getMonth()
+    const dim = new Date(y, m + 1, 0).getDate()
+    const days = Array.from({ length: dim }, (_, i) => iso(y, m, i + 1))
+    return { start: days[0], end: days[dim - 1], days }
+  }, [statMode, statOffset, today])
+
+  // Загрузка сумм по дням для выбранного диапазона
+  useEffect(() => {
+    if (!user) {
+      setTrend({})
+      return
+    }
+    let active = true
+    ;(async () => {
+      try {
+        const r = await loadWaterRange(user.id, period.start, period.end)
+        if (active) setTrend(r)
+      } catch {
+        /* ignore */
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [user, period.start, period.end])
 
   const cupVolumes = useMemo(() => {
     const step = Math.max(1, selMl)
@@ -93,11 +198,47 @@ export default function WaterTracker() {
     })
   }, [drunk, cupVolumes])
 
-  const updateWeekDay = (date: string, delta: number) => {
-    setWeekData((prev) => ({
-      ...prev,
-      [date]: Math.max(0, (prev[date] ?? 0) + delta),
-    }))
+  const nextEmpty = cupFills.findIndex((f) => f < 0.999)
+
+  const syncTrendToday = (total: number) =>
+    setTrend((prev) => ({ ...prev, [today]: Math.max(0, total) }))
+
+  // Точно выставляет итог за сегодня: убирает свежие логи и при нехватке добавляет один.
+  const setTotal = async (target: number) => {
+    if (!user || !day) return
+    const tgt = Math.max(0, Math.round(target))
+    const logs = [...day.logs]
+    let current = day.drunk
+    const removeIds: string[] = []
+    while (current > tgt && logs.length > 0) {
+      const l = logs.shift() as WaterLog
+      removeIds.push(l.id)
+      current -= l.amount
+    }
+    let newLogs = logs
+    if (current < tgt) {
+      const added = await addWaterLog(user.id, today, tgt - current)
+      current = tgt
+      newLogs = [added, ...newLogs]
+    }
+    for (const id of removeIds) {
+      try {
+        await removeWaterLog(user.id, id)
+      } catch {
+        /* ignore */
+      }
+    }
+    setDay((prev) => (prev ? { ...prev, drunk: current, logs: newLogs } : prev))
+    syncTrendToday(current)
+  }
+
+  // Кумулятивный тап: до этого бокала — наполнить, по полному — обнулить от него.
+  const tapCup = async (idx: number) => {
+    let through = 0
+    for (let k = 0; k <= idx; k++) through += cupVolumes[k] ?? 0
+    const before = through - (cupVolumes[idx] ?? 0)
+    const target = drunk >= through ? before : through
+    await setTotal(target)
   }
 
   const quickAdd = async (ml: number) => {
@@ -107,15 +248,14 @@ export default function WaterTracker() {
       setDay((prev) =>
         prev ? { ...prev, drunk: prev.drunk + ml, logs: [log, ...prev.logs] } : prev,
       )
-      updateWeekDay(today, ml)
+      syncTrendToday(drunk + ml)
     } catch {
       /* ignore */
     }
   }
 
-  const removeAmount = async (amount: number) => {
-    if (!user || !day || day.logs.length === 0) return
-    const log = day.logs.find((entry) => entry.amount === amount) ?? day.logs[0]
+  const removeLog = async (log: WaterLog) => {
+    if (!user) return
     try {
       await removeWaterLog(user.id, log.id)
       setDay((prev) =>
@@ -127,19 +267,9 @@ export default function WaterTracker() {
             }
           : prev,
       )
-      updateWeekDay(today, -log.amount)
+      syncTrendToday(drunk - log.amount)
     } catch {
       /* ignore */
-    }
-  }
-
-  const toggleGlass = async (idx: number) => {
-    const cupMl = cupVolumes[idx] ?? selMl
-    const fill = cupFills[idx] ?? 0
-    if (fill > 0) {
-      await removeAmount(cupMl)
-    } else {
-      await quickAdd(cupMl)
     }
   }
 
@@ -155,82 +285,35 @@ export default function WaterTracker() {
   const isFull = pct >= 100
   const dashOffset = C * (1 - pct / 100)
 
-  const WD_SHORT_RU = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
-  const weekLabel = (d: string) => WD_SHORT_RU[(new Date(d + 'T00:00:00').getDay() + 6) % 7]
-
-  const anchor = addDays(today, histOffset * 7)
-  const histDays = Array.from({ length: 7 }, (_, i) => addDays(anchor, -6 + i))
-  const shiftHist = (by: number) => setHistOffset((o) => o + by)
+  // Данные графика
+  const statValues = period.days.map((d) => trend[d] ?? 0)
+  const nonZero = statValues.filter((v) => v > 0)
+  const avg = nonZero.length
+    ? Math.round(nonZero.reduce((s, v) => s + v, 0) / nonZero.length)
+    : 0
+  const periodLabel =
+    statMode === 'week'
+      ? `${dm(period.start)} – ${dm(period.end)}`
+      : `${period.start.slice(5, 7)}.${period.start.slice(0, 4)}`
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-semibold">{t('water.title')}</h1>
-        <div className="flex items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setViewMode(viewMode === 'today' ? 'history' : 'today')}
-            className="cursor-pointer rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-          >
-            {viewMode === 'today' ? '📊' : '🕒'}
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setGoalEdit(!goalEdit)
-              setGoalDraft(String(goal))
-            }}
-            className="cursor-pointer rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-          >
-            ⚙️
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={() => {
+            setGoalEdit(!goalEdit)
+            setGoalDraft(String(goal))
+          }}
+          className="cursor-pointer rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        >
+          ⚙️
+        </button>
       </div>
 
       {loading ? (
         <p className="text-sm text-neutral-500">{t('common.loading')}</p>
-      ) : viewMode === 'history' ? (
-        <div className={`${cardCls} flex flex-col gap-4`}>
-          <div className="flex items-center justify-between">
-            <button
-              type="button"
-              onClick={() => shiftHist(-1)}
-              className="cursor-pointer rounded px-2 py-1 text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
-            >
-              ‹
-            </button>
-            <span className="text-sm font-medium">
-              {histDays[0]} – {histDays[6]}
-            </span>
-            <button
-              type="button"
-              onClick={() => shiftHist(1)}
-              className="cursor-pointer rounded px-2 py-1 text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
-            >
-              ›
-            </button>
-          </div>
-          <div className="flex items-end justify-between gap-2">
-            {histDays.map((d) => {
-              const ml = weekData[d] || 0
-              const dayPct = goal > 0 ? Math.min(100, (ml / goal) * 100) : 0
-              return (
-                <div key={d} className="flex flex-1 flex-col items-center gap-1">
-                  <span className="text-xs font-medium">{Math.round(dayPct)}%</span>
-                  <div className="flex h-40 w-full flex-col justify-end overflow-hidden rounded-xl bg-neutral-100 dark:bg-neutral-800">
-                    <div
-                      className="w-full rounded-t-xl bg-sky-400 transition-all"
-                      style={{
-                        height: `${Math.max(ml > 0 ? 8 : 0, dayPct)}%`,
-                      }}
-                    />
-                  </div>
-                  <span className="text-[10px] text-neutral-400">{weekLabel(d)}</span>
-                </div>
-              )
-            })}
-          </div>
-        </div>
       ) : (
         <>
           <div className={`${cardCls} flex flex-col gap-3`}>
@@ -299,7 +382,8 @@ export default function WaterTracker() {
                 />
               </svg>
               <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                <p className="text-4xl font-bold">{pct}%</p>
+                <span className="text-3xl">💧</span>
+                <p className="text-3xl font-bold">{pct}%</p>
                 <p className="text-sm text-neutral-500 dark:text-neutral-400">
                   {drunk} / {goal} ml
                 </p>
@@ -309,40 +393,19 @@ export default function WaterTracker() {
               </div>
             </div>
 
-            <div className="grid w-full grid-cols-3 gap-3 sm:grid-cols-4">
+            <div className="grid w-full grid-cols-4 gap-1 sm:grid-cols-5">
               {cupVolumes.map((cupMl, i) => {
                 const fill = cupFills[i] ?? 0
-                const filledMl = Math.round(fill * cupMl)
-                const active = fill > 0
+                const active = fill > 0.001
                 return (
                   <button
                     key={`${cupMl}-${i}`}
                     type="button"
-                    onClick={() => toggleGlass(i)}
-                    className={`flex cursor-pointer flex-col items-center gap-1 rounded-2xl px-2 py-1 transition active:scale-[.97] ${
-                      active ? 'opacity-100' : 'opacity-80 hover:opacity-100'
-                    }`}
+                    onClick={() => tapCup(i)}
+                    className="flex cursor-pointer flex-col items-center gap-0.5 rounded-2xl py-1 transition active:scale-90"
                   >
-                    <span
-                      className={`relative flex h-20 w-14 items-end overflow-hidden rounded-[18px] border-2 transition ${
-                        active
-                          ? 'border-sky-400 bg-sky-50 shadow-sm shadow-sky-200/70 dark:border-sky-500/70 dark:bg-sky-950/20'
-                          : 'border-neutral-300 bg-white dark:border-neutral-700 dark:bg-neutral-950'
-                      }`}
-                    >
-                      <span
-                        className="absolute inset-x-1 bottom-1 rounded-[12px] bg-gradient-to-t from-sky-500 to-sky-300 transition-all duration-300"
-                        style={{ height: fill > 0 ? `${Math.max(10, Math.round(fill * 100))}%` : '0%' }}
-                      />
-                      <span
-                        className={`absolute inset-0 flex items-center justify-center text-[11px] font-semibold ${
-                          fill > 0.55 ? 'text-white' : 'text-neutral-500 dark:text-neutral-300'
-                        }`}
-                      >
-                        {filledMl}
-                      </span>
-                    </span>
-                    <span className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+                    <GlassIcon fill={fill} active={active} plus={i === nextEmpty} />
+                    <span className="text-[10px] font-medium text-neutral-400">
                       {cupMl} ml
                     </span>
                   </button>
@@ -395,6 +458,124 @@ export default function WaterTracker() {
             </div>
           )}
 
+          {/* Статистика — всегда снизу */}
+          <div className={`${cardCls} flex flex-col gap-4`}>
+            <div className="flex items-center justify-between">
+              <div>
+                <p className="text-sm font-semibold">📊 Статистика</p>
+                <p className="text-xs text-neutral-400">
+                  Сред. {avg} мл/день
+                </p>
+              </div>
+              <div className="flex rounded-lg bg-neutral-100 p-0.5 text-xs font-medium dark:bg-neutral-800">
+                {(['week', 'month'] as const).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => {
+                      setStatMode(m)
+                      setStatOffset(0)
+                    }}
+                    className={`cursor-pointer rounded-md px-3 py-1 transition ${
+                      statMode === m
+                        ? 'bg-white text-sky-600 shadow-sm dark:bg-neutral-900 dark:text-sky-400'
+                        : 'text-neutral-500'
+                    }`}
+                  >
+                    {m === 'week' ? 'Неделя' : 'Месяц'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-neutral-400">
+              <button
+                type="button"
+                onClick={() => setStatOffset((o) => o - 1)}
+                className="cursor-pointer rounded px-2 py-1 transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+              >
+                ‹
+              </button>
+              <span className="font-medium text-neutral-500 dark:text-neutral-300">
+                {periodLabel}
+              </span>
+              <button
+                type="button"
+                disabled={statOffset >= 0}
+                onClick={() => setStatOffset((o) => Math.min(0, o + 1))}
+                className="cursor-pointer rounded px-2 py-1 transition hover:bg-neutral-100 disabled:opacity-30 dark:hover:bg-neutral-800"
+              >
+                ›
+              </button>
+            </div>
+
+            <div className="flex flex-col gap-1">
+              <div className="relative flex h-40 items-end gap-1">
+                <div className="pointer-events-none absolute inset-x-0 top-0 border-t border-dashed border-sky-400/40" />
+                {avg > 0 && goal > 0 && (
+                  <div
+                    className="pointer-events-none absolute inset-x-0 border-t border-dashed border-emerald-400/60"
+                    style={{ bottom: `${Math.min(100, (avg / goal) * 100)}%` }}
+                  />
+                )}
+                {period.days.map((d, i) => {
+                  const v = statValues[i]
+                  const hp = goal > 0 ? Math.min(100, (v / goal) * 100) : 0
+                  const isToday = d === today
+                  return (
+                    <div
+                      key={d}
+                      className="flex h-full flex-1 items-end"
+                      title={`${dm(d)}: ${v} ml`}
+                    >
+                      <div
+                        className={`w-full rounded-t transition-all ${
+                          isToday
+                            ? 'bg-gradient-to-t from-sky-600 to-sky-400'
+                            : v > 0
+                              ? 'bg-sky-300 dark:bg-sky-500/70'
+                              : 'bg-neutral-100 dark:bg-neutral-800'
+                        }`}
+                        style={{ height: `${v > 0 ? Math.max(4, hp) : 2}%` }}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+              <div className="flex gap-1">
+                {period.days.map((d) => {
+                  const dayNum = Number(d.slice(8, 10))
+                  const label =
+                    statMode === 'week'
+                      ? WD_SHORT_RU[(new Date(d + 'T00:00:00').getDay() + 6) % 7]
+                      : dayNum === 1 || dayNum % 5 === 0
+                        ? String(dayNum)
+                        : ''
+                  return (
+                    <span
+                      key={d}
+                      className="flex-1 text-center text-[9px] text-neutral-400"
+                    >
+                      {label}
+                    </span>
+                  )
+                })}
+              </div>
+            </div>
+
+            <div className="flex items-center justify-center gap-4 text-[11px] text-neutral-400">
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-2 rounded-full bg-sky-400" /> Выпито
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-3 border-t border-dashed border-emerald-400" /> Среднее
+              </span>
+              <span className="flex items-center gap-1">
+                <span className="h-2 w-3 border-t border-dashed border-sky-400" /> Цель
+              </span>
+            </div>
+          </div>
+
           {day && day.logs.length > 0 && (
             <div className={`${cardCls} flex flex-col gap-2`}>
               <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
@@ -408,7 +589,7 @@ export default function WaterTracker() {
                   <span className="text-sm">+{log.amount} ml</span>
                   <button
                     type="button"
-                    onClick={() => removeAmount(log.amount)}
+                    onClick={() => removeLog(log)}
                     className="cursor-pointer text-xs text-red-500 transition hover:text-red-400"
                   >
                     {t('common.delete')}
