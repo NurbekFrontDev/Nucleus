@@ -42,6 +42,7 @@ export const MODULES: ModuleDef[] = [
       { to: '/planner/matrix', key: 'pnav.matrix', icon: '⚖️' },
       { to: '/planner/focus', key: 'pnav.focus', icon: '🍅' },
       { to: '/planner/stats', key: 'pnav.stats', icon: '📊' },
+      { to: '/planner/settings', key: 'pnav.settings', icon: '⚙️' },
     ],
   },
 ]

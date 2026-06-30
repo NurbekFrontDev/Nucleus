@@ -15,18 +15,19 @@ import {
   type PomoKind,
 } from '../lib/planner'
 
-// Экран «Фокус» (П-7): таймер Помодоро 25/5 с длинным перерывом.
-//   Большое кольцо прогресса + крупное время. Три фазы: фокус / перерыв /
-//   длинный перерыв (каждые N фокусов). Старт/Пауза/Сброс/Пропустить.
-//   Можно привязать сессию к делу из «Сегодня». Завершённые фокусы пишутся
-//   в pomodoro_sessions, настройки длительностей — в app_settings.
+// Экран «Фокус» (П-7 + редизайн П-10): Помодоро в стиле GoodTime.
+//   Без вкладок и кнопок: нажатие на время = старт/пауза, управление жестами.
+//   Тянешь от центра — появляется круглый «пульт» с 4 секторами: вверх ＋ (+1
+//   минута), вправо › (вперёд/следующая фаза), влево ‹ (назад), вниз ✕ (стоп).
+//   Отпускаешь на секторе — действие. Фазы (фокус/перерыв/длинный перерыв)
+//   переключаются автоматически и жестами.
 
 const cardCls =
   'rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50'
 const inputCls =
   'w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
 const btnGhost =
-  'rounded-xl border border-neutral-300 px-4 py-2.5 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800'
+  'rounded-xl border border-neutral-300 px-4 py-2.5 text-sm transition hover:bg-neutral-100 active:scale-[.97] dark:border-neutral-700 dark:hover:bg-neutral-800'
 
 // Цвет кольца по фазе.
 const ringColor = (m: PomoKind): string =>
@@ -48,8 +49,6 @@ type PomoSound = (typeof POMO_SOUNDS)[number]
 
 type ToneSpec = { freq: number; start: number; dur: number; type?: OscillatorType; gain?: number }
 
-// Каждый сигнал — набор коротких тонов (чистый синтез через Web Audio, без файлов).
-// 'notification' — несколько «пиков» подряд, как пачка уведомлений на телефоне.
 const SOUND_SPECS: Record<PomoSound, ToneSpec[]> = {
   chime: [
     { freq: 523, start: 0, dur: 0.55, gain: 1.7 },
@@ -100,6 +99,11 @@ function playPomoSound(sound: string, volume: number) {
   }
 }
 
+type Dir = 'add' | 'skip' | 'back' | 'stop' | null
+const PHASE_ORDER: PomoKind[] = ['focus', 'break', 'long_break']
+const DEADZONE = 26
+const DIAL_R = 78
+
 export default function PlannerFocus() {
   const { user } = useAuth()
   const { t } = useLang()
@@ -115,6 +119,21 @@ export default function PlannerFocus() {
   const [showSettings, setShowSettings] = useState(false)
   const [draft, setDraft] = useState<PomoSettings>(POMO_DEFAULTS)
   const [ready, setReady] = useState(false)
+
+  // Жестовый «пульт».
+  const [dial, setDial] = useState<{ active: boolean; dx: number; dy: number; dir: Dir }>({
+    active: false,
+    dx: 0,
+    dy: 0,
+    dir: null,
+  })
+  const startRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
+  const dialRef = useRef<{ active: boolean; dx: number; dy: number; dir: Dir }>({
+    active: false,
+    dx: 0,
+    dy: 0,
+    dir: null,
+  })
 
   const endRef = useRef<number | null>(null)
   const completeRef = useRef<() => void>(() => {})
@@ -151,7 +170,7 @@ export default function PlannerFocus() {
     }
   }, [user])
 
-  // Логика завершения фазы (через ref, чтобы тик всегда видел свежее состояние).
+  // Логика завершения фазы (через ref, чтобы тик всегда видел свежие значения).
   completeRef.current = () => {
     setRunning(false)
     endRef.current = null
@@ -186,7 +205,7 @@ export default function PlannerFocus() {
     }
   }
 
-  // Тик таймера: считаем от целевого времени, чтобы не плыло в фоне.
+  // Тик таймера.
   useEffect(() => {
     if (!running) return
     const id = window.setInterval(() => {
@@ -212,26 +231,81 @@ export default function PlannerFocus() {
     setRunning(false)
     endRef.current = null
   }
-  const reset = () => {
-    setRunning(false)
-    endRef.current = null
-    setRemaining(durMin(mode) * 60)
-  }
   const switchMode = (m: PomoKind) => {
     setRunning(false)
     endRef.current = null
     setMode(m)
     setRemaining(durMin(m) * 60)
   }
-  const skip = () => {
-    if (mode === 'focus') switchMode('break')
-    else switchMode('focus')
+
+  // ===== Жесты =====
+  const cyclePhase = (delta: number) => {
+    const i = PHASE_ORDER.indexOf(mode)
+    const nextMode = PHASE_ORDER[(i + delta + PHASE_ORDER.length) % PHASE_ORDER.length]
+    switchMode(nextMode)
+  }
+  const addMinute = () => {
+    setRemaining((r) => r + 60)
+    if (running && endRef.current != null) endRef.current += 60000
+  }
+  const stopAll = () => {
+    setRunning(false)
+    endRef.current = null
+    setMode('focus')
+    setRemaining(settings.focusMin * 60)
+  }
+
+  const dirFrom = (dx: number, dy: number): Dir => {
+    if (Math.hypot(dx, dy) < DEADZONE) return null
+    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'skip' : 'back'
+    return dy > 0 ? 'stop' : 'add'
+  }
+
+  const onDialDown = (e: React.PointerEvent) => {
+    try {
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    } catch {
+      // noop
+    }
+    startRef.current = { x: e.clientX, y: e.clientY }
+    const next = { active: true, dx: 0, dy: 0, dir: null as Dir }
+    dialRef.current = next
+    setDial(next)
+  }
+  const onDialMove = (e: React.PointerEvent) => {
+    if (!dialRef.current.active) return
+    const dx = e.clientX - startRef.current.x
+    const dy = e.clientY - startRef.current.y
+    const next = { active: true, dx, dy, dir: dirFrom(dx, dy) }
+    dialRef.current = next
+    setDial(next)
+  }
+  const onDialUp = (e: React.PointerEvent) => {
+    try {
+      ;(e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId)
+    } catch {
+      // noop
+    }
+    const d = dialRef.current
+    const cleared = { active: false, dx: 0, dy: 0, dir: null as Dir }
+    dialRef.current = cleared
+    setDial(cleared)
+    if (!d.active) return
+    if (d.dir === 'add') addMinute()
+    else if (d.dir === 'skip') cyclePhase(1)
+    else if (d.dir === 'back') cyclePhase(-1)
+    else if (d.dir === 'stop') stopAll()
+    else if (running) pause()
+    else start()
+  }
+  const onDialCancel = () => {
+    const cleared = { active: false, dx: 0, dy: 0, dir: null as Dir }
+    dialRef.current = cleared
+    setDial(cleared)
   }
 
   const saveSettings = async () => {
-    const sound = (POMO_SOUNDS as readonly string[]).includes(draft.sound)
-      ? draft.sound
-      : 'double'
+    const sound = (POMO_SOUNDS as readonly string[]).includes(draft.sound) ? draft.sound : 'double'
     const clean: PomoSettings = {
       focusMin: clamp(draft.focusMin, 1, 180),
       breakMin: clamp(draft.breakMin, 1, 60),
@@ -258,15 +332,6 @@ export default function PlannerFocus() {
 
   const phaseLabel =
     mode === 'focus' ? t('focus.focus') : mode === 'break' ? t('focus.break') : t('focus.longBreak')
-  const hint = running
-    ? mode === 'focus'
-      ? t('focus.inFocus')
-      : t('focus.inBreak')
-    : mode === 'focus'
-      ? t('focus.readyFocus')
-      : mode === 'break'
-        ? t('focus.readyBreak')
-        : t('focus.readyLong')
 
   const cycleNow = (focusDone % settings.cycles) + 1
   const filledDots = focusDone % settings.cycles
@@ -279,11 +344,18 @@ export default function PlannerFocus() {
     })),
   ]
 
-  const tabCls = (active: boolean): string =>
-    `rounded-lg px-3 py-1.5 text-sm font-medium transition ${
-      active
-        ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-400'
-        : 'text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800'
+  const dist = Math.hypot(dial.dx, dial.dy)
+  const kf = dist > DIAL_R && dist > 0 ? DIAL_R / dist : 1
+  const knobStyle: React.CSSProperties = {
+    transform: `translate(calc(-50% + ${Math.round(dial.dx * kf)}px), calc(-50% + ${Math.round(
+      dial.dy * kf,
+    )}px))`,
+  }
+  const segCls = (dir: Dir): string =>
+    `absolute flex flex-col items-center gap-0.5 text-2xl font-bold leading-none transition ${
+      dial.dir === dir
+        ? 'text-emerald-600 dark:text-emerald-300'
+        : 'text-neutral-400 dark:text-neutral-500'
     }`
 
   if (!ready) {
@@ -314,28 +386,18 @@ export default function PlannerFocus() {
         </button>
       </div>
 
-      {/* Переключатель фаз */}
-      <div className="flex justify-center">
-        <div className="inline-flex gap-1 rounded-xl border border-neutral-200 bg-white p-1 dark:border-neutral-800 dark:bg-neutral-900/50">
-          <button type="button" className={tabCls(mode === 'focus')} onClick={() => switchMode('focus')}>
-            {t('focus.focus')}
-          </button>
-          <button type="button" className={tabCls(mode === 'break')} onClick={() => switchMode('break')}>
-            {t('focus.break')}
-          </button>
-          <button
-            type="button"
-            className={tabCls(mode === 'long_break')}
-            onClick={() => switchMode('long_break')}
-          >
-            {t('focus.longBreak')}
-          </button>
-        </div>
-      </div>
-
-      {/* Кольцо таймера */}
+      {/* Кольцо таймера с жестовым управлением */}
       <div className={`${cardCls} flex flex-col items-center gap-4`}>
-        <div className="relative h-72 w-72">
+        <div
+          className="relative h-72 w-72 cursor-pointer touch-none select-none"
+          role="button"
+          tabIndex={0}
+          aria-label={t('focus.tapHint')}
+          onPointerDown={onDialDown}
+          onPointerMove={onDialMove}
+          onPointerUp={onDialUp}
+          onPointerCancel={onDialCancel}
+        >
           <svg className="h-full w-full -rotate-90" viewBox="0 0 280 280">
             <circle
               cx="140"
@@ -359,13 +421,40 @@ export default function PlannerFocus() {
               strokeDashoffset={offset}
             />
           </svg>
-          <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
             <div className="text-xs uppercase tracking-wide text-neutral-400">{phaseLabel}</div>
             <div className="text-6xl font-bold tabular-nums">{mmss(remaining)}</div>
             <div className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
               {t('focus.cycleDots', { n: cycleNow, m: settings.cycles })}
             </div>
           </div>
+
+          {dial.active && (
+            <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center">
+              <div className="relative flex h-56 w-56 items-center justify-center rounded-full border border-neutral-300/60 bg-neutral-100/85 backdrop-blur dark:border-neutral-700/60 dark:bg-neutral-900/85">
+                <div className={`${segCls('add')} left-1/2 top-5 -translate-x-1/2`}>
+                  <span>＋</span>
+                  <span className="text-[10px] font-medium">{t('focus.gAdd')}</span>
+                </div>
+                <div className={`${segCls('skip')} right-5 top-1/2 -translate-y-1/2`}>
+                  <span>›</span>
+                  <span className="text-[10px] font-medium">{t('focus.gSkip')}</span>
+                </div>
+                <div className={`${segCls('back')} left-5 top-1/2 -translate-y-1/2`}>
+                  <span>‹</span>
+                  <span className="text-[10px] font-medium">{t('focus.gBack')}</span>
+                </div>
+                <div className={`${segCls('stop')} bottom-5 left-1/2 -translate-x-1/2`}>
+                  <span>✕</span>
+                  <span className="text-[10px] font-medium">{t('focus.gStop')}</span>
+                </div>
+                <div
+                  className="absolute left-1/2 top-1/2 h-12 w-12 rounded-full bg-emerald-500 shadow-lg ring-4 ring-emerald-500/25"
+                  style={knobStyle}
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Точки циклов */}
@@ -380,34 +469,9 @@ export default function PlannerFocus() {
           ))}
         </div>
 
-        <p className="text-center text-sm text-neutral-500 dark:text-neutral-400">{hint}</p>
-
-        {/* Управление */}
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          {running ? (
-            <button
-              type="button"
-              onClick={pause}
-              className="rounded-xl bg-emerald-500 px-8 py-3 text-base font-semibold text-white transition hover:bg-emerald-600"
-            >
-              {t('focus.pause')}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={start}
-              className="rounded-xl bg-emerald-500 px-8 py-3 text-base font-semibold text-white transition hover:bg-emerald-600"
-            >
-              {remaining < total ? t('focus.resume') : t('focus.start')}
-            </button>
-          )}
-          <button type="button" onClick={reset} className={btnGhost}>
-            {t('focus.reset')}
-          </button>
-          <button type="button" onClick={skip} className={btnGhost}>
-            {t('focus.skip')}
-          </button>
-        </div>
+        <p className="max-w-xs text-center text-sm text-neutral-500 dark:text-neutral-400">
+          {t('focus.tapHint')}
+        </p>
       </div>
 
       {/* Дело, на котором фокус */}
@@ -427,108 +491,105 @@ export default function PlannerFocus() {
       {/* Настройки таймера */}
       {showSettings && (
         <div className={`${cardCls} flex flex-col gap-3`}>
-          <div className="text-sm font-medium">{t('focus.settings')}</div>
+          <h2 className="text-base font-semibold">{t('focus.settings')}</h2>
           <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1 text-xs text-neutral-500 dark:text-neutral-400">
-              {t('focus.focusMin')}
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                {t('focus.focusMin')}
+              </label>
               <input
                 type="number"
                 min={1}
+                max={180}
                 className={inputCls}
                 value={draft.focusMin}
-                onChange={(e) => setDraft({ ...draft, focusMin: Number(e.target.value) })}
+                onChange={(e) => setDraft((d) => ({ ...d, focusMin: Number(e.target.value) }))}
               />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-neutral-500 dark:text-neutral-400">
-              {t('focus.breakMin')}
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                {t('focus.breakMin')}
+              </label>
               <input
                 type="number"
                 min={1}
+                max={60}
                 className={inputCls}
                 value={draft.breakMin}
-                onChange={(e) => setDraft({ ...draft, breakMin: Number(e.target.value) })}
+                onChange={(e) => setDraft((d) => ({ ...d, breakMin: Number(e.target.value) }))}
               />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-neutral-500 dark:text-neutral-400">
-              {t('focus.longBreakMin')}
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                {t('focus.longBreakMin')}
+              </label>
               <input
                 type="number"
                 min={1}
+                max={90}
                 className={inputCls}
                 value={draft.longBreakMin}
-                onChange={(e) => setDraft({ ...draft, longBreakMin: Number(e.target.value) })}
+                onChange={(e) =>
+                  setDraft((d) => ({ ...d, longBreakMin: Number(e.target.value) }))
+                }
               />
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-neutral-500 dark:text-neutral-400">
-              {t('focus.cycles')}
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                {t('focus.cycles')}
+              </label>
               <input
                 type="number"
                 min={1}
+                max={12}
                 className={inputCls}
                 value={draft.cycles}
-                onChange={(e) => setDraft({ ...draft, cycles: Number(e.target.value) })}
+                onChange={(e) => setDraft((d) => ({ ...d, cycles: Number(e.target.value) }))}
               />
-            </label>
+            </div>
           </div>
-
-          {/* Звук сигнала + громкость */}
-          <div className="flex flex-col gap-2">
-            <div className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+          <div>
+            <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
               {t('focus.sound')}
-            </div>
-            <div className="flex flex-col gap-1.5">
-              {POMO_SOUNDS.map((s) => (
-                <div
-                  key={s}
-                  className={`flex items-center justify-between gap-2 rounded-lg border px-3 py-2 text-sm transition ${
-                    draft.sound === s
-                      ? 'border-emerald-500 bg-emerald-500/10'
-                      : 'border-neutral-300 dark:border-neutral-700'
-                  }`}
-                >
-                  <button
-                    type="button"
-                    onClick={() => setDraft({ ...draft, sound: s })}
-                    className="flex flex-1 items-center gap-2 text-left"
-                  >
-                    <span>{draft.sound === s ? '🔘' : '⚪'}</span>
-                    {t(`focus.sound_${s}`)}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => playPomoSound(s, draft.volume)}
-                    className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-                    title={t('focus.preview')}
-                  >
-                    ▶
-                  </button>
-                </div>
-              ))}
-            </div>
-            <label className="mt-1 flex flex-col gap-1 text-xs text-neutral-500 dark:text-neutral-400">
-              {t('focus.volume')}: {draft.volume}%
-              <input
-                type="range"
-                min={0}
-                max={100}
-                step={5}
-                value={draft.volume}
-                onChange={(e) => setDraft({ ...draft, volume: Number(e.target.value) })}
-                onMouseUp={() => playPomoSound(draft.sound, draft.volume)}
-                onTouchEnd={() => playPomoSound(draft.sound, draft.volume)}
-                className="w-full accent-emerald-500"
-              />
             </label>
+            <Select
+              value={draft.sound}
+              options={POMO_SOUNDS.map((s) => ({ value: s, label: t(`focus.sound_${s}`) }))}
+              onChange={(v) => setDraft((d) => ({ ...d, sound: v }))}
+            />
           </div>
-
+          <div>
+            <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
+              {t('focus.volume')} {draft.volume}%
+            </label>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              className="w-full accent-emerald-500"
+              value={draft.volume}
+              onChange={(e) => setDraft((d) => ({ ...d, volume: Number(e.target.value) }))}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={() => playPomoSound(draft.sound, draft.volume)}
+            className={btnGhost}
+          >
+            {t('focus.preview')}
+          </button>
           <div className="flex justify-end gap-2">
-            <button type="button" onClick={() => setShowSettings(false)} className={btnGhost}>
+            <button
+              type="button"
+              onClick={() => setShowSettings(false)}
+              className={btnGhost}
+            >
               {t('common.cancel')}
             </button>
             <button
               type="button"
               onClick={saveSettings}
-              className="rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-emerald-600"
+              className="rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400"
             >
               {t('common.save')}
             </button>

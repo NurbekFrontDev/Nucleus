@@ -16,6 +16,7 @@ import PlannerItems from './pages/PlannerItems'
 import PlannerMatrix from './pages/PlannerMatrix'
 import PlannerFocus from './pages/PlannerFocus'
 import PlannerStats from './pages/PlannerStats'
+import PlannerSettings from './pages/PlannerSettings'
 
 function App() {
   const { session, loading } = useAuth()
@@ -57,6 +58,7 @@ function App() {
         <Route path="/planner/calendar" element={<Navigate to="/planner" replace />} />
         <Route path="/planner/focus" element={<PlannerFocus />} />
         <Route path="/planner/stats" element={<PlannerStats />} />
+        <Route path="/planner/settings" element={<PlannerSettings />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Route>
     </Routes>

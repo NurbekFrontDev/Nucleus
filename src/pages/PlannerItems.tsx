@@ -533,7 +533,7 @@ export default function PlannerItems() {
                 {it.icon && <span className="shrink-0">{it.icon}</span>}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <p className="truncate text-sm font-medium">{it.title}</p>
+                    <p className="break-words text-sm font-medium">{it.title}</p>
                     {it.important && (
                       <span className="shrink-0 text-xs" title={t('items.important')}>⭐</span>
                     )}
@@ -548,7 +548,7 @@ export default function PlannerItems() {
                     {time ? ` · ${time}` : ''}
                   </p>
                   {isHabitItem && it.identity && (
-                    <p className="mt-0.5 truncate text-xs text-neutral-500 dark:text-neutral-400">
+                    <p className="mt-0.5 break-words text-xs text-neutral-500 dark:text-neutral-400">
                       {t('items.sentenceBecomeShort')} {it.identity}
                     </p>
                   )}

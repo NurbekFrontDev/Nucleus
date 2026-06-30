@@ -19,14 +19,14 @@ export default function Layout() {
           <button
             key={m.id}
             onClick={() => navigate(m.home)}
-            className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
+            className={`flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
               isActive
                 ? 'bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100'
                 : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200'
             }`}
           >
-            <span>{m.icon}</span>
-            <span>{t(m.nameKey)}</span>
+            <span className="shrink-0">{m.icon}</span>
+            <span className="truncate">{t(m.nameKey)}</span>
           </button>
         )
       })}
@@ -67,13 +67,13 @@ export default function Layout() {
 
       {/* Top bar (mobile): brand + module switcher */}
       <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-neutral-200 bg-white/95 px-4 py-2 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:hidden">
-        <span className="flex items-center gap-1.5 font-semibold">
+        <span className="flex shrink-0 items-center gap-1.5 font-semibold">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500 text-sm">
             ⚛️
           </span>
           Nucleus
         </span>
-        <div className="ml-auto w-44">{moduleSwitcher}</div>
+        <div className="ml-auto min-w-0 max-w-[14rem] flex-1">{moduleSwitcher}</div>
       </header>
 
       {/* Content */}
