@@ -442,18 +442,18 @@ export default function PlannerToday() {
           </div>
         )}
         {time && (
-          <span className="shrink-0 text-xs text-neutral-500 dark:text-neutral-400">{time}</span>
+          <span className="shrink-0 rounded-lg bg-white px-2 py-0.5 text-sm font-medium text-neutral-700 shadow-sm ring-1 ring-neutral-200/60 dark:bg-neutral-800 dark:text-neutral-200 dark:ring-neutral-700">{time}</span>
         )}
       </div>
     )
   }
 
-  // Группы для режима «Утро / День / Вечер».
+  // Группы для режима «Утро / День / Вечер / Весь день».
   const sectionDefs: { key: Exclude<TimeOfDay, null> | 'none'; label: string }[] = [
     { key: 'morning', label: t('today.morning') },
     { key: 'day', label: t('today.day') },
-    { key: 'evening', label: t('today.evening') },
     { key: 'allday', label: t('today.allday') },
+    { key: 'evening', label: t('today.evening') },
     { key: 'none', label: t('today.noTime') },
   ]
 
@@ -739,7 +739,7 @@ export default function PlannerToday() {
             <button
               type="button"
               onClick={() => setEnergyOpen(true)}
-              className={`${cardCls} w-full text-left transition hover:border-emerald-400 dark:hover:border-emerald-600`}
+              className={`${cardCls} w-full cursor-pointer text-left transition hover:border-emerald-400 dark:hover:border-emerald-600`}
             >
               <div className="flex items-center justify-between gap-3">
                 <p className="text-sm font-medium">
@@ -755,10 +755,7 @@ export default function PlannerToday() {
                   style={{ width: `${pct}%` }}
                 />
               </div>
-              {/* Подсказка-«энергия» под баром */}
-              <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-neutral-400 dark:text-neutral-500">
-                <span>⚡ {t('energy.tapHint')}</span>
-              </div>
+
             </button>
           )}
 
