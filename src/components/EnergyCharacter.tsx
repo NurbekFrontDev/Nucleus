@@ -26,7 +26,10 @@ export default function EnergyCharacter({ energy, onClose }: Props) {
   const [open, setOpen] = useState(true)
   const visible = useAnimatedMount(open, 220)
 
-  const close = () => setOpen(false)
+  const close = () => {
+    onClose()
+    setOpen(false)
+  }
   if (!visible) return null
 
   const { emoji, level, glow } = getLevel(energy.energy)
