@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
 import { addDays, todayStr } from '../lib/planner'
@@ -33,62 +33,113 @@ export default function WaterTracker() {
   const [viewMode, setViewMode] = useState<'today' | 'history'>('today')
   const [histOffset, setHistOffset] = useState(0)
 
-  const reload = async () => {
-    if (!user) return
-    const d = await loadWaterDay(user.id, today)
-    setDay(d)
-    setGoalDraft(String(d.goal))
-    const w = await loadWaterWeek(user.id, addDays(today, histOffset * 7))
-    const week: Record<string, number> = {}
-    for (const [date, ml] of Object.entries(w)) week[date] = ml
-    setWeekData(week)
-    setLoading(false)
-  }
-
   useEffect(() => {
+    if (!user) {
+      setDay(null)
+      setWeekData({})
+      setLoading(false)
+      return
+    }
+
+    let active = true
     setLoading(true)
-    reload()
-  }, [user])
+
+    ;(async () => {
+      try {
+        const [d, w] = await Promise.all([
+          loadWaterDay(user.id, today),
+          loadWaterWeek(user.id, addDays(today, histOffset * 7)),
+        ])
+        if (!active) return
+        setDay(d)
+        setGoalDraft(String(d.goal))
+        const nextWeek: Record<string, number> = {}
+        for (const [date, ml] of Object.entries(w)) nextWeek[date] = ml
+        setWeekData(nextWeek)
+      } finally {
+        if (active) setLoading(false)
+      }
+    })()
+
+    return () => {
+      active = false
+    }
+  }, [user, today, histOffset])
 
   const drunk = day?.drunk ?? 0
   const goal = day?.goal ?? 2000
   const pct = goal > 0 ? Math.min(100, Math.round((drunk / goal) * 100)) : 0
-  const glasses = Math.round(goal / 250)
-  const drunkGlasses = Math.round(drunk / 250)
+  const left = Math.max(0, goal - drunk)
+
+  const cupVolumes = useMemo(() => {
+    const step = Math.max(1, selMl)
+    const target = Math.max(step, goal)
+    const parts: number[] = []
+    let remaining = target
+    while (remaining > 0) {
+      const part = Math.min(step, remaining)
+      parts.push(part)
+      remaining -= part
+    }
+    return parts
+  }, [goal, selMl])
+
+  const cupFills = useMemo(() => {
+    let remaining = drunk
+    return cupVolumes.map((cap) => {
+      const fill = Math.max(0, Math.min(cap, remaining))
+      remaining = Math.max(0, remaining - cap)
+      return cap > 0 ? fill / cap : 0
+    })
+  }, [drunk, cupVolumes])
+
+  const updateWeekDay = (date: string, delta: number) => {
+    setWeekData((prev) => ({
+      ...prev,
+      [date]: Math.max(0, (prev[date] ?? 0) + delta),
+    }))
+  }
 
   const quickAdd = async (ml: number) => {
     if (!user) return
     try {
       const log = await addWaterLog(user.id, today, ml)
-      setDay((prev) => (prev ? { ...prev, drunk: prev.drunk + ml, logs: [log, ...prev.logs] } : null))
+      setDay((prev) =>
+        prev ? { ...prev, drunk: prev.drunk + ml, logs: [log, ...prev.logs] } : prev,
+      )
+      updateWeekDay(today, ml)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const removeAmount = async (amount: number) => {
+    if (!user || !day || day.logs.length === 0) return
+    const log = day.logs.find((entry) => entry.amount === amount) ?? day.logs[0]
+    try {
+      await removeWaterLog(user.id, log.id)
+      setDay((prev) =>
+        prev
+          ? {
+              ...prev,
+              drunk: Math.max(0, prev.drunk - log.amount),
+              logs: prev.logs.filter((entry) => entry.id !== log.id),
+            }
+          : prev,
+      )
+      updateWeekDay(today, -log.amount)
     } catch {
       /* ignore */
     }
   }
 
   const toggleGlass = async (idx: number) => {
-    if (!user || !day) return
-    const mlPerGlass = Math.round(goal / glasses)
-    if (idx < drunkGlasses) {
-      const lastLog = day.logs.find((l) => l.amount === mlPerGlass)
-      if (lastLog) {
-        try {
-          await removeWaterLog(user.id, lastLog.id)
-          setDay((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  drunk: Math.max(0, prev.drunk - mlPerGlass),
-                  logs: prev.logs.filter((l) => l.id !== lastLog.id),
-                }
-              : null,
-          )
-        } catch {
-          /* ignore */
-        }
-      }
+    const cupMl = cupVolumes[idx] ?? selMl
+    const fill = cupFills[idx] ?? 0
+    if (fill > 0) {
+      await removeAmount(cupMl)
     } else {
-      await quickAdd(mlPerGlass)
+      await quickAdd(cupMl)
     }
   }
 
@@ -96,7 +147,8 @@ export default function WaterTracker() {
     const v = Number(goalDraft)
     if (!user || !v || v <= 0) return
     await saveWaterGoal(user.id, v)
-    setDay((prev) => (prev ? { ...prev, goal: v } : null))
+    setDay((prev) => (prev ? { ...prev, goal: v } : prev))
+    setGoalDraft(String(v))
     setGoalEdit(false)
   }
 
@@ -108,15 +160,12 @@ export default function WaterTracker() {
 
   const anchor = addDays(today, histOffset * 7)
   const histDays = Array.from({ length: 7 }, (_, i) => addDays(anchor, -6 + i))
-  const shiftHist = (by: number) => {
-    setHistOffset((o) => o + by)
-    reload()
-  }
+  const shiftHist = (by: number) => setHistOffset((o) => o + by)
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-semibold">💧 {t('water.title')}</h1>
+        <h1 className="text-2xl font-semibold">{t('water.title')}</h1>
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -144,6 +193,7 @@ export default function WaterTracker() {
         <div className={`${cardCls} flex flex-col gap-4`}>
           <div className="flex items-center justify-between">
             <button
+              type="button"
               onClick={() => shiftHist(-1)}
               className="cursor-pointer rounded px-2 py-1 text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
             >
@@ -153,6 +203,7 @@ export default function WaterTracker() {
               {histDays[0]} – {histDays[6]}
             </span>
             <button
+              type="button"
               onClick={() => shiftHist(1)}
               className="cursor-pointer rounded px-2 py-1 text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
             >
@@ -165,13 +216,12 @@ export default function WaterTracker() {
               const dayPct = goal > 0 ? Math.min(100, (ml / goal) * 100) : 0
               return (
                 <div key={d} className="flex flex-1 flex-col items-center gap-1">
-                  <span className="text-xs font-medium">{dayPct}%</span>
-                  <div className="flex w-full flex-1 flex-col justify-end">
+                  <span className="text-xs font-medium">{Math.round(dayPct)}%</span>
+                  <div className="flex h-40 w-full flex-col justify-end overflow-hidden rounded-xl bg-neutral-100 dark:bg-neutral-800">
                     <div
-                      className="w-full rounded-t-md bg-sky-400 transition-all"
+                      className="w-full rounded-t-xl bg-sky-400 transition-all"
                       style={{
-                        height: `${Math.max(2, dayPct)}%`,
-                        minHeight: ml > 0 ? 8 : 0,
+                        height: `${Math.max(ml > 0 ? 8 : 0, dayPct)}%`,
                       }}
                     />
                   </div>
@@ -183,7 +233,6 @@ export default function WaterTracker() {
         </div>
       ) : (
         <>
-          {/* Volume slider */}
           <div className={`${cardCls} flex flex-col gap-3`}>
             <div className="flex items-center justify-between">
               <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
@@ -218,7 +267,6 @@ export default function WaterTracker() {
             </button>
           </div>
 
-          {/* Ring + glasses */}
           <div className={`${cardCls} flex flex-col items-center gap-5`}>
             <div className="relative">
               <svg className="h-56 w-56 -rotate-90" viewBox="0 0 240 240">
@@ -255,24 +303,51 @@ export default function WaterTracker() {
                 <p className="text-sm text-neutral-500 dark:text-neutral-400">
                   {drunk} / {goal} ml
                 </p>
+                <p className="mt-1 text-xs text-neutral-400">
+                  {left} ml {t('water.left')}
+                </p>
               </div>
             </div>
 
-            <div className="flex flex-wrap justify-center gap-2">
-              {Array.from({ length: glasses }).map((_, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => toggleGlass(i)}
-                  className={`cursor-pointer text-3xl transition active:scale-90 ${
-                    i < drunkGlasses
-                      ? 'opacity-100 drop-shadow-md'
-                      : 'opacity-30 hover:opacity-50'
-                  }`}
-                >
-                  🥛
-                </button>
-              ))}
+            <div className="grid w-full grid-cols-3 gap-3 sm:grid-cols-4">
+              {cupVolumes.map((cupMl, i) => {
+                const fill = cupFills[i] ?? 0
+                const filledMl = Math.round(fill * cupMl)
+                const active = fill > 0
+                return (
+                  <button
+                    key={`${cupMl}-${i}`}
+                    type="button"
+                    onClick={() => toggleGlass(i)}
+                    className={`flex cursor-pointer flex-col items-center gap-1 rounded-2xl px-2 py-1 transition active:scale-[.97] ${
+                      active ? 'opacity-100' : 'opacity-80 hover:opacity-100'
+                    }`}
+                  >
+                    <span
+                      className={`relative flex h-20 w-14 items-end overflow-hidden rounded-[18px] border-2 transition ${
+                        active
+                          ? 'border-sky-400 bg-sky-50 shadow-sm shadow-sky-200/70 dark:border-sky-500/70 dark:bg-sky-950/20'
+                          : 'border-neutral-300 bg-white dark:border-neutral-700 dark:bg-neutral-950'
+                      }`}
+                    >
+                      <span
+                        className="absolute inset-x-1 bottom-1 rounded-[12px] bg-gradient-to-t from-sky-500 to-sky-300 transition-all duration-300"
+                        style={{ height: fill > 0 ? `${Math.max(10, Math.round(fill * 100))}%` : '0%' }}
+                      />
+                      <span
+                        className={`absolute inset-0 flex items-center justify-center text-[11px] font-semibold ${
+                          fill > 0.55 ? 'text-white' : 'text-neutral-500 dark:text-neutral-300'
+                        }`}
+                      >
+                        {filledMl}
+                      </span>
+                    </span>
+                    <span className="text-[11px] font-medium text-neutral-500 dark:text-neutral-400">
+                      {cupMl} ml
+                    </span>
+                  </button>
+                )
+              })}
             </div>
 
             {isFull && (
@@ -282,7 +357,6 @@ export default function WaterTracker() {
             )}
           </div>
 
-          {/* Goal setting */}
           {goalEdit && (
             <div className={`${cardCls} flex flex-col gap-2`}>
               <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
@@ -321,7 +395,6 @@ export default function WaterTracker() {
             </div>
           )}
 
-          {/* Today's logs */}
           {day && day.logs.length > 0 && (
             <div className={`${cardCls} flex flex-col gap-2`}>
               <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
@@ -335,19 +408,7 @@ export default function WaterTracker() {
                   <span className="text-sm">+{log.amount} ml</span>
                   <button
                     type="button"
-                    onClick={async () => {
-                      if (!user) return
-                      await removeWaterLog(user.id, log.id)
-                      setDay((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              drunk: Math.max(0, prev.drunk - log.amount),
-                              logs: prev.logs.filter((l) => l.id !== log.id),
-                            }
-                          : null,
-                      )
-                    }}
+                    onClick={() => removeAmount(log.amount)}
                     className="cursor-pointer text-xs text-red-500 transition hover:text-red-400"
                   >
                     {t('common.delete')}

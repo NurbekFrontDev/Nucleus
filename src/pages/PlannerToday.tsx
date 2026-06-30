@@ -458,6 +458,73 @@ export default function PlannerToday() {
     )
   }
 
+  const sectionLabel = (item: PlannerItem): string => {
+    switch (item.time_of_day) {
+      case 'morning':
+        return t('today.morning')
+      case 'day':
+        return t('today.day')
+      case 'allday':
+        return t('today.allday')
+      case 'evening':
+        return t('today.evening')
+      default:
+        return t('today.noTime')
+    }
+  }
+
+  const renderReorderTask = (item: PlannerItem, index: number) => {
+    const done = isDone(item.id)
+    const dot = PRIORITY_DOT[item.priority]
+    const time = timeLabel(item)
+    const isHabit = item.type === 'habit'
+
+    return (
+      <div
+        key={item.id}
+        ref={(el) => {
+          if (el) rowRefs.current.set(item.id, el)
+          else rowRefs.current.delete(item.id)
+        }}
+        style={dragStyle(item.id, index)}
+        className={`relative flex items-start gap-3 ${cardCls}${done ? ' opacity-60' : ''} ${
+          drag?.id === item.id && drag.active
+            ? ' border-emerald-500/60 shadow-xl ring-1 ring-emerald-500/40'
+            : ''
+        }`}
+      >
+        {grip(item.id, index)}
+        {dot && <span className="mt-1 shrink-0 text-xs leading-none">{dot}</span>}
+        {item.important && <span className="mt-1 shrink-0 text-xs leading-none">⭐</span>}
+        {item.icon && <span className="mt-0.5 shrink-0">{item.icon}</span>}
+
+        <div className="min-w-0 flex-1">
+          <p
+            className={`break-words text-sm font-medium ${
+              done ? 'text-neutral-500 line-through dark:text-neutral-400' : ''
+            }`}
+          >
+            {item.title}
+            {isHabit && <span className="ml-1 text-xs">🔁</span>}
+          </p>
+
+          <div className="mt-1 flex flex-wrap items-center gap-1.5">
+            <span className="rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-medium text-neutral-500 dark:bg-neutral-800 dark:text-neutral-300">
+              {sectionLabel(item)}
+            </span>
+            {time && (
+              <span className="shrink-0 rounded-lg bg-white px-2 py-0.5 text-sm font-medium text-neutral-700 shadow-sm ring-1 ring-neutral-200/60 dark:bg-neutral-800 dark:text-neutral-200 dark:ring-neutral-700">
+                {time}
+              </span>
+            )}
+          </div>
+
+          {item.note && <p className="mt-1 break-words text-xs text-neutral-500">{item.note}</p>}
+        </div>
+      </div>
+    )
+  }
+
   // Группы для режима «Утро / День / Вечер / Весь день».
   const sectionDefs: { key: Exclude<TimeOfDay, null> | 'none'; label: string }[] = [
     { key: 'morning', label: t('today.morning') },
@@ -805,31 +872,7 @@ export default function PlannerToday() {
                   )
                 })
               ) : reorder ? (
-                <section className="flex flex-col gap-2">
-                  {items.map((item, index) => (
-                    <div
-                      key={item.id}
-                      ref={(el) => {
-                        if (el) rowRefs.current.set(item.id, el)
-                        else rowRefs.current.delete(item.id)
-                      }}
-                      style={dragStyle(item.id, index)}
-                      className={`relative flex items-center gap-2 rounded-xl border bg-neutral-50 px-3 py-3 dark:bg-neutral-900/40 ${
-                        drag?.id === item.id && drag.active
-                          ? 'border-emerald-500/60 shadow-xl ring-1 ring-emerald-500/40'
-                          : 'border-neutral-200 dark:border-neutral-800'
-                      }`}
-                    >
-                      {grip(item.id, index)}
-                      {PRIORITY_DOT[item.priority] && (
-                        <span className="shrink-0 text-xs leading-none">{PRIORITY_DOT[item.priority]}</span>
-                      )}
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{item.title}</p>
-                      </div>
-                    </div>
-                  ))}
-                </section>
+                <section className="flex flex-col gap-2">{items.map(renderReorderTask)}</section>
               ) : (
                 <section className="flex flex-col gap-2">{items.map(renderTask)}</section>
               )}
