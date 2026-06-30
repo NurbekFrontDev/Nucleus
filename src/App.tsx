@@ -34,28 +34,12 @@ function App() {
   const [restored, setRestored] = useState(false)
   const userId = session?.user?.id
 
-  // При входе восстанавливаем последнюю открытую страницу:
-  //   1) мгновенно из localStorage (то же устройство, без сети) —
-  //      это главный путь, он не зависит от БД и кеша схемы PostgREST;
-  //   2) затем из БД (если на другом устройстве была другая страница).
+  // При входе восстанавливаем последнюю открытую страницу из БД.
+  // База — единый источник правды, поэтому телефон и компьютер
+  // открываются на одной и той же странице.
   useEffect(() => {
     if (!userId) return
     let active = true
-    const key = `nucleus:last-path:${userId}`
-
-    // 1) Мгновенное восстановление из localStorage.
-    let local = ''
-    try {
-      local = localStorage.getItem(key) || ''
-    } catch {
-      /* localStorage недоступен */
-    }
-    if (local && local !== '/login' && local !== '/' && window.location.pathname === '/') {
-      setLastPath(local)
-      navigate(local, { replace: true })
-    }
-
-    // 2) Восстановление из БД (синхронизация между устройствами).
     ;(async () => {
       try {
         const { data } = await supabase
@@ -82,18 +66,13 @@ function App() {
     }
   }, [userId, navigate])
 
-  // После восстановления сохраняем текущую страницу: сразу в localStorage
-  // (это устройство) и в БД (синхронизация между устройствами).
+  // После восстановления сразу сохраняем текущую страницу в БД
+  // (синхронизация между устройствами).
   useEffect(() => {
     if (!restored || !userId) return
     const p = location.pathname
     if (p === '/login') return
     setLastPath(p)
-    try {
-      localStorage.setItem(`nucleus:last-path:${userId}`, p)
-    } catch {
-      /* игнорируем */
-    }
     void supabase.from('app_settings').upsert(
       { user_id: userId, last_path: p, updated_at: new Date().toISOString() },
       { onConflict: 'user_id' },
