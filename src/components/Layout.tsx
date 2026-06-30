@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import BackupReminder from './BackupReminder'
 import AssistantWidget from './AssistantWidget'
@@ -10,6 +11,20 @@ export default function Layout() {
   const navigate = useNavigate()
   const activeModule = moduleForPath(location.pathname)
   const navItems = activeModule.nav
+
+  //Dynamic document title based on active route.
+  useEffect(() => {
+    const path = location.pathname
+    let titleKey = activeModule.nameKey
+    for (const item of navItems) {
+      const isActive = item.end ? path === item.to : path.startsWith(item.to)
+      if (isActive) {
+        titleKey = item.key
+        break
+      }
+    }
+    document.title = `${t(titleKey)} - Nucleus`
+  }, [location.pathname, navItems])
 
   const moduleSwitcher = (
     <div className="flex w-full gap-1 rounded-xl bg-neutral-200/60 p-1 dark:bg-neutral-800/60">
@@ -66,14 +81,14 @@ export default function Layout() {
       </aside>
 
       {/* Top bar (mobile): brand + module switcher */}
-      <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-neutral-200 bg-white/95 px-4 py-2 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:hidden">
+      <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-neutral-200 bg-white/95 px-4 pt-[env(safe-area-inset-top)] pb-2 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:hidden">
         <span className="flex shrink-0 items-center gap-1.5 font-semibold">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500 text-sm">
             ⚛️
           </span>
           Nucleus
         </span>
-        <div className="ml-auto min-w-0 max-w-[14rem] flex-1">{moduleSwitcher}</div>
+        <div className="ml-auto min-w-0 flex-1">{moduleSwitcher}</div>
       </header>
 
       {/* Content */}
@@ -84,7 +99,7 @@ export default function Layout() {
       </main>
 
       {/* Bottom navigation (mobile) */}
-      <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t border-neutral-200 bg-white/95 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t border-neutral-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:hidden">
         {navItems.map((item) => (
           <NavLink
             key={item.to}

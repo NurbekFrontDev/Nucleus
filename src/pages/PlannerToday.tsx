@@ -412,21 +412,21 @@ export default function PlannerToday() {
                 done ? 'text-neutral-500 line-through dark:text-neutral-400' : ''
               }`}
             >
-              <span className="truncate">{item.title}</span>
+              <span className="break-words">{item.title}</span>
               <span className="shrink-0 text-xs">🔁</span>
             </p>
-            {item.note && <p className="truncate text-xs text-neutral-500">{item.note}</p>}
+            {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
           </button>
         ) : (
           <div className="min-w-0 flex-1">
             <p
-              className={`truncate text-sm font-medium ${
+              className={`break-words text-sm font-medium ${
                 done ? 'text-neutral-500 line-through dark:text-neutral-400' : ''
               }`}
             >
               {item.title}
             </p>
-            {item.note && <p className="truncate text-xs text-neutral-500">{item.note}</p>}
+            {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
           </div>
         )}
         {time && (

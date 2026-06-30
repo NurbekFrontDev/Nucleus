@@ -268,14 +268,16 @@ export default function PlannerFocus() {
       // noop
     }
     startRef.current = { x: e.clientX, y: e.clientY }
-    const next = { active: true, dx: 0, dy: 0, dir: null as Dir }
+    // Do NOT show the dial on press - only after a drag past deadzone.
+    const next = { active: false, dx: 0, dy: 0, dir: null as Dir }
     dialRef.current = next
     setDial(next)
   }
   const onDialMove = (e: React.PointerEvent) => {
-    if (!dialRef.current.active) return
     const dx = e.clientX - startRef.current.x
     const dy = e.clientY - startRef.current.y
+    // Only show the dial once the pointer moves beyond the deadzone.
+    if (Math.hypot(dx, dy) < DEADZONE) return
     const next = { active: true, dx, dy, dir: dirFrom(dx, dy) }
     dialRef.current = next
     setDial(next)
