@@ -60,6 +60,8 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
   const [amount, setAmount] = useState('')
   const [note, setNote] = useState('')
   const [busy, setBusy] = useState(false)
+  // Форма добавления долга по умолчанию свёрнута; раскрывается по нажатию.
+  const [formOpen, setFormOpen] = useState(false)
   // Отдельное состояние для записи платежа, чтобы не крутилась кнопка «Добавить».
   const [paying, setPaying] = useState(false)
 
@@ -676,8 +678,8 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
       <div
         className={
           embedded
-            ? 'flex items-center justify-between'
-            : 'sticky top-0 z-20 -mx-4 flex items-center justify-between border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85'
+            ? 'flex flex-wrap items-center justify-between gap-x-3 gap-y-1'
+            : 'sticky top-0 z-20 -mx-4 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85'
         }
       >
         {embedded ? (
@@ -685,24 +687,47 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
         ) : (
           <h1 className="text-2xl font-semibold">💳 {t('debts.title')}</h1>
         )}
-        {active.length > 0 && (
-          <span className="text-sm text-neutral-500 dark:text-neutral-400">
-            {t('debts.totalLeft', { v: formatSum(totalLeft) })}
-          </span>
+        {(active.length > 0 || (debtCategory && debtsBudget > 0)) && (
+          <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+            {active.length > 0 && (
+              <span>{t('debts.totalLeft', { v: formatSum(totalLeft) })}</span>
+            )}
+            {active.length > 0 && debtCategory && debtsBudget > 0 && (
+              <span aria-hidden className="text-neutral-300 dark:text-neutral-700">
+                ·
+              </span>
+            )}
+            {debtCategory && debtsBudget > 0 && (
+              <span>
+                {t('debts.paidThisMonth', { v: formatSum(paidThisMonth), b: formatSum(debtsBudget) })}
+              </span>
+            )}
+          </div>
         )}
       </div>
 
-      {debtCategory && debtsBudget > 0 && (
-        <p className="text-sm text-neutral-500 dark:text-neutral-400">
-          {t('debts.paidThisMonth', { v: formatSum(paidThisMonth), b: formatSum(debtsBudget) })}
-        </p>
-      )}
-
+      {!formOpen ? (
+        <button
+          type="button"
+          onClick={() => setFormOpen(true)}
+          className="flex w-full items-center justify-between rounded-2xl border border-neutral-200 bg-white px-4 py-3 text-sm font-medium transition hover:border-emerald-400 dark:border-neutral-800 dark:bg-neutral-900/50 dark:hover:border-emerald-600"
+        >
+          <span>＋ {t('debts.add')}</span>
+          <span className="text-neutral-400">▾</span>
+        </button>
+      ) : (
       <form
         onSubmit={addDebt}
         className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50"
       >
-        <p className="text-sm font-medium">{t('debts.add')}</p>
+        <button
+          type="button"
+          onClick={() => setFormOpen(false)}
+          className="flex items-center justify-between text-sm font-medium text-neutral-500 transition hover:text-neutral-800 dark:hover:text-neutral-200"
+        >
+          <span>＋ {t('debts.add')}</span>
+          <span className="text-neutral-400">▴</span>
+        </button>
         <input
           value={person}
           onChange={(e) => setPerson(e.target.value)}
@@ -731,6 +756,7 @@ export default function Debts({ embedded = false }: { embedded?: boolean }) {
           {busy ? t('debts.adding') : t('common.add')}
         </button>
       </form>
+      )}
 
       {loading ? (
         <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>

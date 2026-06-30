@@ -35,8 +35,9 @@ type View = 'today' | 'week' | 'month' | 'year'
 
 const cardCls =
   'rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50'
-const navBtn =
-  'flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-neutral-300 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800'
+// Минималистичная стрелка навигации (без рамки) — по бокам от колец дней.
+const arrowBtn =
+  'flex h-8 w-7 shrink-0 items-center justify-center text-xl leading-none text-neutral-400 transition hover:text-neutral-700 active:scale-90 dark:text-neutral-500 dark:hover:text-neutral-200'
 
 const pad = (n: number) => String(n).padStart(2, '0')
 const iso = (y: number, m: number, d: number) => `${y}-${pad(m + 1)}-${pad(d)}`
@@ -59,6 +60,11 @@ const markColor = (m: DayMark): string => {
       return 'bg-sky-500'
   }
 }
+
+// Цвет кольца дня по проценту выполнения — синхронно с прогресс-баром дня
+// (≤30% красный, ≤60% жёлтый, иначе зелёный).
+const ringTone = (p: number): string =>
+  p <= 30 ? 'text-red-500' : p <= 60 ? 'text-amber-500' : 'text-emerald-500'
 
 export default function PlannerToday() {
   const { user } = useAuth()
@@ -241,7 +247,6 @@ export default function PlannerToday() {
         ? 'bg-amber-500'
         : 'bg-emerald-500'
 
-  const isToday = date === today
   const relLabel =
     date === today
       ? t('today.today')
@@ -452,7 +457,7 @@ export default function PlannerToday() {
         {item.icon && <span className="mt-0.5 shrink-0">{item.icon}</span>}
         <div className="min-w-0 flex-1">
           <p
-            className={`break-words text-sm font-medium ${
+            className={`break-words text-base font-medium ${
               done ? 'text-neutral-500 line-through dark:text-neutral-400' : ''
             }`}
           >
@@ -472,7 +477,7 @@ export default function PlannerToday() {
             )}
           </p>
           {time && (
-            <p className="mt-0.5 text-xs font-medium text-neutral-500 dark:text-neutral-400">{time}</p>
+            <p className="mt-0.5 text-[13px] font-medium text-neutral-500 dark:text-neutral-400">{time}</p>
           )}
           {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
         </div>
@@ -522,7 +527,7 @@ export default function PlannerToday() {
 
         <div className="min-w-0 flex-1">
           <p
-            className={`break-words text-sm font-medium ${
+            className={`break-words text-base font-medium ${
               done ? 'text-neutral-500 line-through dark:text-neutral-400' : ''
             }`}
           >
@@ -716,43 +721,38 @@ export default function PlannerToday() {
     <div className="flex flex-col gap-5">
       {/* Закреплённая шапка: не движется при прокрутке содержимого. */}
       <div className="sticky top-0 z-20 -mx-4 flex flex-col gap-3 border-b border-neutral-200/70 bg-white/85 px-4 pb-3 pt-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
-      {/* Шапка: навигация + период/дата + переключатель вида справа. */}
+      {/* Верхняя строка: дата по центру (тап — вернуться к «сегодня») +
+          иконка-календарь справа (открывает выпадающий список вида). */}
       <div className="flex items-center justify-between gap-2">
-        <div className="flex items-center gap-1">
-          <button
-            onClick={() => (isCalendar ? shift(-1) : setDate(addDays(date, -1)))}
-            aria-label={t('today.prev')}
-            className={navBtn}
-          >
-            ◀
-          </button>
-          <div className="min-w-[8rem] text-center">
-            {isCalendar ? (
-              <p className="text-lg font-semibold">{periodLabel}</p>
-            ) : (
-              <>
-                <p className="text-lg font-semibold">{relLabel || formatDateHuman(date)}</p>
-                {relLabel && <p className="text-xs text-neutral-500">{formatDateHuman(date)}</p>}
-              </>
-            )}
-          </div>
-          <button
-            onClick={() => (isCalendar ? shift(1) : setDate(addDays(date, 1)))}
-            aria-label={t('today.next')}
-            className={navBtn}
-          >
-            ▶
-          </button>
-        </div>
-
-        {/* Кнопка-переключатель вида (Сегодня / Неделя / Месяц / Год). */}
-        <div className="relative">
+        <span aria-hidden className="h-8 w-8 shrink-0" />
+        <button
+          type="button"
+          onClick={() => (isCalendar ? setAnchor(today) : setDate(today))}
+          title={t('today.today')}
+          className="min-w-0 flex-1 truncate text-center"
+        >
+          {isCalendar ? (
+            <span className="text-base font-semibold">{periodLabel}</span>
+          ) : (
+            <span className="text-base font-semibold">
+              {relLabel || formatDateHuman(date)}
+              {relLabel && (
+                <span className="ml-1.5 text-xs font-normal text-neutral-500 dark:text-neutral-400">
+                  · {formatDateHuman(date)}
+                </span>
+              )}
+            </span>
+          )}
+        </button>
+        <div className="relative shrink-0">
           <button
             type="button"
             onClick={() => setMenuOpen((v) => !v)}
-            className="flex items-center gap-1 rounded-lg border border-neutral-300 px-3 py-1.5 text-sm font-medium transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+            aria-label={viewLabel(view)}
+            title={viewLabel(view)}
+            className="flex h-8 w-8 items-center justify-center rounded-lg border border-neutral-300 text-base transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
           >
-            🗓️ {viewLabel(view)} ▾
+            🗓️
           </button>
           {menuOpen && (
             <>
@@ -780,91 +780,95 @@ export default function PlannerToday() {
         </div>
       </div>
 
-      {/* Быстрый возврат к сегодняшней дате. */}
-      {isCalendar ? (
-        <button
-          onClick={() => setAnchor(today)}
-          className="self-center rounded-lg px-3 py-1 text-xs font-medium text-emerald-600 transition hover:bg-emerald-500/10 dark:text-emerald-400"
-        >
-          {t('cal.today')}
-        </button>
-      ) : (
-        !isToday && (
-          <button
-            onClick={() => setDate(today)}
-            className="self-center rounded-lg px-3 py-1 text-xs font-medium text-emerald-600 transition hover:bg-emerald-500/10 dark:text-emerald-400"
-          >
-            {t('today.today')}
+      {/* Кольца дней с минималистичными стрелками по бокам (вид «Сегодня»);
+          в календаре — те же стрелки + быстрый возврат к сегодня. */}
+      {!isCalendar ? (
+        <div className="flex items-center gap-1">
+          <button onClick={() => setDate(addDays(date, -1))} aria-label={t('today.prev')} className={arrowBtn}>
+            ‹
           </button>
-        )
-      )}
-
-      {/* Кольца дней: внутри кольца — краткое название дня недели; кольцо
-          заполняется по проценту выполнения за день. Закреплены с шапкой. */}
-      {!isCalendar && (
-        <div className="flex justify-between gap-1">
-          {Array.from({ length: 7 }, (_, i) => {
-            const dStr = addDays(date, i - 3)
-            const dt = new Date(dStr + 'T00:00:00')
-            const wd = (dt.getDay() + 6) % 7
-            const sel = dStr === date
-            const isStripToday = dStr === today
-            const sum = stripSummaries[dStr]
-            let ringPct = sum && sum.total > 0 ? Math.round((sum.done / sum.total) * 100) : 0
-            if (dStr === date && items.length > 0)
-              ringPct = Math.round((items.filter((it) => isDone(it.id)).length / items.length) * 100)
-            const off = STRIP_C * (1 - ringPct / 100)
-            return (
-              <button
-                key={dStr}
-                type="button"
-                onClick={() => setDate(dStr)}
-                aria-label={WEEKDAYS[wd]}
-                className="flex flex-1 flex-col items-center"
-              >
-                <span className="relative flex h-12 w-12 items-center justify-center">
-                  <svg viewBox="0 0 48 48" className="absolute inset-0 h-full w-full -rotate-90">
-                    <circle
-                      cx="24"
-                      cy="24"
-                      r={STRIP_R}
-                      fill="none"
-                      strokeWidth="3.5"
-                      className={
-                        sel
-                          ? 'text-emerald-500/25 dark:text-emerald-500/20'
-                          : 'text-neutral-200 dark:text-neutral-800'
-                      }
-                      stroke="currentColor"
-                    />
-                    {ringPct > 0 && (
+          <div className="flex flex-1 justify-between gap-1">
+            {Array.from({ length: 7 }, (_, i) => {
+              const dStr = addDays(date, i - 3)
+              const dt = new Date(dStr + 'T00:00:00')
+              const wd = (dt.getDay() + 6) % 7
+              const sel = dStr === date
+              const isStripToday = dStr === today
+              const sum = stripSummaries[dStr]
+              let ringPct = sum && sum.total > 0 ? Math.round((sum.done / sum.total) * 100) : 0
+              // Для выбранного дня берём «энергию» дня, чтобы цвет и заполнение
+              // кольца совпадали с прогресс-баром внизу.
+              if (dStr === date && items.length > 0) ringPct = pct
+              const off = STRIP_C * (1 - ringPct / 100)
+              const tone = ringTone(ringPct)
+              return (
+                <button
+                  key={dStr}
+                  type="button"
+                  onClick={() => setDate(dStr)}
+                  aria-label={WEEKDAYS[wd]}
+                  className="flex flex-1 flex-col items-center"
+                >
+                  <span className="relative flex h-12 w-12 items-center justify-center">
+                    <svg viewBox="0 0 48 48" className="absolute inset-0 h-full w-full -rotate-90">
                       <circle
                         cx="24"
                         cy="24"
                         r={STRIP_R}
                         fill="none"
                         strokeWidth="3.5"
-                        strokeLinecap="round"
-                        className="text-emerald-500 transition-[stroke-dashoffset] duration-300"
+                        className={sel ? `${tone} opacity-20` : 'text-neutral-200 dark:text-neutral-800'}
                         stroke="currentColor"
-                        strokeDasharray={STRIP_C}
-                        strokeDashoffset={off}
                       />
-                    )}
-                  </svg>
-                  <span
-                    className={`relative text-[11px] font-bold uppercase tracking-tight ${
-                      sel || isStripToday
-                        ? 'text-emerald-600 dark:text-emerald-400'
-                        : 'text-neutral-600 dark:text-neutral-300'
-                    }`}
-                  >
-                    {WEEKDAYS[wd]}
+                      {ringPct > 0 && (
+                        <circle
+                          cx="24"
+                          cy="24"
+                          r={STRIP_R}
+                          fill="none"
+                          strokeWidth="3.5"
+                          strokeLinecap="round"
+                          className={`${tone} transition-[stroke-dashoffset] duration-300`}
+                          stroke="currentColor"
+                          strokeDasharray={STRIP_C}
+                          strokeDashoffset={off}
+                        />
+                      )}
+                    </svg>
+                    <span
+                      className={`relative text-[11px] font-bold uppercase tracking-tight ${
+                        sel
+                          ? tone
+                          : isStripToday
+                            ? 'text-emerald-600 dark:text-emerald-400'
+                            : 'text-neutral-600 dark:text-neutral-300'
+                      }`}
+                    >
+                      {WEEKDAYS[wd]}
+                    </span>
                   </span>
-                </span>
-              </button>
-            )
-          })}
+                </button>
+              )
+            })}
+          </div>
+          <button onClick={() => setDate(addDays(date, 1))} aria-label={t('today.next')} className={arrowBtn}>
+            ›
+          </button>
+        </div>
+      ) : (
+        <div className="flex items-center justify-center gap-4">
+          <button onClick={() => shift(-1)} aria-label={t('today.prev')} className={arrowBtn}>
+            ‹
+          </button>
+          <button
+            onClick={() => setAnchor(today)}
+            className="rounded-lg px-3 py-1 text-xs font-medium text-emerald-600 transition hover:bg-emerald-500/10 dark:text-emerald-400"
+          >
+            {t('cal.today')}
+          </button>
+          <button onClick={() => shift(1)} aria-label={t('today.next')} className={arrowBtn}>
+            ›
+          </button>
         </div>
       )}
       </div>
@@ -947,29 +951,34 @@ export default function PlannerToday() {
             </>
           )}
 
-          {/* Прогресс-бар дня — закреплён внизу экрана и всегда виден.
-              Всё в одну строку: слева счётчик, по центру полоса, справа процент.
-              Тап открывает окно персонажа энергии. На телефоне приподнят над нижней
-              навигацией (bottom-16), на десктопе bottom-0. */}
+          {/* Прогресс-бар дня — закреплён ВНИЗУ экрана отдельной панелью
+              (всегда виден, не «висит» в воздухе). Кнопка чата ассистента
+              поднята выше и оказывается над ним. Тап открывает окно энергии. */}
           {total > 0 && (
-            <button
-              type="button"
-              onClick={() => setEnergyOpen(true)}
-              className="sticky bottom-16 z-10 -mx-4 mt-1 flex items-center gap-3 border-t border-neutral-200/70 bg-white/90 px-4 py-2.5 text-left backdrop-blur transition md:bottom-0 dark:border-neutral-800/70 dark:bg-neutral-950/90"
-            >
-              <span className="shrink-0 text-xs font-medium text-neutral-600 dark:text-neutral-300">
-                {dayEnergy.doneCount === total
-                  ? t('today.allDone')
-                  : t('today.progress', { done: dayEnergy.doneCount, total })}
-              </span>
-              <span className="h-2 flex-1 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
-                <span
-                  className={`block h-full rounded-full ${barColor} transition-all duration-300`}
-                  style={{ width: `${pct}%` }}
-                />
-              </span>
-              <span className="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-400">{pct}%</span>
-            </button>
+            <>
+              {/* Отступ под фиксированную панель, чтобы последнее дело не пряталось. */}
+              <div aria-hidden className="h-14" />
+              <div className="fixed inset-x-0 bottom-16 z-20 px-4 md:bottom-0">
+                <button
+                  type="button"
+                  onClick={() => setEnergyOpen(true)}
+                  className="mx-auto flex w-full max-w-3xl items-center gap-3 rounded-xl border border-neutral-200 bg-white/95 px-4 py-2.5 text-left shadow-lg backdrop-blur transition dark:border-neutral-800 dark:bg-neutral-950/95"
+                >
+                  <span className="shrink-0 text-xs font-medium text-neutral-600 dark:text-neutral-300">
+                    {dayEnergy.doneCount === total
+                      ? t('today.allDone')
+                      : t('today.progress', { done: dayEnergy.doneCount, total })}
+                  </span>
+                  <span className="h-2 flex-1 overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
+                    <span
+                      className={`block h-full rounded-full ${barColor} transition-all duration-300`}
+                      style={{ width: `${pct}%` }}
+                    />
+                  </span>
+                  <span className="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-400">{pct}%</span>
+                </button>
+              </div>
+            </>
           )}
         </>
       )}

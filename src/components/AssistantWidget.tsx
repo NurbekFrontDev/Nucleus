@@ -18,7 +18,7 @@ export default function AssistantWidget() {
           onClick={() => setOpen(true)}
           title={t('ai.open')}
           aria-label={t('ai.open')}
-          className="fixed bottom-20 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500 text-2xl shadow-lg shadow-emerald-500/30 transition hover:bg-emerald-400 active:scale-95 md:bottom-6 md:right-6"
+          className="fixed bottom-28 right-4 z-30 flex h-14 w-14 items-center justify-center rounded-full bg-emerald-500 text-2xl shadow-lg shadow-emerald-500/30 transition hover:bg-emerald-400 active:scale-95 md:bottom-6 md:right-6"
         >
           💬
         </button>
