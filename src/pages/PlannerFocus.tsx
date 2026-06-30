@@ -119,6 +119,7 @@ export default function PlannerFocus() {
   const [showSettings, setShowSettings] = useState(false)
   const [draft, setDraft] = useState<PomoSettings>(POMO_DEFAULTS)
   const [ready, setReady] = useState(false)
+  const [pressed, setPressed] = useState(false)
 
   // Жестовый «пульт».
   const [dial, setDial] = useState<{ active: boolean; dx: number; dy: number; dir: Dir }>({
@@ -282,6 +283,7 @@ export default function PlannerFocus() {
     }
     startRef.current = { x: e.clientX, y: e.clientY }
     pressedRef.current = true
+    setPressed(true)
     // Do NOT show the dial on press - only after a drag past deadzone.
     const next = { active: false, dx: 0, dy: 0, dir: null as Dir }
     dialRef.current = next
@@ -306,6 +308,7 @@ export default function PlannerFocus() {
       // noop
     }
     pressedRef.current = false
+    setPressed(false)
     const d = dialRef.current
     const cleared = { active: false, dx: 0, dy: 0, dir: null as Dir }
     dialRef.current = cleared
@@ -326,6 +329,7 @@ export default function PlannerFocus() {
   }
   const onDialCancel = () => {
     pressedRef.current = false
+    setPressed(false)
     const cleared = { active: false, dx: 0, dy: 0, dir: null as Dir }
     dialRef.current = cleared
     setDial(cleared)
@@ -378,6 +382,10 @@ export default function PlannerFocus() {
       dial.dy * kf,
     )}px))`,
   }
+  // Анимация нажатия применяется только к кругу (не во время жеста-«пульта»).
+  const dialPressStyle: React.CSSProperties = {
+    transform: pressed && !dial.active ? 'scale(0.96)' : undefined,
+  }
   const segCls = (dir: Dir): string =>
     `absolute flex flex-col items-center gap-0.5 text-2xl font-bold leading-none transition ${
       dial.dir === dir
@@ -416,7 +424,8 @@ export default function PlannerFocus() {
       {/* Кольцо таймера с жестовым управлением */}
       <div className={`${cardCls} flex flex-col items-center gap-4`}>
         <div
-          className="relative mx-auto h-72 w-72 cursor-pointer touch-none select-none"
+          className="relative mx-auto h-72 w-72 cursor-pointer touch-none select-none transition-transform duration-150"
+          style={dialPressStyle}
           role="button"
           tabIndex={0}
           aria-label={t('focus.tapHint')}

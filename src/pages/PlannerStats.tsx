@@ -100,9 +100,9 @@ export default function PlannerStats() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
-      <div>
+      {/* Закреплённая шапка: заголовок + переключатель периода не двигаются. */}
+      <div className="sticky top-0 z-20 -mx-4 flex flex-col gap-3 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
         <h1 className="text-xl font-semibold">{t('pnav.stats')}</h1>
-      </div>
 
       {/* Переключатель периода */}
       <div className="flex gap-1 rounded-xl border border-neutral-200 p-1 dark:border-neutral-800">
@@ -120,6 +120,7 @@ export default function PlannerStats() {
             {periodLabel(p)}
           </button>
         ))}
+      </div>
       </div>
 
       {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}

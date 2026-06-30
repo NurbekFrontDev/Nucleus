@@ -41,6 +41,10 @@ const navBtn =
 const pad = (n: number) => String(n).padStart(2, '0')
 const iso = (y: number, m: number, d: number) => `${y}-${pad(m + 1)}-${pad(d)}`
 
+// Геометрия мини-кольца прогресса в ленте дней.
+const STRIP_R = 16
+const STRIP_C = 2 * Math.PI * STRIP_R
+
 // Цвет полоски-метки в календаре: выполнено -> зелёный, иначе по важности дела.
 const markColor = (m: DayMark): string => {
   if (m.done) return 'bg-emerald-500'
@@ -76,6 +80,7 @@ export default function PlannerToday() {
   const [reorder, setReorder] = useState(false)
   const [sheetItem, setSheetItem] = useState<PlannerItem | null>(null)
   const [energyOpen, setEnergyOpen] = useState(false)
+  const [stripSummaries, setStripSummaries] = useState<Record<string, DaySummary>>({})
 
   // ===== Виды «Неделя / Месяц / Год» (календарь) =====
   const [anchor, setAnchor] = useState(today) // дата внутри текущего периода
@@ -135,6 +140,23 @@ export default function PlannerToday() {
         if (active) setError((e as Error).message)
       } finally {
         if (active) setLoading(false)
+      }
+    })()
+    return () => {
+      active = false
+    }
+  }, [user, date, view])
+
+  // Сводки 7-дневной ленты колец (вид «Сегодня»): процент выполнения по дням.
+  useEffect(() => {
+    if (!user || view !== 'today') return
+    let active = true
+    ;(async () => {
+      try {
+        const s = await loadDaySummaries(user.id, addDays(date, -3), addDays(date, 3))
+        if (active) setStripSummaries(s)
+      } catch {
+        // некритично для ленты колец
       }
     })()
     return () => {
@@ -405,54 +427,55 @@ export default function PlannerToday() {
     const dot = PRIORITY_DOT[item.priority]
     const time = timeLabel(item)
     const isHabit = item.type === 'habit'
+    // Тап по всей строке отмечает/снимает выполнение; 📊 открывает окно привычки.
     return (
-      <div key={item.id} className={`flex items-center gap-3 ${cardCls}${done ? ' opacity-60' : ''}`}>
-        <button
-          type="button"
-          onClick={() => onToggle(item)}
-          aria-label={item.title}
-          className={`flex h-5 w-5 shrink-0 cursor-pointer items-center justify-center rounded-md border text-[10px] font-bold transition ${
+      <div
+        key={item.id}
+        role="button"
+        tabIndex={0}
+        onClick={() => onToggle(item)}
+        aria-label={item.title}
+        className={`flex cursor-pointer items-center gap-3 ${cardCls}${done ? ' opacity-60' : ''} transition active:scale-[.99]`}
+      >
+        <span
+          aria-hidden
+          className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[10px] font-bold transition ${
             done
               ? 'border-emerald-500 bg-emerald-500 text-neutral-950'
-              : 'border-neutral-300 hover:border-emerald-500 dark:border-neutral-600'
+              : 'border-neutral-300 dark:border-neutral-600'
           }`}
         >
           {done ? '\u2713' : ''}
-        </button>
+        </span>
         {dot && <span className="shrink-0 text-xs leading-none">{dot}</span>}
         {item.important && <span className="shrink-0 text-xs leading-none">⭐</span>}
         {item.icon && <span className="shrink-0">{item.icon}</span>}
-        {isHabit ? (
-          <button
-            type="button"
-            onClick={() => setSheetItem(item)}
-            title={t('habits.openHint')}
-            className="min-w-0 flex-1 text-left"
+        <div className="min-w-0 flex-1">
+          <p
+            className={`flex items-center gap-1 break-words text-sm font-medium ${
+              done ? 'text-neutral-500 line-through dark:text-neutral-400' : ''
+            }`}
           >
-            <p
-              className={`flex items-center gap-1 text-sm font-medium ${
-                done ? 'text-neutral-500 line-through dark:text-neutral-400' : ''
-              }`}
-            >
-              <span className="break-words">{item.title}</span>
-              <span className="shrink-0 text-xs">🔁</span>
-            </p>
-            {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
-          </button>
-        ) : (
-          <div className="min-w-0 flex-1">
-            <p
-              className={`break-words text-sm font-medium ${
-                done ? 'text-neutral-500 line-through dark:text-neutral-400' : ''
-              }`}
-            >
-              {item.title}
-            </p>
-            {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
-          </div>
-        )}
+            <span className="break-words">{item.title}</span>
+            {isHabit && <span className="shrink-0 text-xs">🔁</span>}
+          </p>
+          {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
+        </div>
         {time && (
           <span className="shrink-0 rounded-md bg-white px-1.5 py-0.5 text-[11px] font-medium text-neutral-700 shadow-sm ring-1 ring-neutral-200/60 dark:bg-neutral-800 dark:text-neutral-200 dark:ring-neutral-700">{time}</span>
+        )}
+        {isHabit && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              setSheetItem(item)
+            }}
+            title={t('habits.openHint')}
+            className="shrink-0 rounded-md px-1.5 py-1 text-sm text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+          >
+            📊
+          </button>
         )}
       </div>
     )
@@ -692,6 +715,8 @@ export default function PlannerToday() {
 
   return (
     <div className="flex flex-col gap-5">
+      {/* Закреплённая шапка: не движется при прокрутке содержимого. */}
+      <div className="sticky top-0 z-20 -mx-4 flex flex-col gap-3 border-b border-neutral-200/70 bg-white/85 px-4 pb-3 pt-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
       {/* Шапка: навигация + период/дата + переключатель вида справа. */}
       <div className="flex items-center justify-between gap-2">
         <div className="flex items-center gap-1">
@@ -775,6 +800,83 @@ export default function PlannerToday() {
         )
       )}
 
+      {/* Кольца дней с прогрессом — закреплены вместе с шапкой. */}
+      {!isCalendar && (
+        <div className="flex justify-between gap-1">
+          {Array.from({ length: 7 }, (_, i) => {
+            const dStr = addDays(date, i - 3)
+            const dt = new Date(dStr + 'T00:00:00')
+            const wd = (dt.getDay() + 6) % 7
+            const sel = dStr === date
+            const isStripToday = dStr === today
+            const sum = stripSummaries[dStr]
+            let ringPct = sum && sum.total > 0 ? Math.round((sum.done / sum.total) * 100) : 0
+            if (dStr === date && items.length > 0)
+              ringPct = Math.round((items.filter((it) => isDone(it.id)).length / items.length) * 100)
+            const off = STRIP_C * (1 - ringPct / 100)
+            return (
+              <button
+                key={dStr}
+                type="button"
+                onClick={() => setDate(dStr)}
+                className={`flex flex-1 flex-col items-center gap-1 rounded-2xl border py-1.5 transition ${
+                  sel
+                    ? 'border-emerald-500 bg-emerald-500/10'
+                    : isStripToday
+                      ? 'border-emerald-500/40'
+                      : 'border-transparent hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                }`}
+              >
+                <span
+                  className={`text-[10px] font-medium uppercase ${
+                    sel || isStripToday
+                      ? 'text-emerald-600 dark:text-emerald-400'
+                      : 'text-neutral-500 dark:text-neutral-400'
+                  }`}
+                >
+                  {WEEKDAYS[wd]}
+                </span>
+                <span className="relative flex h-9 w-9 items-center justify-center">
+                  <svg viewBox="0 0 40 40" className="absolute inset-0 h-full w-full -rotate-90">
+                    <circle
+                      cx="20"
+                      cy="20"
+                      r={STRIP_R}
+                      fill="none"
+                      strokeWidth="4"
+                      className="text-neutral-200 dark:text-neutral-800"
+                      stroke="currentColor"
+                    />
+                    {ringPct > 0 && (
+                      <circle
+                        cx="20"
+                        cy="20"
+                        r={STRIP_R}
+                        fill="none"
+                        strokeWidth="4"
+                        strokeLinecap="round"
+                        className="text-emerald-500 transition-[stroke-dashoffset] duration-300"
+                        stroke="currentColor"
+                        strokeDasharray={STRIP_C}
+                        strokeDashoffset={off}
+                      />
+                    )}
+                  </svg>
+                  <span
+                    className={`relative text-sm font-semibold ${
+                      sel ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-700 dark:text-neutral-200'
+                    }`}
+                  >
+                    {dt.getDate()}
+                  </span>
+                </span>
+              </button>
+            )
+          })}
+        </div>
+      )}
+      </div>
+
       {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
 
       {isCalendar ? (
@@ -810,41 +912,6 @@ export default function PlannerToday() {
       ) : (
         // ===== Вид «Сегодня» =====
         <>
-          {/* Кольца дней: быстрый переход между днями одним кликом (как в старом плане).
-              Окно из 7 дней всегда центрируется на выбранном дне. */}
-          <div className="flex justify-between gap-1">
-            {Array.from({ length: 7 }, (_, i) => {
-              const dStr = addDays(date, i - 3)
-              const dt = new Date(dStr + 'T00:00:00')
-              const wd = (dt.getDay() + 6) % 7
-              const sel = dStr === date
-              const isStripToday = dStr === today
-              return (
-                <button
-                  key={dStr}
-                  type="button"
-                  onClick={() => setDate(dStr)}
-                  className={`flex flex-1 flex-col items-center gap-1 rounded-2xl border py-1.5 transition ${
-                    sel
-                      ? 'border-emerald-500 bg-emerald-500 text-neutral-950'
-                      : isStripToday
-                        ? 'border-emerald-500/50 text-emerald-600 dark:text-emerald-400'
-                        : 'border-transparent text-neutral-500 hover:bg-neutral-100 dark:text-neutral-400 dark:hover:bg-neutral-800'
-                  }`}
-                >
-                  <span className="text-[10px] font-medium uppercase">{WEEKDAYS[wd]}</span>
-                  <span
-                    className={`flex h-7 w-7 items-center justify-center rounded-full text-sm font-semibold ${
-                      sel ? 'bg-white/25' : isStripToday ? 'bg-emerald-500/10' : ''
-                    }`}
-                  >
-                    {dt.getDate()}
-                  </span>
-                </button>
-              )
-            })}
-          </div>
-
           {/* Прогресс-бар дня: взвешенный по приоритетам (энергия).
               Тап открывает окно персонажа энергии. */}
           {total > 0 && (

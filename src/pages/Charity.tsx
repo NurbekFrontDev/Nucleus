@@ -336,7 +336,7 @@ export default function Charity() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
+      <div className="sticky top-0 z-20 -mx-4 flex flex-col gap-2 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
         <button
           type="button"
           onClick={() => navigate('/')}

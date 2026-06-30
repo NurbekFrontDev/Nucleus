@@ -1044,7 +1044,9 @@ export default function Goals() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-semibold">🎯 {t('goals.title')}</h1>
+      <div className="sticky top-0 z-20 -mx-4 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
+        <h1 className="text-2xl font-semibold">🎯 {t('goals.title')}</h1>
+      </div>
 
       <form
         onSubmit={addWish}

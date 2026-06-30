@@ -23,6 +23,8 @@ export default function Investments() {
 
   return (
     <div className="space-y-5">
+      {/* Закреплённая шапка: заголовок + под-вкладки не двигаются при прокрутке. */}
+      <div className="sticky top-0 z-20 -mx-4 flex flex-col gap-3 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
       <div className="flex items-center gap-2">
         <span className="text-lg">📈</span>
         <h1 className="text-xl font-semibold">{t('inv.title')}</h1>
@@ -44,6 +46,7 @@ export default function Investments() {
             {t(s.key)}
           </button>
         ))}
+      </div>
       </div>
 
       {/* Контент под-вкладки */}

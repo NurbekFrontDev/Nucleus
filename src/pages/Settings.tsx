@@ -43,7 +43,9 @@ export default function Settings() {
 
   return (
     <div className="flex flex-col gap-4">
-      <h1 className="text-2xl font-semibold">⚙️ {t('set.title')}</h1>
+      <div className="sticky top-0 z-20 -mx-4 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
+        <h1 className="text-2xl font-semibold">⚙️ {t('set.title')}</h1>
+      </div>
 
       <div className="rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50">
         <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('set.signedInAs')}</p>

@@ -112,6 +112,11 @@ export default function PlannerItems() {
   }
 
   const openEdit = (it: PlannerItem) => {
+    // Если форма уже открыта на этом же деле — закрываем (тоггл).
+    if (showForm && editId === it.id) {
+      cancel()
+      return
+    }
     setEditId(it.id)
     setForm({
       type: it.type,
@@ -245,9 +250,275 @@ export default function PlannerItems() {
 
   const isHabitForm = form.type === 'habit'
 
+  // Форма добавления/редактирования. При добавлении показывается сверху,
+  // при редактировании — встраивается прямо под нужным делом (см. ниже).
+  const renderForm = () => (
+    <div className={`${cardCls} animate-pop flex flex-col gap-3`}>
+      <h2 className="text-base font-semibold">
+        {editId
+          ? isHabitForm
+            ? t('items.editHabit')
+            : t('items.editTitle')
+          : isHabitForm
+            ? t('items.newHabit')
+            : t('items.newTitle')}
+      </h2>
+
+      {/* Переключатель Дело / Привычка */}
+      <div className="flex gap-2">
+        <button
+          type="button"
+          onClick={() => setType('task')}
+          className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+            !isHabitForm
+              ? 'bg-emerald-500 text-neutral-950'
+              : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+          }`}
+        >
+          {t('items.typeTask')}
+        </button>
+        <button
+          type="button"
+          onClick={() => setType('habit')}
+          className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+            isHabitForm
+              ? 'bg-emerald-500 text-neutral-950'
+              : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+          }`}
+        >
+          🔁 {t('items.typeHabit')}
+        </button>
+      </div>
+
+      <div>
+        <label className={labelCls}>{isHabitForm ? t('items.habitName') : t('items.name')}</label>
+        <input
+          className={inputCls}
+          value={form.title}
+          onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+          placeholder={isHabitForm ? t('items.habitNamePh') : t('items.namePh')}
+        />
+      </div>
+
+      {/* Конструктор-предложение для привычки */}
+      {isHabitForm && (
+        <>
+          <div>
+            <label className={labelCls}>{t('items.when')}</label>
+            <input
+              className={inputCls}
+              value={form.cue}
+              onChange={(e) => setForm((f) => ({ ...f, cue: e.target.value }))}
+              placeholder={t('items.whenPh')}
+            />
+          </div>
+          <div>
+            <label className={labelCls}>{t('items.identity')}</label>
+            <input
+              className={inputCls}
+              value={form.identity}
+              onChange={(e) => setForm((f) => ({ ...f, identity: e.target.value }))}
+              placeholder={t('items.identityPh')}
+            />
+          </div>
+          <div className="rounded-lg bg-neutral-50 p-3 text-sm dark:bg-neutral-800/40">
+            {t('items.sentenceWill')}{' '}
+            <span className="font-medium text-emerald-600 dark:text-emerald-400">
+              {form.title.trim() || t('items.phAction')}
+            </span>
+            {', '}
+            <span className="font-medium text-violet-600 dark:text-violet-400">
+              {form.cue.trim() || t('items.phWhen')}
+            </span>
+            {', '}
+            {t('items.sentenceBecome')}{' '}
+            <span className="font-medium text-amber-600 dark:text-amber-400">
+              {form.identity.trim() || t('items.phIdentity')}
+            </span>
+            {'.'}
+          </div>
+          <div>
+            <label className={labelCls}>{t('items.twoMin')}</label>
+            <input
+              className={inputCls}
+              value={form.two_min}
+              onChange={(e) => setForm((f) => ({ ...f, two_min: e.target.value }))}
+              placeholder={t('items.twoMinPh')}
+            />
+          </div>
+        </>
+      )}
+
+      <div>
+        <label className={labelCls}>{t('items.notePh')}</label>
+        <input
+          className={inputCls}
+          value={form.note}
+          onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
+          placeholder={t('items.notePh')}
+        />
+      </div>
+
+      <div>
+        <label className={labelCls}>{t('items.repeat')}</label>
+        <Select
+          value={form.repeat_rule}
+          onChange={(v) => setForm((f) => ({ ...f, repeat_rule: v as RepeatRule }))}
+          options={[
+            ...(isHabitForm ? [] : [{ value: 'none', label: t('items.repeatNone') }]),
+            { value: 'daily', label: t('items.repeatDaily') },
+            { value: 'weekdays', label: t('items.repeatWeekdays') },
+            { value: 'weekly', label: t('items.repeatWeekly') },
+          ]}
+        />
+      </div>
+
+      {form.repeat_rule === 'weekly' && (
+        <div>
+          <label className={labelCls}>{t('items.weekdays')}</label>
+          <div className="flex flex-wrap gap-1.5">
+            {WEEKDAYS.map((w, idx) => {
+              const d = idx + 1
+              const on = form.weekdays.includes(d)
+              return (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={() => toggleWeekday(d)}
+                  className={`h-9 w-9 rounded-lg text-xs font-medium transition ${
+                    on
+                      ? 'bg-emerald-500 text-neutral-950'
+                      : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                  }`}
+                >
+                  {w}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
+      {form.repeat_rule === 'none' && !isHabitForm && (
+        <div>
+          <label className={labelCls}>{t('items.startDate')}</label>
+          <DatePicker
+            value={form.start_date}
+            onChange={(v) => setForm((f) => ({ ...f, start_date: v }))}
+          />
+        </div>
+      )}
+
+      {(form.repeat_rule !== 'none' || isHabitForm) && (
+        <div>
+          <label className={labelCls}>{t('items.startFrom')}</label>
+          <DatePicker
+            value={form.start_date}
+            onChange={(v) => setForm((f) => ({ ...f, start_date: v }))}
+          />
+        </div>
+      )}
+
+      <div>
+        <label className={labelCls}>{t('items.priority')}</label>
+        <Select
+          value={form.priority}
+          onChange={(v) => setForm((f) => ({ ...f, priority: v as Priority }))}
+          options={[
+            { value: 'none', label: t('items.prioNone') },
+            { value: 'low', label: t('items.prioLow') },
+            { value: 'medium', label: t('items.prioMedium') },
+            { value: 'high', label: t('items.prioHigh') },
+          ]}
+        />
+      </div>
+
+      <div>
+        <button
+          type="button"
+          onClick={() => setForm((f) => ({ ...f, important: !f.important }))}
+          className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
+            form.important
+              ? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-300'
+              : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800'
+          }`}
+        >
+          <span>{form.important ? '⭐' : '☆'}</span>
+          <span>{t('items.important')}</span>
+        </button>
+        <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{t('items.importantHint')}</p>
+      </div>
+
+      <div>
+        <label className={labelCls}>{t('items.section')}</label>
+        <Select
+          value={form.time_of_day ?? 'none'}
+          onChange={(v) =>
+            setForm((f) => ({ ...f, time_of_day: v === 'none' ? null : (v as TimeOfDay) }))
+          }
+          options={[
+            { value: 'none', label: t('items.secNone') },
+            { value: 'morning', label: t('items.secMorning') },
+            { value: 'day', label: t('items.secDay') },
+            { value: 'evening', label: t('items.secEvening') },
+            { value: 'allday', label: t('items.secAllDay') },
+          ]}
+        />
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className={labelCls}>{t('items.timeStart')}</label>
+          <TimePicker
+            value={form.at_time_start}
+            onChange={(v) => setForm((f) => ({ ...f, at_time_start: v }))}
+          />
+        </div>
+        <div>
+          <label className={labelCls}>{t('items.timeEnd')}</label>
+          <TimePicker
+            value={form.at_time_end}
+            onChange={(v) => setForm((f) => ({ ...f, at_time_end: v }))}
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className={labelCls}>{t('items.icon')}</label>
+        <input
+          className={inputCls}
+          value={form.icon}
+          onChange={(e) => setForm((f) => ({ ...f, icon: e.target.value }))}
+          placeholder="📖"
+        />
+      </div>
+
+      {error && <p className="text-sm text-red-500">{error}</p>}
+
+      <div className="flex justify-end gap-2">
+        <button
+          type="button"
+          onClick={cancel}
+          className="rounded-lg border border-neutral-300 px-4 py-2 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
+        >
+          {t('common.cancel')}
+        </button>
+        <button
+          type="button"
+          disabled={saving}
+          onClick={submit}
+          className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-60"
+        >
+          {saving ? t('common.saving') : t('items.save')}
+        </button>
+      </div>
+    </div>
+  )
+
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
-      <div className="flex items-center justify-between gap-2">
+      {/* Закреплённая шапка: заголовок + кнопка добавления не движутся при прокрутке. */}
+      <div className="sticky top-0 z-20 -mx-4 flex items-center justify-between gap-2 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
         <h1 className="text-xl font-semibold">{t('pnav.items')}</h1>
         {!showForm && (
           <button
@@ -260,268 +531,8 @@ export default function PlannerItems() {
         )}
       </div>
 
-      {showForm && (
-        <div className={`${cardCls} animate-pop flex flex-col gap-3`}>
-          <h2 className="text-base font-semibold">
-            {editId
-              ? isHabitForm
-                ? t('items.editHabit')
-                : t('items.editTitle')
-              : isHabitForm
-                ? t('items.newHabit')
-                : t('items.newTitle')}
-          </h2>
-
-          {/* Переключатель Дело / Привычка */}
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setType('task')}
-              className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                !isHabitForm
-                  ? 'bg-emerald-500 text-neutral-950'
-                  : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
-              }`}
-            >
-              {t('items.typeTask')}
-            </button>
-            <button
-              type="button"
-              onClick={() => setType('habit')}
-              className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                isHabitForm
-                  ? 'bg-emerald-500 text-neutral-950'
-                  : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
-              }`}
-            >
-              🔁 {t('items.typeHabit')}
-            </button>
-          </div>
-
-          <div>
-            <label className={labelCls}>{isHabitForm ? t('items.habitName') : t('items.name')}</label>
-            <input
-              className={inputCls}
-              value={form.title}
-              onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
-              placeholder={isHabitForm ? t('items.habitNamePh') : t('items.namePh')}
-            />
-          </div>
-
-          {/* Конструктор-предложение для привычки */}
-          {isHabitForm && (
-            <>
-              <div>
-                <label className={labelCls}>{t('items.when')}</label>
-                <input
-                  className={inputCls}
-                  value={form.cue}
-                  onChange={(e) => setForm((f) => ({ ...f, cue: e.target.value }))}
-                  placeholder={t('items.whenPh')}
-                />
-              </div>
-              <div>
-                <label className={labelCls}>{t('items.identity')}</label>
-                <input
-                  className={inputCls}
-                  value={form.identity}
-                  onChange={(e) => setForm((f) => ({ ...f, identity: e.target.value }))}
-                  placeholder={t('items.identityPh')}
-                />
-              </div>
-              <div className="rounded-lg bg-neutral-50 p-3 text-sm dark:bg-neutral-800/40">
-                {t('items.sentenceWill')}{' '}
-                <span className="font-medium text-emerald-600 dark:text-emerald-400">
-                  {form.title.trim() || t('items.phAction')}
-                </span>
-                {', '}
-                <span className="font-medium text-violet-600 dark:text-violet-400">
-                  {form.cue.trim() || t('items.phWhen')}
-                </span>
-                {', '}
-                {t('items.sentenceBecome')}{' '}
-                <span className="font-medium text-amber-600 dark:text-amber-400">
-                  {form.identity.trim() || t('items.phIdentity')}
-                </span>
-                {'.'}
-              </div>
-              <div>
-                <label className={labelCls}>{t('items.twoMin')}</label>
-                <input
-                  className={inputCls}
-                  value={form.two_min}
-                  onChange={(e) => setForm((f) => ({ ...f, two_min: e.target.value }))}
-                  placeholder={t('items.twoMinPh')}
-                />
-              </div>
-            </>
-          )}
-
-          <div>
-            <label className={labelCls}>{t('items.notePh')}</label>
-            <input
-              className={inputCls}
-              value={form.note}
-              onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
-              placeholder={t('items.notePh')}
-            />
-          </div>
-
-          <div>
-            <label className={labelCls}>{t('items.repeat')}</label>
-            <Select
-              value={form.repeat_rule}
-              onChange={(v) => setForm((f) => ({ ...f, repeat_rule: v as RepeatRule }))}
-              options={[
-                ...(isHabitForm ? [] : [{ value: 'none', label: t('items.repeatNone') }]),
-                { value: 'daily', label: t('items.repeatDaily') },
-                { value: 'weekdays', label: t('items.repeatWeekdays') },
-                { value: 'weekly', label: t('items.repeatWeekly') },
-              ]}
-            />
-          </div>
-
-          {form.repeat_rule === 'weekly' && (
-            <div>
-              <label className={labelCls}>{t('items.weekdays')}</label>
-              <div className="flex flex-wrap gap-1.5">
-                {WEEKDAYS.map((w, idx) => {
-                  const d = idx + 1
-                  const on = form.weekdays.includes(d)
-                  return (
-                    <button
-                      key={w}
-                      type="button"
-                      onClick={() => toggleWeekday(d)}
-                      className={`h-9 w-9 rounded-lg text-xs font-medium transition ${
-                        on
-                          ? 'bg-emerald-500 text-neutral-950'
-                          : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
-                      }`}
-                    >
-                      {w}
-                    </button>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {form.repeat_rule === 'none' && !isHabitForm && (
-            <div>
-              <label className={labelCls}>{t('items.startDate')}</label>
-              <DatePicker
-                value={form.start_date}
-                onChange={(v) => setForm((f) => ({ ...f, start_date: v }))}
-              />
-            </div>
-          )}
-
-          {(form.repeat_rule !== 'none' || isHabitForm) && (
-            <div>
-              <label className={labelCls}>{t('items.startFrom')}</label>
-              <DatePicker
-                value={form.start_date}
-                onChange={(v) => setForm((f) => ({ ...f, start_date: v }))}
-              />
-            </div>
-          )}
-
-          <div>
-            <label className={labelCls}>{t('items.priority')}</label>
-            <Select
-              value={form.priority}
-              onChange={(v) => setForm((f) => ({ ...f, priority: v as Priority }))}
-              options={[
-                { value: 'none', label: t('items.prioNone') },
-                { value: 'low', label: t('items.prioLow') },
-                { value: 'medium', label: t('items.prioMedium') },
-                { value: 'high', label: t('items.prioHigh') },
-              ]}
-            />
-          </div>
-
-          <div>
-            <button
-              type="button"
-              onClick={() => setForm((f) => ({ ...f, important: !f.important }))}
-              className={`flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition ${
-                form.important
-                  ? 'border-amber-400 bg-amber-50 text-amber-700 dark:border-amber-500/60 dark:bg-amber-500/10 dark:text-amber-300'
-                  : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800'
-              }`}
-            >
-              <span>{form.important ? '⭐' : '☆'}</span>
-              <span>{t('items.important')}</span>
-            </button>
-            <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">{t('items.importantHint')}</p>
-          </div>
-
-          <div>
-            <label className={labelCls}>{t('items.section')}</label>
-            <Select
-              value={form.time_of_day ?? 'none'}
-              onChange={(v) =>
-                setForm((f) => ({ ...f, time_of_day: v === 'none' ? null : (v as TimeOfDay) }))
-              }
-              options={[
-                { value: 'none', label: t('items.secNone') },
-                { value: 'morning', label: t('items.secMorning') },
-                { value: 'day', label: t('items.secDay') },
-                { value: 'evening', label: t('items.secEvening') },
-                { value: 'allday', label: t('items.secAllDay') },
-              ]}
-            />
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div>
-              <label className={labelCls}>{t('items.timeStart')}</label>
-              <TimePicker
-                value={form.at_time_start}
-                onChange={(v) => setForm((f) => ({ ...f, at_time_start: v }))}
-              />
-            </div>
-            <div>
-              <label className={labelCls}>{t('items.timeEnd')}</label>
-              <TimePicker
-                value={form.at_time_end}
-                onChange={(v) => setForm((f) => ({ ...f, at_time_end: v }))}
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className={labelCls}>{t('items.icon')}</label>
-            <input
-              className={inputCls}
-              value={form.icon}
-              onChange={(e) => setForm((f) => ({ ...f, icon: e.target.value }))}
-              placeholder="📖"
-            />
-          </div>
-
-          {error && <p className="text-sm text-red-500">{error}</p>}
-
-          <div className="flex justify-end gap-2">
-            <button
-              type="button"
-              onClick={cancel}
-              className="rounded-lg border border-neutral-300 px-4 py-2 text-sm transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-            >
-              {t('common.cancel')}
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={submit}
-              className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-60"
-            >
-              {saving ? t('common.saving') : t('items.save')}
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Форма добавления — сверху; форма редактирования — встроена под делом ниже. */}
+      {showForm && !editId && renderForm()}
 
       {loading ? (
         <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
@@ -535,43 +546,52 @@ export default function PlannerItems() {
             const dot = PRIORITY_DOT[it.priority]
             const time = timeLabel(it)
             const isHabitItem = it.type === 'habit'
+            const editing = showForm && editId === it.id
             return (
-              <div key={it.id} className={`flex items-start gap-3 ${cardCls}`}>
-                {dot && <span className="mt-0.5 shrink-0 text-xs leading-none">{dot}</span>}
-                {it.icon && <span className="shrink-0">{it.icon}</span>}
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <p className="break-words text-sm font-medium">{it.title}</p>
-                    {it.important && (
-                      <span className="shrink-0 text-xs" title={t('items.important')}>⭐</span>
+              <div key={it.id} className="flex flex-col gap-2">
+                <div
+                  className={`flex items-start gap-3 ${cardCls}${
+                    editing ? ' border-emerald-500/60 ring-1 ring-emerald-500/40' : ''
+                  }`}
+                >
+                  {dot && <span className="mt-0.5 shrink-0 text-xs leading-none">{dot}</span>}
+                  {it.icon && <span className="shrink-0">{it.icon}</span>}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <p className="break-words text-sm font-medium">{it.title}</p>
+                      {it.important && (
+                        <span className="shrink-0 text-xs" title={t('items.important')}>⭐</span>
+                      )}
+                      {isHabitItem && (
+                        <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                          🔁 {t('items.typeHabit')}
+                        </span>
+                      )}
+                    </div>
+                    <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">
+                      {describeRepeat(it)}
+                      {time ? ` · ${time}` : ''}
+                    </p>
+                    {isHabitItem && it.identity && (
+                      <p className="mt-0.5 break-words text-xs text-neutral-500 dark:text-neutral-400">
+                        {t('items.sentenceBecomeShort')} {it.identity}
+                      </p>
                     )}
-                    {isHabitItem && (
-                      <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                        🔁 {t('items.typeHabit')}
-                      </span>
+                    {it.note && (
+                      <p className="mt-0.5 truncate text-xs text-neutral-400">{it.note}</p>
                     )}
                   </div>
-                  <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">
-                    {describeRepeat(it)}
-                    {time ? ` · ${time}` : ''}
-                  </p>
-                  {isHabitItem && it.identity && (
-                    <p className="mt-0.5 break-words text-xs text-neutral-500 dark:text-neutral-400">
-                      {t('items.sentenceBecomeShort')} {it.identity}
-                    </p>
-                  )}
-                  {it.note && (
-                    <p className="mt-0.5 truncate text-xs text-neutral-400">{it.note}</p>
-                  )}
+                  <div className="flex shrink-0 gap-1">
+                    <IconButton icon="edit" title={t('common.edit')} onClick={() => openEdit(it)} />
+                    <IconButton
+                      icon="delete"
+                      title={t('common.delete')}
+                      onClick={() => setDelItem(it)}
+                    />
+                  </div>
                 </div>
-                <div className="flex shrink-0 gap-1">
-                  <IconButton icon="edit" title={t('common.edit')} onClick={() => openEdit(it)} />
-                  <IconButton
-                    icon="delete"
-                    title={t('common.delete')}
-                    onClick={() => setDelItem(it)}
-                  />
-                </div>
+                {/* Выпадающее окно редактирования появляется прямо под этим делом. */}
+                {editing && renderForm()}
               </div>
             )
           })}

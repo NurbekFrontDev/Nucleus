@@ -342,13 +342,15 @@ export default function Expenses() {
 
   return (
     <div className="flex flex-col gap-5">
-      <div className="inline-flex self-start rounded-xl border border-neutral-200 bg-neutral-100 p-1 dark:border-neutral-800 dark:bg-neutral-900/50">
-        <button type="button" onClick={() => setView('expenses')} className={tabCls(view === 'expenses')}>
-          🧾 {t('exp.title')}
-        </button>
-        <button type="button" onClick={() => setView('debts')} className={tabCls(view === 'debts')}>
-          💳 {t('debts.title')}
-        </button>
+      <div className="sticky top-0 z-20 -mx-4 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
+        <div className="inline-flex self-start rounded-xl border border-neutral-200 bg-neutral-100 p-1 dark:border-neutral-800 dark:bg-neutral-900/50">
+          <button type="button" onClick={() => setView('expenses')} className={tabCls(view === 'expenses')}>
+            🧾 {t('exp.title')}
+          </button>
+          <button type="button" onClick={() => setView('debts')} className={tabCls(view === 'debts')}>
+            💳 {t('debts.title')}
+          </button>
+        </div>
       </div>
 
       {view === 'debts' ? (

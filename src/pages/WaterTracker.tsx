@@ -292,7 +292,7 @@ export default function WaterTracker() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-5">
-      <div className="flex items-center justify-between">
+      <div className="sticky top-0 z-20 -mx-4 flex items-center justify-between border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
         <h1 className="text-2xl font-semibold">{t('water.title')}</h1>
         <button
           type="button"

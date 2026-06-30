@@ -114,7 +114,7 @@ export default function PlannerMatrix() {
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
-      <div>
+      <div className="sticky top-0 z-20 -mx-4 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
         <h1 className="text-xl font-semibold">{t('pnav.matrix')}</h1>
       </div>
 

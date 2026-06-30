@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import BackupReminder from './BackupReminder'
 import AssistantWidget from './AssistantWidget'
@@ -11,6 +11,9 @@ export default function Layout() {
   const navigate = useNavigate()
   const activeModule = moduleForPath(location.pathname)
   const navItems = activeModule.nav
+  // Контент скроллится внутри <main>, а не в окне — это позволяет закреплять
+  // (sticky) шапки внутри каждой страницы, не перекрывая мобильную верхнюю панель.
+  const mainRef = useRef<HTMLElement>(null)
 
   // Dynamic document title + scroll-to-top on route change.
   useEffect(() => {
@@ -24,6 +27,7 @@ export default function Layout() {
       }
     }
     document.title = `${t(titleKey)} - Nucleus`
+    mainRef.current?.scrollTo(0, 0)
     window.scrollTo(0, 0)
   }, [location.pathname, navItems])
 
@@ -50,9 +54,9 @@ export default function Layout() {
   )
 
   return (
-    <div className="min-h-screen md:flex">
+    <div className="flex h-[100dvh] flex-col overflow-hidden md:flex-row">
       {/* Sidebar (desktop) */}
-      <aside className="hidden md:flex md:w-72 md:flex-col md:border-r md:border-neutral-200 md:p-4 dark:md:border-neutral-800">
+      <aside className="hidden md:flex md:w-72 md:shrink-0 md:flex-col md:overflow-y-auto md:border-r md:border-neutral-200 md:p-4 dark:md:border-neutral-800">
         <div className="mb-4 flex items-center gap-2 px-2">
           <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-emerald-500 text-lg">
             ⚛️
@@ -81,8 +85,8 @@ export default function Layout() {
         </nav>
       </aside>
 
-      {/* Top bar (mobile): brand + module switcher */}
-      <header className="sticky top-0 z-10 flex items-center gap-3 border-b border-neutral-200 bg-white/95 px-4 pt-[env(safe-area-inset-top)] pb-2 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:hidden">
+      {/* Top bar (mobile): brand + module switcher. Не скроллится — main скроллится сам. */}
+      <header className="z-20 flex shrink-0 items-center gap-3 border-b border-neutral-200 bg-white/95 px-4 pt-[env(safe-area-inset-top)] pb-2 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:hidden">
         <span className="flex shrink-0 items-center gap-1.5 font-semibold">
           <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-emerald-500 text-sm">
             ⚛️
@@ -92,15 +96,15 @@ export default function Layout() {
         <div className="ml-auto min-w-0 flex-1">{moduleSwitcher}</div>
       </header>
 
-      {/* Content */}
-      <main className="flex-1 pb-20 md:pb-0">
+      {/* Content (scroll container) */}
+      <main ref={mainRef} className="flex-1 overflow-y-auto pb-20 md:pb-0">
         <div className="mx-auto max-w-3xl px-4 py-6">
           <Outlet />
         </div>
       </main>
 
       {/* Bottom navigation (mobile) */}
-      <nav className="fixed inset-x-0 bottom-0 z-10 flex border-t border-neutral-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:hidden">
+      <nav className="fixed inset-x-0 bottom-0 z-30 flex border-t border-neutral-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:hidden">
         {navItems.map((item) => (
           <NavLink
             key={item.to}
