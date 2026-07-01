@@ -848,7 +848,7 @@ export default function PlannerToday() {
                   aria-label={WEEKDAYS[wd]}
                   className="flex min-w-0 flex-1 flex-col items-center"
                 >
-                  <span className={`relative flex aspect-square w-full max-w-[44px] items-center justify-center rounded-full transition ${sel ? 'bg-neutral-200/80 dark:bg-white/15' : ''}`}>
+                  <span className={`relative flex aspect-square w-full max-w-[44px] items-center justify-center rounded-full transition sm:max-w-[56px] md:max-w-[68px] ${sel ? 'bg-neutral-200/80 dark:bg-white/15' : ''}`}>
                     <svg viewBox="0 0 48 48" className="absolute inset-0 h-full w-full -rotate-90">
                       <circle
                         cx="24"
@@ -875,7 +875,7 @@ export default function PlannerToday() {
                       )}
                     </svg>
                     <span
-                      className={`relative text-[11px] font-bold uppercase tracking-tight ${
+                      className={`relative text-[11px] font-bold uppercase tracking-tight sm:text-sm ${
                         sel
                           ? ringPct > 0
                             ? tone
@@ -1015,11 +1015,12 @@ export default function PlannerToday() {
             <>
               {/* Отступ под фиксированную панель, чтобы последнее дело не пряталось. */}
               <div aria-hidden className="h-14" />
-              <div className="fixed inset-x-0 bottom-16 z-20 px-4 md:bottom-0 md:left-72">
+              <div className="fixed inset-x-0 bottom-16 z-20 md:bottom-0 md:left-72">
+                <div className="mx-auto max-w-3xl px-4">
                 <button
                   type="button"
                   onClick={() => setEnergyOpen(true)}
-                  className="mx-auto flex w-full max-w-3xl items-center gap-3 rounded-xl border border-neutral-200 bg-white/95 px-4 py-2.5 text-left shadow-lg backdrop-blur transition dark:border-neutral-800 dark:bg-neutral-950/95"
+                  className="flex w-full items-center gap-3 rounded-xl border border-neutral-200 bg-white/95 px-4 py-2.5 text-left shadow-lg backdrop-blur transition dark:border-neutral-800 dark:bg-neutral-950/95"
                 >
                   <span className="shrink-0 text-xs font-medium text-neutral-600 dark:text-neutral-300">
                     {dayEnergy.doneCount === total
@@ -1034,6 +1035,7 @@ export default function PlannerToday() {
                   </span>
                   <span className="shrink-0 text-sm font-semibold text-emerald-600 dark:text-emerald-400">{pct}%</span>
                 </button>
+                </div>
               </div>
             </>
           )}
