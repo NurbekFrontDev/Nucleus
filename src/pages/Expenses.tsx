@@ -6,6 +6,8 @@ import Select from '../components/Select'
 import DatePicker from '../components/DatePicker'
 import PeriodFilter, { type PeriodValue } from '../components/PeriodFilter'
 import IconButton from '../components/IconButton'
+import AmountInput from '../components/AmountInput'
+import { useUsdRates, type EntryCurrency } from '../lib/rates'
 import Debts from './Debts'
 import { useLang } from '../lib/i18n'
 import {
@@ -58,6 +60,7 @@ const tabCls = (active: boolean) =>
 export default function Expenses() {
   const { user } = useAuth()
   const { t, tr } = useLang()
+  const { toUsd } = useUsdRates()
   const todayISO = new Date().toISOString().slice(0, 10)
 
   const [view, setView] = useState<'expenses' | 'debts'>('expenses')
@@ -70,6 +73,7 @@ export default function Expenses() {
   const [filterCat, setFilterCat] = useState('')
 
   const [amount, setAmount] = useState('')
+  const [currency, setCurrency] = useState<EntryCurrency>('USD')
   const [date, setDate] = useState(todayISO)
   const [categoryId, setCategoryId] = useState('')
   const [subcategory, setSubcategory] = useState('')
@@ -81,6 +85,7 @@ export default function Expenses() {
 
   const [editId, setEditId] = useState<string | null>(null)
   const [editAmount, setEditAmount] = useState('')
+  const [editCurrency, setEditCurrency] = useState<EntryCurrency>('USD')
   const [editDate, setEditDate] = useState('')
   const [editCategoryId, setEditCategoryId] = useState('')
   const [editSubcategory, setEditSubcategory] = useState('')
@@ -252,7 +257,8 @@ export default function Expenses() {
   const addExpense = async (e: FormEvent) => {
     e.preventDefault()
     if (!user) return
-    const original = parseAmount(amount)
+    const entered = parseAmount(amount)
+    const original = Math.round(toUsd(entered, currency) * 100) / 100
     if (!original || original <= 0) {
       setError(t('common.enterPositive'))
       return
@@ -284,6 +290,7 @@ export default function Expenses() {
     }
     if (inPeriod((data as Expense).date)) setItems([data as Expense, ...items])
     setAmount('')
+    setCurrency('USD')
     setSubcategory('')
     setDescription('')
     setFromPot('')
@@ -292,6 +299,7 @@ export default function Expenses() {
   const startEdit = (i: Expense) => {
     setEditId(i.id)
     setEditAmount(formatAmountInput(String(i.amount)))
+    setEditCurrency('USD')
     setEditDate(i.date)
     setEditCategoryId(i.category_id ?? '')
     setEditSubcategory(i.subcategory ?? '')
@@ -301,7 +309,8 @@ export default function Expenses() {
   }
 
   const saveEdit = async (id: string) => {
-    const original = parseAmount(editAmount)
+    const entered = parseAmount(editAmount)
+    const original = Math.round(toUsd(entered, editCurrency) * 100) / 100
     if (!original || original <= 0) {
       setError(t('common.enterPositive'))
       return
@@ -398,12 +407,17 @@ export default function Expenses() {
               <span>＋ {t('exp.addBtn')}</span>
               <span className="text-neutral-400">▴</span>
             </button>
-            <input
-              inputMode="decimal"
+            <AmountInput
               value={amount}
-              onChange={(e) => setAmount(formatAmountInput(e.target.value))}
+              currency={currency}
+              onValueChange={setAmount}
+              onCurrencyChange={setCurrency}
               placeholder={t('common.amount')}
-              className={inputCls}
+              usdHint={
+                currency !== 'USD' && parseAmount(amount) > 0
+                  ? `≈ ${formatSum(toUsd(parseAmount(amount), currency))}`
+                  : null
+              }
             />
             <DatePicker value={date} onChange={setDate} />
             <Select
@@ -525,12 +539,17 @@ export default function Expenses() {
                     key={i.id}
                     className="flex flex-col gap-3 rounded-xl border border-emerald-500/40 bg-neutral-50 px-4 py-3 dark:bg-neutral-900/40"
                   >
-                    <input
-                      inputMode="decimal"
+                    <AmountInput
                       value={editAmount}
-                      onChange={(e) => setEditAmount(formatAmountInput(e.target.value))}
+                      currency={editCurrency}
+                      onValueChange={setEditAmount}
+                      onCurrencyChange={setEditCurrency}
                       placeholder={t('common.amount')}
-                      className={inputCls}
+                      usdHint={
+                        editCurrency !== 'USD' && parseAmount(editAmount) > 0
+                          ? `≈ ${formatSum(toUsd(parseAmount(editAmount), editCurrency))}`
+                          : null
+                      }
                     />
                     <DatePicker value={editDate} onChange={setEditDate} />
                     <Select

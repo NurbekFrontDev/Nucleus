@@ -5,6 +5,8 @@ import Combobox from '../components/Combobox'
 import DatePicker from '../components/DatePicker'
 import PeriodFilter, { type PeriodValue } from '../components/PeriodFilter'
 import IconButton from '../components/IconButton'
+import AmountInput from '../components/AmountInput'
+import { useUsdRates, type EntryCurrency } from '../lib/rates'
 import { useLang } from '../lib/i18n'
 import {
   getOrCreateMonth,
@@ -43,6 +45,7 @@ const chipCls = (active: boolean) =>
 export default function Incomes() {
   const { user } = useAuth()
   const { t, tr } = useLang()
+  const { toUsd } = useUsdRates()
   const todayISO = new Date().toISOString().slice(0, 10)
 
   const [period, setPeriod] = useState<PeriodValue | null>(null)
@@ -52,6 +55,7 @@ export default function Incomes() {
   const [sortOrder, setSortOrder] = useState<'new' | 'old'>('new')
 
   const [amount, setAmount] = useState('')
+  const [currency, setCurrency] = useState<EntryCurrency>('USD')
   const [date, setDate] = useState(todayISO)
   const [source, setSource] = useState('')
   const [description, setDescription] = useState('')
@@ -61,6 +65,7 @@ export default function Incomes() {
 
   const [editId, setEditId] = useState<string | null>(null)
   const [editAmount, setEditAmount] = useState('')
+  const [editCurrency, setEditCurrency] = useState<EntryCurrency>('USD')
   const [editDate, setEditDate] = useState('')
   const [editSource, setEditSource] = useState('')
   const [editDescription, setEditDescription] = useState('')
@@ -141,7 +146,8 @@ export default function Incomes() {
   const addIncome = async (e: FormEvent) => {
     e.preventDefault()
     if (!user) return
-    const original = parseAmount(amount)
+    const entered = parseAmount(amount)
+    const original = Math.round(toUsd(entered, currency) * 100) / 100
     if (!original || original <= 0) {
       setError(t('common.enterPositive'))
       return
@@ -169,6 +175,7 @@ export default function Incomes() {
     }
     if (inPeriod((data as Income).date)) setItems([data as Income, ...items])
     setAmount('')
+    setCurrency('USD')
     setSource('')
     setDescription('')
   }
@@ -176,6 +183,7 @@ export default function Incomes() {
   const startEdit = (i: Income) => {
     setEditId(i.id)
     setEditAmount(formatAmountInput(String(i.amount)))
+    setEditCurrency('USD')
     setEditDate(i.date)
     setEditSource(i.source ?? '')
     setEditDescription(i.description ?? '')
@@ -183,7 +191,8 @@ export default function Incomes() {
   }
 
   const saveEdit = async (id: string) => {
-    const original = parseAmount(editAmount)
+    const entered = parseAmount(editAmount)
+    const original = Math.round(toUsd(entered, editCurrency) * 100) / 100
     if (!original || original <= 0) {
       setError(t('common.enterPositive'))
       return
@@ -255,12 +264,17 @@ export default function Incomes() {
           <span>＋ {t('inc.addBtn')}</span>
           <span className="text-neutral-400">▴</span>
         </button>
-        <input
-          inputMode="decimal"
+        <AmountInput
           value={amount}
-          onChange={(e) => setAmount(formatAmountInput(e.target.value))}
+          currency={currency}
+          onValueChange={setAmount}
+          onCurrencyChange={setCurrency}
           placeholder={t('common.amount')}
-          className={inputCls}
+          usdHint={
+            currency !== 'USD' && parseAmount(amount) > 0
+              ? `≈ ${formatSum(toUsd(parseAmount(amount), currency))}`
+              : null
+          }
         />
         <DatePicker value={date} onChange={setDate} />
         <Combobox
@@ -314,12 +328,17 @@ export default function Incomes() {
                 key={i.id}
                 className="flex flex-col gap-3 rounded-xl border border-emerald-500/40 bg-neutral-50 px-4 py-3 dark:bg-neutral-900/40"
               >
-                <input
-                  inputMode="decimal"
+                <AmountInput
                   value={editAmount}
-                  onChange={(e) => setEditAmount(formatAmountInput(e.target.value))}
+                  currency={editCurrency}
+                  onValueChange={setEditAmount}
+                  onCurrencyChange={setEditCurrency}
                   placeholder={t('common.amount')}
-                  className={inputCls}
+                  usdHint={
+                    editCurrency !== 'USD' && parseAmount(editAmount) > 0
+                      ? `≈ ${formatSum(toUsd(parseAmount(editAmount), editCurrency))}`
+                      : null
+                  }
                 />
                 <DatePicker value={editDate} onChange={setEditDate} />
                 <Combobox

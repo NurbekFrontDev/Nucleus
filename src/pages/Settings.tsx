@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useTheme } from '../lib/ThemeContext'
 import Select from '../components/Select'
-import CurrencyConverter from '../components/CurrencyConverter'
 import UsageCard from '../components/UsageCard'
 import { useLang } from '../lib/i18n'
 import { loadCryptoAutoExpense, saveCryptoAutoExpense } from '../lib/db'
@@ -264,8 +263,6 @@ export default function Settings() {
           </button>
         </div>
       </div>
-
-      <CurrencyConverter />
 
       <UsageCard />
 
