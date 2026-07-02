@@ -159,7 +159,7 @@ async function getWritableDir(interactive: boolean): Promise<FileSystemDirectory
   const h = await idbGet<FileSystemDirectoryHandle>(DIR_KEY)
   if (!h) return null
   try {
-    const opts = { mode: 'readwrite' } as unknown as FileSystemHandlePermissionDescriptor
+    const opts = { mode: 'readwrite' as const }
     const anyH = h as unknown as {
       queryPermission?: (o: unknown) => Promise<PermissionState>
       requestPermission?: (o: unknown) => Promise<PermissionState>
