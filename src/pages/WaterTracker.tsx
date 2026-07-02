@@ -470,7 +470,6 @@ export default function WaterTracker() {
                   <input
                     type="number"
                     inputMode="numeric"
-                    autoFocus
                     value={goalDraft}
                     onChange={(e) => setGoalDraft(e.target.value)}
                     onKeyDown={(e) => {

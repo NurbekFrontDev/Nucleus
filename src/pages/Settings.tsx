@@ -24,7 +24,6 @@ export default function Settings() {
   const [cryptoAuto, setCryptoAuto] = useState(true)
   const [backupAuto, setBackupAuto] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
-  const [backupMsg, setBackupMsg] = useState<string | null>(null)
   const [lastBackupAt, setLastBackupAt] = useState<string | null>(null)
   const [lastBackupTarget, setLastBackupTarget] = useState<string | null>(null)
   const [dirName, setDirName] = useState<string | null>(null)
@@ -99,11 +98,9 @@ export default function Settings() {
   const doBackup = async () => {
     if (!user || backupBusy) return
     setBackupBusy(true)
-    setBackupMsg(null)
     try {
       const res = await runBackup(user.id)
       if (res.cloud || res.file) {
-        setBackupMsg(t('set.backupOkMsg', { rows: String(res.rowCount) }))
         setLastBackupAt(new Date().toISOString())
         setLastBackupTarget(res.target)
         const place = backupTargetLabel(res.target, lang === 'en' ? 'en' : 'ru')
@@ -113,10 +110,10 @@ export default function Settings() {
             : `Бэкап сохранён: ${place} (${res.rowCount} записей)`,
         )
       } else {
-        setBackupMsg(t('set.backupFailMsg'))
+        showToast(lang === 'en' ? 'Backup failed' : 'Не удалось сделать бэкап')
       }
     } catch {
-      setBackupMsg(t('set.backupFailMsg'))
+      showToast(lang === 'en' ? 'Backup failed' : 'Не удалось сделать бэкап')
     } finally {
       setBackupBusy(false)
     }
@@ -202,33 +199,32 @@ export default function Settings() {
       <div className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50">
         <p className="font-medium">🛡️ {t('set.backup')}</p>
 
-        {/* Инфо о последнем бэкапе (слева) + кнопка «Сделать бэкап» (справа). */}
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="min-w-0 text-sm text-neutral-500 dark:text-neutral-400">
-            {lastBackupAt ? (
-              <>
-                {lang === 'en' ? 'Last backup: ' : 'Последний бэкап: '}
-                {new Date(lastBackupAt).toLocaleString(lang === 'en' ? 'en-US' : 'ru-RU')}
-                {', '}
-                {backupTargetLabel(lastBackupTarget, lang === 'en' ? 'en' : 'ru')}
-              </>
-            ) : lang === 'en' ? (
-              'No backups yet'
-            ) : (
-              'Бэкапов ещё не было'
-            )}
-          </div>
+        {/* Кнопка «Сделать бэкап» сверху (справа). */}
+        <div className="flex justify-end">
           <button
             onClick={doBackup}
             disabled={!user || backupBusy}
-            className="ml-auto shrink-0 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50"
+            className="shrink-0 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50"
           >
             {backupBusy ? t('backup.doing') : t('set.backupNow')}
           </button>
         </div>
-        {backupMsg && (
-          <span className="text-sm text-neutral-500 dark:text-neutral-400">{backupMsg}</span>
-        )}
+
+        {/* Инфо о последнем бэкапе — под кнопкой. */}
+        <div className="text-sm text-neutral-500 dark:text-neutral-400">
+          {lastBackupAt ? (
+            <>
+              {lang === 'en' ? 'Last backup: ' : 'Последний бэкап: '}
+              {new Date(lastBackupAt).toLocaleString(lang === 'en' ? 'en-US' : 'ru-RU')}
+              {', '}
+              {backupTargetLabel(lastBackupTarget, lang === 'en' ? 'en' : 'ru')}
+            </>
+          ) : lang === 'en' ? (
+            'No backups yet'
+          ) : (
+            'Бэкапов ещё не было'
+          )}
+        </div>
 
         {/* Папка для бэкапов на ПК (только веб с поддержкой File System Access API). */}
         {canPickDir && (
