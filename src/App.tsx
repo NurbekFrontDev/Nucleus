@@ -2,6 +2,9 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import { useEffect, useRef, useState } from 'react'
 import { useAuth } from './lib/AuthContext'
 import { supabase } from './lib/supabase'
+import { initNativeAuth } from './lib/native'
+import { Capacitor } from '@capacitor/core'
+import { App as CapacitorApp } from '@capacitor/app'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -100,6 +103,34 @@ function App() {
       }
     })()
   }, [restored, userId, location.pathname])
+
+  // Нативная авторизация: обновление токена при возврате в приложение и
+  // обработка возврата из браузера после входа через Google (deep link).
+  useEffect(() => {
+    const cleanup = initNativeAuth()
+    return cleanup
+  }, [])
+
+  // Аппаратная кнопка «назад» на Android: сначала уходим на предыдущий
+  // экран внутри приложения, и только с «корневых» экранов модулей (FinLit/Планировщик)
+  // сворачиваем приложение, а не закрываем его совсем.
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) return
+    let handle: { remove: () => void } | undefined
+    CapacitorApp.addListener('backButton', () => {
+      const path = window.location.pathname
+      if (path === '/' || path === '/planner') {
+        CapacitorApp.minimizeApp()
+      } else {
+        navigate(-1)
+      }
+    }).then((h) => {
+      handle = h
+    })
+    return () => {
+      handle?.remove()
+    }
+  }, [navigate])
 
   if (loading) {
     return (

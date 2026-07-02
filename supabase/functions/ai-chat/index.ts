@@ -4,21 +4,16 @@
 // ходит к провайдеру ИИ (ключ спрятан в секретах Supabase) и возвращает ответ.
 // Браузер ключ никогда не видит, как и в функции get-rate.
 //
-// Провайдеры (оба OpenAI-совместимые, поэтому переключение без правки кода):
-//   1) Основной: Grok 4.3 (xAI), ключ XAI_API_KEY.
-//   2) Резервный: GLM 5.1 (NVIDIA NIM), ключ NVIDIA_API_KEY.
-// Если основной недоступен (нет ключа, ошибка сети или пустой ответ),
-// автоматически пробуем резервный.
+// Провайдер: GLM 5.1 (NVIDIA NIM, бесплатно), ключ NVIDIA_API_KEY. Grok и DeepSeek
+// убраны по просьбе пользователя (DeepSeek используется в другом месте отдельно).
+// OpenAI-совместимый эндпоинт, поэтому смену модели/базового URL можно сделать
+// без правки кода - через секреты NVIDIA_BASE_URL / NVIDIA_MODEL.
 //
 // Тело запроса (POST, JSON):
 //   { messages: [{ role, content }], system?: string,
 //     temperature?: number, max_tokens?: number }
-// Ответ: { reply: string, provider: 'grok' | 'nvidia', model: string }
+// Ответ: { reply: string, provider: 'nvidia', model: string }
 //        либо { error: string } со статусом 4xx/5xx.
-//
-// Имена моделей берутся из секретов (GROK_MODEL, NVIDIA_MODEL), у них есть
-// значения по умолчанию. Если у провайдера другое точное имя модели,
-// достаточно задать секрет, не трогая код.
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -37,7 +32,7 @@ type ChatRole = 'system' | 'user' | 'assistant'
 type ChatMessage = { role: ChatRole; content: string }
 
 type Provider = {
-  name: 'grok' | 'nvidia'
+  name: 'nvidia'
   baseUrl: string
   apiKey: string | undefined
   model: string
@@ -113,12 +108,6 @@ Deno.serve(async (req: Request) => {
     if (messages.length === 0) return reply({ error: 'no-messages' }, 400)
 
     const providers: Provider[] = [
-      {
-        name: 'grok',
-        baseUrl: Deno.env.get('XAI_BASE_URL') ?? 'https://api.x.ai/v1',
-        apiKey: Deno.env.get('XAI_API_KEY'),
-        model: Deno.env.get('GROK_MODEL') ?? 'grok-4-latest',
-      },
       {
         name: 'nvidia',
         baseUrl: Deno.env.get('NVIDIA_BASE_URL') ?? 'https://integrate.api.nvidia.com/v1',

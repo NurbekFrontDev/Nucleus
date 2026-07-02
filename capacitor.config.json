@@ -1,0 +1,14 @@
+{
+  "appId": "com.nucleus.app",
+  "appName": "Nucleus",
+  "webDir": "dist",
+  "plugins": {
+    "SplashScreen": {
+      "launchShowDuration": 700,
+      "backgroundColor": "#0a0a0a",
+      "showSpinner": false,
+      "splashFullScreen": true,
+      "splashImmersive": true
+    }
+  }
+}

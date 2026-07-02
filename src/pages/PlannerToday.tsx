@@ -24,6 +24,7 @@ import {
   type PlannerDayOverride,
 } from '../lib/planner'
 import EnergyCharacter from '../components/EnergyCharacter'
+import { hapticTap } from '../lib/native'
 
 // Экран «Сегодня» (П-3 + П-6): один экран с переключателем вида в правом
 // верхнем углу — Сегодня / Неделя / Месяц / Год (как в TickTick).
@@ -287,6 +288,7 @@ export default function PlannerToday() {
   // Отметить/снять выполнение с оптимистичным обновлением и откатом при ошибке.
   const onToggle = async (item: PlannerItem) => {
     if (!user) return
+    void hapticTap()
     const currentlyDone = isDone(item.id)
     const optimistic: PlannerLog = {
       id: 'tmp',

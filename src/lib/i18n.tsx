@@ -580,6 +580,8 @@ const UI: Record<Lang, Record<string, string>> = {
     'login.toSignup': 'Нет аккаунта? Зарегистрироваться',
     'login.toSignin': 'Уже есть аккаунт? Войти',
     'login.created': 'Аккаунт создан! Если включено подтверждение по email — проверь почту, иначе можно сразу войти.',
+    'login.or': 'или',
+    'login.google': 'Войти через Google',
 
     'dash.title': 'Дашборд',
     'dash.incomeGoal': 'Цель по доходу',
@@ -1350,6 +1352,8 @@ const UI: Record<Lang, Record<string, string>> = {
     'login.toSignup': "Don't have an account? Sign up",
     'login.toSignin': 'Already have an account? Sign in',
     'login.created': 'Account created! If email confirmation is enabled, check your inbox; otherwise you can sign in right away.',
+    'login.or': 'or',
+    'login.google': 'Sign in with Google',
 
     'dash.title': 'Dashboard',
     'dash.incomeGoal': 'Income goal',
