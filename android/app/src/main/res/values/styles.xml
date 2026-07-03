@@ -21,7 +21,7 @@
              параметров показывает пустой/чёрный экран. Задаём тёмный фон и нашу иконку
              (атом/ядро) по центру явно, плюс оставляем android:background как запасной
              вариант для Android 11 и ниже (через совместимость core-splashscreen). -->
-        <item name="android:windowSplashScreenBackground">#0a0a0a</item>
+        <item name="android:windowSplashScreenBackground">#000000</item>
         <item name="android:windowSplashScreenAnimatedIcon">@mipmap/ic_launcher_foreground</item>
         <item name="android:background">@drawable/splash</item>
     </style>

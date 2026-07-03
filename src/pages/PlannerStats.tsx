@@ -8,6 +8,7 @@ import {
   type StatsPeriod,
   type HabitStats,
 } from '../lib/planner'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 // Экран «Статистика» (П-9): сводка выполнения дел и привычек за период,
 //   фокус-время из Помодоро, столбики по дням и стрики привычек.
@@ -17,6 +18,8 @@ const cardCls =
   'rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50'
 
 const PERIODS: StatsPeriod[] = ['week', 'month', 'all']
+
+type StatsCache = { stats: PlannerStats; habits: HabitStats[] }
 
 export default function PlannerStats() {
   const { user } = useAuth()
@@ -31,9 +34,18 @@ export default function PlannerStats() {
   useEffect(() => {
     if (!user) return
     let active = true
+    // Мгновенно показываем кэш (без спиннера и без интернета), сеть обновляет в фоне.
+    const ck = `planstats:${user.id}:${period}`
+    const cached = readCache<StatsCache>(ck)
+    if (cached) {
+      setStats(cached.stats)
+      setHabits(cached.habits)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     ;(async () => {
       try {
-        setLoading(true)
         const [s, h] = await Promise.all([
           loadPlannerStats(user.id, period),
           loadHabits(user.id),
@@ -42,6 +54,7 @@ export default function PlannerStats() {
         setStats(s)
         setHabits(h)
         setError(null)
+        writeCache(ck, { stats: s, habits: h })
       } catch (e) {
         if (active) setError((e as Error).message)
       } finally {

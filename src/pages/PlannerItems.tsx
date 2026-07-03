@@ -20,6 +20,7 @@ import {
   type TimeOfDay,
   type ItemInput,
 } from '../lib/planner'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 // Экран «Мои дела»: единое место, где заводят и редактируют дела и привычки
 // (П-5, переделка под стиль Atoms). Это «склад/конструктор»: тут ТОЛЬКО
@@ -229,10 +230,19 @@ export default function PlannerItems() {
 
   const loadAll = async () => {
     if (!user) return
-    try {
+    // Мгновенно показываем кэш (без спиннера и без интернета), сеть обновляет в фоне.
+    const ck = `planitems:${user.id}`
+    const cached = readCache<PlannerItem[]>(ck)
+    if (cached) {
+      setItems(cached)
+      setLoading(false)
+    } else {
       setLoading(true)
+    }
+    try {
       const list = await loadAllItems(user.id)
       setItems(list)
+      writeCache(ck, list)
     } catch (e) {
       setError((e as Error).message)
     } finally {

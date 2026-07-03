@@ -8,6 +8,7 @@ import PeriodFilter, { type PeriodValue } from '../components/PeriodFilter'
 import IconButton from '../components/IconButton'
 import AmountInput from '../components/AmountInput'
 import { useUsdRates, type EntryCurrency } from '../lib/rates'
+import { loadLastCurrency, saveLastCurrency } from '../lib/lastCurrency'
 import Debts from './Debts'
 import { useLang } from '../lib/i18n'
 import {
@@ -24,6 +25,7 @@ import {
   isSavingsCategory,
   isCharityCategory,
 } from '../lib/db'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 type Category = { id: string; name: string; archived?: boolean }
 type Expense = {
@@ -73,7 +75,8 @@ export default function Expenses() {
   const [filterCat, setFilterCat] = useState('')
 
   const [amount, setAmount] = useState('')
-  const [currency, setCurrency] = useState<EntryCurrency>('USD')
+  // Валюта по умолчанию — последняя выбранная пользователем.
+  const [currency, setCurrency] = useState<EntryCurrency>(() => loadLastCurrency())
   const [date, setDate] = useState(todayISO)
   const [categoryId, setCategoryId] = useState('')
   const [subcategory, setSubcategory] = useState('')
@@ -98,6 +101,13 @@ export default function Expenses() {
   useEffect(() => {
     if (!user) return
     let active = true
+    // Мгновенно показываем категории из кэша (без интернета), сеть обновляет в фоне.
+    const catCk = `expcats:${user.id}`
+    const cachedCats = readCache<Category[]>(catCk)
+    if (cachedCats) {
+      setCategories(cachedCats)
+      setCategoryId((prev) => prev || (cachedCats[0]?.id ?? ''))
+    }
     ;(async () => {
       const catRes = await supabase
         .from('categories')
@@ -107,6 +117,7 @@ export default function Expenses() {
       const cats = (catRes.data ?? []) as Category[]
       setCategories(cats)
       setCategoryId((prev) => prev || (cats[0]?.id ?? ''))
+      writeCache(catCk, cats)
     })()
     return () => {
       active = false
@@ -117,9 +128,17 @@ export default function Expenses() {
   useEffect(() => {
     if (!user || !period) return
     let active = true
+    // Мгновенно показываем кэш (без спиннера и без интернета), сеть обновляет в фоне.
+    const ck = `exp:${user.id}:${period.start}:${period.end}`
+    const cached = readCache<Expense[]>(ck)
+    if (cached) {
+      setItems(cached)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     ;(async () => {
       try {
-        setLoading(true)
         const { data, error } = await supabase
           .from('expenses')
           .select(EXPENSE_COLS)
@@ -128,7 +147,10 @@ export default function Expenses() {
           .lte('date', period.end)
           .order('date', { ascending: false })
         if (error) throw error
-        if (active) setItems((data ?? []) as Expense[])
+        if (active) {
+          setItems((data ?? []) as Expense[])
+          writeCache(ck, (data ?? []) as Expense[])
+        }
       } catch (e) {
         if (active) setError((e as Error).message)
       } finally {
@@ -290,7 +312,7 @@ export default function Expenses() {
     }
     if (inPeriod((data as Expense).date)) setItems([data as Expense, ...items])
     setAmount('')
-    setCurrency('USD')
+    setCurrency(loadLastCurrency())
     setSubcategory('')
     setDescription('')
     setFromPot('')
@@ -411,7 +433,10 @@ export default function Expenses() {
               value={amount}
               currency={currency}
               onValueChange={setAmount}
-              onCurrencyChange={setCurrency}
+              onCurrencyChange={(c) => {
+                setCurrency(c)
+                saveLastCurrency(c)
+              }}
               placeholder={t('common.amount')}
               usdHint={
                 currency !== 'USD' && parseAmount(amount) > 0

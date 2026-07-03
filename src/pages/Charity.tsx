@@ -23,6 +23,7 @@ import {
   DEFAULT_CHARITY_SPLIT,
   type CharityPotsStats,
 } from '../lib/db'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 type Category = { id: string; name: string; percent?: number; archived?: boolean }
 type CharityExpense = {
@@ -32,6 +33,15 @@ type CharityExpense = {
   description: string | null
   subcategory: string | null
   paid_from_pot: string | null
+}
+type CharityCache = {
+  categories: Category[]
+  received: number
+  pots: CharityPotsStats
+  split: number
+  goalName: string
+  goalTarget: number
+  items: CharityExpense[]
 }
 
 const fieldBase =
@@ -85,9 +95,23 @@ export default function Charity() {
   useEffect(() => {
     if (!user) return
     let active = true
+    // Мгновенно показываем кэш (без спиннера и без интернета), сеть обновляет в фоне.
+    const ck = `charity:${user.id}`
+    const cached = readCache<CharityCache>(ck)
+    if (cached) {
+      setCategories(cached.categories)
+      setReceived(cached.received)
+      setPots(cached.pots)
+      setSplit(cached.split)
+      setGoalName(cached.goalName)
+      setGoalTarget(cached.goalTarget)
+      setItems(cached.items)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     ;(async () => {
       try {
-        setLoading(true)
         const now = new Date()
         const m = await getOrCreateMonth(user.id, now.getFullYear(), now.getMonth() + 1)
         const [catRes, incRes, potsVal, splitVal, goalVal] = await Promise.all([
@@ -105,10 +129,12 @@ export default function Charity() {
         if (catRes.error) throw catRes.error
         if (incRes.error) throw incRes.error
         const cats = (catRes.data ?? []) as Category[]
-        setCategories(cats)
-        setReceived(
-          (incRes.data ?? []).reduce((s: number, r: { amount: number }) => s + Number(r.amount), 0),
+        const receivedSum = (incRes.data ?? []).reduce(
+          (s: number, r: { amount: number }) => s + Number(r.amount),
+          0,
         )
+        setCategories(cats)
+        setReceived(receivedSum)
         setPots(potsVal)
         setSplit(splitVal)
         setGoalName(goalVal.name)
@@ -116,6 +142,7 @@ export default function Charity() {
 
         // Записи копилки благотворительности (пополнения и пожертвования).
         const charityIds = cats.filter((c) => isCharityCategory(c.name)).map((c) => c.id)
+        let charityItems: CharityExpense[] = []
         if (charityIds.length > 0) {
           const { data: exps } = await supabase
             .from('expenses')
@@ -123,7 +150,19 @@ export default function Charity() {
             .eq('user_id', user.id)
             .in('category_id', charityIds)
             .order('date', { ascending: false })
-          if (active) setItems((exps ?? []) as CharityExpense[])
+          charityItems = (exps ?? []) as CharityExpense[]
+          if (active) setItems(charityItems)
+        }
+        if (active) {
+          writeCache(ck, {
+            categories: cats,
+            received: receivedSum,
+            pots: potsVal,
+            split: splitVal,
+            goalName: goalVal.name,
+            goalTarget: goalVal.target,
+            items: charityItems,
+          })
         }
       } catch (e) {
         if (active) setError((e as Error).message)

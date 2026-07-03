@@ -5,10 +5,13 @@
   "plugins": {
     "SplashScreen": {
       "launchShowDuration": 700,
-      "backgroundColor": "#0a0a0a",
+      "backgroundColor": "#000000",
       "showSpinner": false,
       "splashFullScreen": true,
       "splashImmersive": true
+    },
+    "CapacitorUpdater": {
+      "autoUpdate": false
     }
   }
 }

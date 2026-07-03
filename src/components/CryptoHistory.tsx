@@ -12,6 +12,7 @@ import {
   type HistorySpotEntry,
   type HistoryFutureEntry,
 } from '../lib/crypto'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 // Подробная история инвестиций по месяцам: спот-сделки по монетам и фьючерсы,
 // с реализованным результатом и процентами. Стиль и фильтры -- как во вкладке
@@ -148,8 +149,9 @@ function FutureRow({ f, t }: { f: HistoryFutureEntry; t: T }) {
 export default function CryptoHistory() {
   const { user } = useAuth()
   const { t } = useLang()
-  const [months, setMonths] = useState<HistoryMonth[]>([])
-  const [loading, setLoading] = useState(true)
+  const cachedHist = readCache<HistoryMonth[]>(`crypto-hist:${user?.id ?? 'anon'}`)
+  const [months, setMonths] = useState<HistoryMonth[]>(cachedHist ?? [])
+  const [loading, setLoading] = useState(!cachedHist)
   const [error, setError] = useState<string | null>(null)
   const [openKey, setOpenKey] = useState<string | null>(null)
   const [period, setPeriod] = useState<PeriodValue | null>(null)
@@ -157,10 +159,19 @@ export default function CryptoHistory() {
 
   const reload = useCallback(async () => {
     if (!user) return
-    setLoading(true)
+    const ck = `crypto-hist:${user.id}`
+    const cached = readCache<HistoryMonth[]>(ck)
+    if (cached) {
+      setMonths(cached)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     setError(null)
     try {
-      setMonths(await loadCryptoHistory(user.id))
+      const data = await loadCryptoHistory(user.id)
+      setMonths(data)
+      writeCache(ck, data)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

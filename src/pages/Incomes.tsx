@@ -7,6 +7,7 @@ import PeriodFilter, { type PeriodValue } from '../components/PeriodFilter'
 import IconButton from '../components/IconButton'
 import AmountInput from '../components/AmountInput'
 import { useUsdRates, type EntryCurrency } from '../lib/rates'
+import { loadLastCurrency, saveLastCurrency } from '../lib/lastCurrency'
 import { useLang } from '../lib/i18n'
 import {
   getOrCreateMonth,
@@ -20,6 +21,7 @@ import {
   renamePreset,
   deletePreset,
 } from '../lib/db'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 type Income = {
   id: string
@@ -55,7 +57,8 @@ export default function Incomes() {
   const [sortOrder, setSortOrder] = useState<'new' | 'old'>('new')
 
   const [amount, setAmount] = useState('')
-  const [currency, setCurrency] = useState<EntryCurrency>('USD')
+  // Валюта по умолчанию — последняя выбранная пользователем.
+  const [currency, setCurrency] = useState<EntryCurrency>(() => loadLastCurrency())
   const [date, setDate] = useState(todayISO)
   const [source, setSource] = useState('')
   const [description, setDescription] = useState('')
@@ -74,9 +77,18 @@ export default function Incomes() {
   useEffect(() => {
     if (!user || !period) return
     let active = true
+    // Мгновенно показываем кэш выбранного периода (без спиннера и без интернета),
+    // сеть обновляет данные в фоне (stale-while-revalidate).
+    const ck = `inc:${user.id}:${period.start}:${period.end}`
+    const cached = readCache<Income[]>(ck)
+    if (cached) {
+      setItems(cached)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     ;(async () => {
       try {
-        setLoading(true)
         const { data, error } = await supabase
           .from('incomes')
           .select(INCOME_COLS)
@@ -85,7 +97,11 @@ export default function Incomes() {
           .lte('date', period.end)
           .order('date', { ascending: false })
         if (error) throw error
-        if (active) setItems((data ?? []) as Income[])
+        if (active) {
+          const rows = (data ?? []) as Income[]
+          setItems(rows)
+          writeCache(ck, rows)
+        }
       } catch (e) {
         if (active) setError((e as Error).message)
       } finally {
@@ -175,7 +191,7 @@ export default function Incomes() {
     }
     if (inPeriod((data as Income).date)) setItems([data as Income, ...items])
     setAmount('')
-    setCurrency('USD')
+    setCurrency(loadLastCurrency())
     setSource('')
     setDescription('')
   }
@@ -268,7 +284,10 @@ export default function Incomes() {
           value={amount}
           currency={currency}
           onValueChange={setAmount}
-          onCurrencyChange={setCurrency}
+          onCurrencyChange={(c) => {
+            setCurrency(c)
+            saveLastCurrency(c)
+          }}
           placeholder={t('common.amount')}
           usdHint={
             currency !== 'USD' && parseAmount(amount) > 0

@@ -17,6 +17,7 @@ import {
   type FutureStats,
   type FutureDirection,
 } from '../lib/crypto'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
@@ -34,8 +35,9 @@ export default function CryptoFutures() {
   const { user } = useAuth()
   const { t } = useLang()
 
-  const [futures, setFutures] = useState<FutureStats[]>([])
-  const [loading, setLoading] = useState(true)
+  const cachedFut = readCache<FutureStats[]>(`crypto-fut:${user?.id ?? 'anon'}`)
+  const [futures, setFutures] = useState<FutureStats[]>(cachedFut ?? [])
+  const [loading, setLoading] = useState(!cachedFut)
   const [error, setError] = useState<string | null>(null)
 
   // Форма добавления позиции
@@ -59,11 +61,19 @@ export default function CryptoFutures() {
 
   const reload = useCallback(async () => {
     if (!user) return
-    setLoading(true)
+    const ck = `crypto-fut:${user.id}`
+    const cached = readCache<FutureStats[]>(ck)
+    if (cached) {
+      setFutures(cached)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     setError(null)
     try {
       const list = await loadFutures(user.id)
       setFutures(list)
+      writeCache(ck, list)
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

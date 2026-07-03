@@ -1019,6 +1019,36 @@ export const POMO_DEFAULTS: PomoSettings = {
   volume: 100,
 }
 
+// Кэш настроек таймера в localStorage — чтобы экран «Фокус» открывался
+// мгновенно и работал офлайн (без ожидания сети). Сеть обновляет кэш в фоне.
+const POMO_CACHE_KEY = 'nucleus:pomoSettings'
+
+export function loadPomoSettingsCache(): PomoSettings {
+  try {
+    const raw = localStorage.getItem(POMO_CACHE_KEY)
+    if (!raw) return { ...POMO_DEFAULTS }
+    const p = JSON.parse(raw) as Partial<PomoSettings>
+    return {
+      focusMin: typeof p.focusMin === 'number' ? p.focusMin : POMO_DEFAULTS.focusMin,
+      breakMin: typeof p.breakMin === 'number' ? p.breakMin : POMO_DEFAULTS.breakMin,
+      longBreakMin: typeof p.longBreakMin === 'number' ? p.longBreakMin : POMO_DEFAULTS.longBreakMin,
+      cycles: typeof p.cycles === 'number' ? p.cycles : POMO_DEFAULTS.cycles,
+      sound: typeof p.sound === 'string' ? p.sound : POMO_DEFAULTS.sound,
+      volume: typeof p.volume === 'number' ? p.volume : POMO_DEFAULTS.volume,
+    }
+  } catch {
+    return { ...POMO_DEFAULTS }
+  }
+}
+
+export function savePomoSettingsCache(s: PomoSettings): void {
+  try {
+    localStorage.setItem(POMO_CACHE_KEY, JSON.stringify(s))
+  } catch {
+    // кэш недоступен — не критично
+  }
+}
+
 // Загружает настройки таймера; при отсутствии строки — значения по умолчанию.
 export async function loadPomoSettings(userId: string): Promise<PomoSettings> {
   const { data, error } = await supabase
@@ -1035,7 +1065,7 @@ export async function loadPomoSettings(userId: string): Promise<PomoSettings> {
     pomo_sound?: string | null
     pomo_volume?: number | null
   }
-  return {
+  const result: PomoSettings = {
     focusMin: row.pomo_focus_min ?? POMO_DEFAULTS.focusMin,
     breakMin: row.pomo_break_min ?? POMO_DEFAULTS.breakMin,
     longBreakMin: row.pomo_long_break_min ?? POMO_DEFAULTS.longBreakMin,
@@ -1043,10 +1073,15 @@ export async function loadPomoSettings(userId: string): Promise<PomoSettings> {
     sound: row.pomo_sound ?? POMO_DEFAULTS.sound,
     volume: row.pomo_volume ?? POMO_DEFAULTS.volume,
   }
+  // Обновляем локальный кэш, чтобы в следующий раз экран открылся мгновенно.
+  savePomoSettingsCache(result)
+  return result
 }
 
 // Сохраняет настройки таймера (upsert строки app_settings пользователя).
 export async function savePomoSettings(userId: string, s: PomoSettings): Promise<void> {
+  // Сразу обновляем локальный кэш (мгновенный офлайн-доступ), затем пишем в БД.
+  savePomoSettingsCache(s)
   const { error } = await supabase.from('app_settings').upsert(
     {
       user_id: userId,
@@ -1233,4 +1268,144 @@ export async function loadPlannerStats(
     activeHabits: items.filter((i) => i.type === 'habit').length,
     perDay,
   }
+}
+
+// ====================================================================
+// Шаблоны дней (П-10): именованный набор дел, задающий «форму» дня
+// (напр. «Со сном утром» и «Без сна утром»). Шаблон создаётся снимком
+// текущего дня, а применяется к выбранной дате — дела шаблона
+// добавляются на этот день как разовые задачи (repeat_rule='none',
+// start_date=дата). Так переиспользуется вся логика дня, ничего лишнего.
+// ====================================================================
+
+export type DayTemplate = {
+  id: string
+  name: string
+  icon: string | null
+  item_count: number
+}
+
+export type DayTemplateItem = {
+  title: string
+  note: string | null
+  icon: string | null
+  time_of_day: TimeOfDay
+  at_time_start: string | null
+  at_time_end: string | null
+  priority: Priority
+  important: boolean
+  sort_order: number
+}
+
+// Загружает шаблоны дней пользователя вместе с числом дел в каждом.
+export async function loadDayTemplates(userId: string): Promise<DayTemplate[]> {
+  const [tplRes, itemRes] = await Promise.all([
+    supabase
+      .from('planner_day_templates')
+      .select('id, name, icon')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true }),
+    supabase.from('planner_day_template_items').select('template_id').eq('user_id', userId),
+  ])
+  if (tplRes.error) throw tplRes.error
+  if (itemRes.error) throw itemRes.error
+  const counts = new Map<string, number>()
+  for (const r of (itemRes.data ?? []) as { template_id: string }[]) {
+    counts.set(r.template_id, (counts.get(r.template_id) ?? 0) + 1)
+  }
+  return ((tplRes.data ?? []) as { id: string; name: string; icon: string | null }[]).map(
+    (row) => ({
+      id: row.id,
+      name: row.name,
+      icon: row.icon,
+      item_count: counts.get(row.id) ?? 0,
+    }),
+  )
+}
+
+// Сохраняет текущий день как шаблон: снимок переданных дел (название/
+// иконка/секция/время/важность/заметка). Отметки выполнения не входят.
+export async function saveDayTemplate(
+  userId: string,
+  name: string,
+  items: PlannerItem[],
+): Promise<void> {
+  const { data, error } = await supabase
+    .from('planner_day_templates')
+    .insert({ user_id: userId, name })
+    .select('id')
+    .single()
+  if (error) throw error
+  const templateId = (data as { id: string }).id
+  const rows = items.map((it, i) => ({
+    template_id: templateId,
+    user_id: userId,
+    title: it.title,
+    note: it.note,
+    icon: it.icon,
+    time_of_day: it.time_of_day,
+    at_time_start: it.at_time_start,
+    at_time_end: it.at_time_end,
+    priority: it.priority,
+    important: it.important,
+    sort_order: i + 1,
+  }))
+  if (rows.length > 0) {
+    const { error: itemsError } = await supabase.from('planner_day_template_items').insert(rows)
+    if (itemsError) throw itemsError
+  }
+}
+
+// Применяет шаблон к дате: создаёт разовые дела на этот день из дел
+// шаблона. Возвращает, сколько дел добавлено. Дела добавляются к дню
+// (не заменяют существующие) — лишнее можно удалить как обычно.
+export async function applyDayTemplate(
+  userId: string,
+  templateId: string,
+  dateStr: string,
+): Promise<number> {
+  const { data, error } = await supabase
+    .from('planner_day_template_items')
+    .select(
+      'title, note, icon, time_of_day, at_time_start, at_time_end, priority, important, sort_order',
+    )
+    .eq('user_id', userId)
+    .eq('template_id', templateId)
+    .order('sort_order', { ascending: true })
+  if (error) throw error
+  const tItems = (data ?? []) as DayTemplateItem[]
+  if (tItems.length === 0) return 0
+  const rows = tItems.map((it) => ({
+    user_id: userId,
+    title: it.title,
+    note: it.note,
+    type: 'task' as PlannerType,
+    repeat_rule: 'none' as RepeatRule,
+    weekdays: [] as number[],
+    time_of_day: it.time_of_day,
+    at_time_start: it.at_time_start,
+    at_time_end: it.at_time_end,
+    priority: it.priority,
+    start_date: dateStr,
+    icon: it.icon,
+    important: it.important,
+    cue: null,
+    identity: null,
+    two_min: null,
+    sort_order: it.sort_order,
+  }))
+  const { error: insErr } = await supabase.from('planner_items').insert(rows)
+  if (insErr) throw insErr
+  return rows.length
+}
+
+// Удаляет шаблон (его дела-снимки удаляются каскадом). Уже созданные
+// в днях разовые дела остаются нетронутыми.
+export async function deleteDayTemplate(userId: string, templateId: string): Promise<void> {
+  const { error } = await supabase
+    .from('planner_day_templates')
+    .delete()
+    .eq('user_id', userId)
+    .eq('id', templateId)
+  if (error) throw error
 }

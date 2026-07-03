@@ -11,8 +11,10 @@ import {
   formatAmountInput,
   parseAmount,
 } from '../lib/db'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 type Category = { id: string; name: string; percent: number; sort_order: number; archived?: boolean }
+type BudgetCache = { monthId: string; goalIncome: string; received: number; categories: Category[] }
 
 const inputCls =
   'w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
@@ -132,9 +134,21 @@ export default function Budget() {
   useEffect(() => {
     if (!user) return
     let active = true
+    // Мгновенно показываем кэш месяца (без спиннера и без интернета),
+    // сеть обновляет данные в фоне (stale-while-revalidate).
+    const ck = `budget:${user.id}:${year}-${month}`
+    const cached = readCache<BudgetCache>(ck)
+    if (cached) {
+      setMonthId(cached.monthId)
+      setGoalIncome(cached.goalIncome)
+      setReceived(cached.received)
+      setCategories(cached.categories)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     ;(async () => {
       try {
-        setLoading(true)
         const m = await getOrCreateMonth(user.id, year, month)
         const [catRes, incRes] = await Promise.all([
           supabase
@@ -148,20 +162,20 @@ export default function Budget() {
         if (!active) return
         if (catRes.error) throw catRes.error
         if (incRes.error) throw incRes.error
+        const goalIncomeStr = m.planned_income ? formatAmountInput(String(m.planned_income)) : ''
+        const receivedSum = (incRes.data ?? []).reduce(
+          (s: number, r: { amount: number }) => s + Number(r.amount),
+          0,
+        )
+        const cats = ((catRes.data ?? []) as Category[]).map((c) => ({
+          ...c,
+          percent: Number(c.percent),
+        }))
         setMonthId(m.id)
-        setGoalIncome(m.planned_income ? formatAmountInput(String(m.planned_income)) : '')
-        setReceived(
-          (incRes.data ?? []).reduce(
-            (s: number, r: { amount: number }) => s + Number(r.amount),
-            0,
-          ),
-        )
-        setCategories(
-          ((catRes.data ?? []) as Category[]).map((c) => ({
-            ...c,
-            percent: Number(c.percent),
-          })),
-        )
+        setGoalIncome(goalIncomeStr)
+        setReceived(receivedSum)
+        setCategories(cats)
+        writeCache(ck, { monthId: m.id, goalIncome: goalIncomeStr, received: receivedSum, categories: cats })
       } catch (e) {
         if (active) setError((e as Error).message)
       } finally {

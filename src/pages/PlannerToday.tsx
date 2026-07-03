@@ -2,9 +2,11 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
 import { formatDateHuman, monthName } from '../lib/db'
+import { readCache, writeCache } from '../lib/offlineCache'
 import HabitSheet from '../components/HabitSheet'
 import DayPanel from '../components/DayPanel'
 import DayEditSheet from '../components/DayEditSheet'
+import DayTemplateSheet from '../components/DayTemplateSheet'
 import {
   loadDay,
   toggleDone,
@@ -80,10 +82,19 @@ export default function PlannerToday() {
 
   // ===== Вид «Сегодня» =====
   const [date, setDate] = useState(today)
-  const [items, setItems] = useState<PlannerItem[]>([])
-  const [logs, setLogs] = useState<Record<string, PlannerLog>>({})
-  const [sections, setSections] = useState(false)
-  const [loading, setLoading] = useState(true)
+  // Кэш дня для мгновенного открытия без интернета (stale-while-revalidate):
+  // сразу показываем сохранённые дела дня, сеть обновляет их в фоне.
+  type DayCache = {
+    items: PlannerItem[]
+    logs: Record<string, PlannerLog>
+    overrides: Record<string, PlannerDayOverride>
+    sections: boolean
+  }
+  const cachedDay = user ? readCache<DayCache>(`planday:${user.id}:${today}`) : null
+  const [items, setItems] = useState<PlannerItem[]>(cachedDay?.items ?? [])
+  const [logs, setLogs] = useState<Record<string, PlannerLog>>(cachedDay?.logs ?? {})
+  const [sections, setSections] = useState(cachedDay?.sections ?? false)
+  const [loading, setLoading] = useState(!cachedDay)
   const [error, setError] = useState<string | null>(null)
   const [reorder, setReorder] = useState(false)
   const [sheetItem, setSheetItem] = useState<PlannerItem | null>(null)
@@ -91,7 +102,9 @@ export default function PlannerToday() {
   // Режим «Изменить день»: правка дела только на эту дату (не трогая шаблон).
   const [editDay, setEditDay] = useState(false)
   const [editItem, setEditItem] = useState<PlannerItem | null>(null)
-  const [overrides, setOverrides] = useState<Record<string, PlannerDayOverride>>({})
+  // Окно «Шаблоны дня»: сохранить текущий день / применить шаблон.
+  const [templatesOpen, setTemplatesOpen] = useState(false)
+  const [overrides, setOverrides] = useState<Record<string, PlannerDayOverride>>(cachedDay?.overrides ?? {})
   const [stripSummaries, setStripSummaries] = useState<Record<string, DaySummary>>({})
 
   // ===== Виды «Неделя / Месяц / Год» (календарь) =====
@@ -137,13 +150,23 @@ export default function PlannerToday() {
     let active = true
     setReorder(false)
     setEditDay(false)
-    // Сбрасываем данные дня сразу при смене даты, чтобы прогресс-бар и кольцо
-    // выбранного дня не показывали на секунду данные прошлого дня (оранжевая вспышка).
-    setItems([])
-    setLogs({})
+    // Мгновенно показываем кэш выбранного дня (без спиннера и без интернета).
+    // Если кэша нет — очищаем, чтобы не мелькали данные прошлого дня.
+    const ck = `planday:${user.id}:${date}`
+    const cached = readCache<DayCache>(ck)
+    if (cached) {
+      setItems(cached.items)
+      setLogs(cached.logs)
+      setOverrides(cached.overrides)
+      setSections(cached.sections)
+      setLoading(false)
+    } else {
+      setItems([])
+      setLogs({})
+      setLoading(true)
+    }
     ;(async () => {
       try {
-        setLoading(true)
         const [day, sec] = await Promise.all([
           loadDay(user.id, date),
           loadDaySections(user.id),
@@ -154,6 +177,12 @@ export default function PlannerToday() {
         setOverrides(day.overrides)
         setSections(sec)
         setError(null)
+        writeCache(ck, {
+          items: day.items,
+          logs: day.logs,
+          overrides: day.overrides,
+          sections: sec,
+        })
       } catch (e) {
         if (active) setError((e as Error).message)
       } finally {
@@ -955,7 +984,16 @@ export default function PlannerToday() {
           {loading ? (
             <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
           ) : items.length === 0 ? (
-            <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('today.empty')}</p>
+            <div className="flex flex-col items-start gap-3">
+              <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('today.empty')}</p>
+              <button
+                type="button"
+                onClick={() => setTemplatesOpen(true)}
+                className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+              >
+                📋 {lang === 'ru' ? 'Шаблоны дня' : 'Day templates'}
+              </button>
+            </div>
           ) : (
             <>
               <div className="flex flex-wrap items-center gap-2">
@@ -988,6 +1026,13 @@ export default function PlannerToday() {
                   }`}
                 >
                   {editDay ? t('today.editDayDone') : t('today.editDay')}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setTemplatesOpen(true)}
+                  className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-500 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
+                >
+                  📋 {lang === 'ru' ? 'Шаблоны' : 'Templates'}
                 </button>
               </div>
 
@@ -1086,6 +1131,17 @@ export default function PlannerToday() {
           hasOverride={!!overrides[editItem.id]}
           onClose={() => setEditItem(null)}
           onSaved={reload}
+        />
+      )}
+
+      {/* Окно «Шаблоны дня» (вид «Сегодня»). */}
+      {templatesOpen && user && (
+        <DayTemplateSheet
+          userId={user.id}
+          date={date}
+          items={items}
+          onClose={() => setTemplatesOpen(false)}
+          onApplied={reload}
         />
       )}
     </div>

@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import PeriodFilter, { type PeriodValue } from '../components/PeriodFilter'
 import { useLang } from '../lib/i18n'
 import { formatSum, monthName, isCharityCategory, isSavingsCategory } from '../lib/db'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 type MonthRow = {
   id: string
@@ -30,6 +31,10 @@ type Detail = {
   expenseBySub: Breakdown[]
 }
 type Acc = Record<string, { amount: number; archived: boolean }>
+type HistoryCache = {
+  months: MonthRow[]
+  details: Record<string, Detail>
+}
 
 // Сворачиваем мапу в отсортированный по убыванию массив.
 function toBreakdown(map: Acc): Breakdown[] {
@@ -60,9 +65,18 @@ export default function History() {
   useEffect(() => {
     if (!user) return
     let active = true
+    // Мгновенно показываем кэш (без спиннера и без интернета), сеть обновляет в фоне.
+    const ck = `history:${user.id}`
+    const cached = readCache<HistoryCache>(ck)
+    if (cached) {
+      setMonths(cached.months)
+      setDetails(cached.details)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     ;(async () => {
       try {
-        setLoading(true)
         const [mRes, incRes, expRes, catRes] = await Promise.all([
           supabase
             .from('months')
@@ -140,8 +154,10 @@ export default function History() {
           map[id].expenseBySub = toBreakdown(expSub[id] ?? {})
         }
 
-        setMonths((mRes.data ?? []) as MonthRow[])
+        const monthsData = (mRes.data ?? []) as MonthRow[]
+        setMonths(monthsData)
         setDetails(map)
+        writeCache(ck, { months: monthsData, details: map })
       } catch (e) {
         if (active) setError((e as Error).message)
       } finally {

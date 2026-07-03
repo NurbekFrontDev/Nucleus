@@ -24,6 +24,7 @@ import {
   saveGoalsOrder,
   DEFAULT_GOALS_SPLIT,
 } from '../lib/db'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 type Goal = {
   id: string
@@ -42,6 +43,13 @@ type Goal = {
 }
 type Contribution = { id: string; goal_id: string; amount: number; date: string }
 type Category = { id: string; name: string; percent?: number; archived?: boolean }
+type GoalsCache = {
+  goals: Goal[]
+  contribs: Contribution[]
+  categories: Category[]
+  received: number
+  split: number
+}
 
 const GOAL_COLS =
   'id, name, note, target_amount, target_date, is_goal, is_primary, done, category, subcategory, expense_id, sort_order, created_at'
@@ -175,9 +183,21 @@ export default function Goals() {
   useEffect(() => {
     if (!user) return
     let active = true
+    // Мгновенно показываем кэш (без спиннера и без интернета), сеть обновляет в фоне.
+    const ck = `goals:${user.id}`
+    const cached = readCache<GoalsCache>(ck)
+    if (cached) {
+      setGoals(cached.goals)
+      setContribs(cached.contribs)
+      setCategories(cached.categories)
+      setReceived(cached.received)
+      setSplit(cached.split)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     ;(async () => {
       try {
-        setLoading(true)
         const now = new Date()
         const m = await getOrCreateMonth(user.id, now.getFullYear(), now.getMonth() + 1)
         const [gRes, cRes, catRes, incRes, splitVal] = await Promise.all([
@@ -203,13 +223,25 @@ export default function Goals() {
         if (cRes.error) throw cRes.error
         if (catRes.error) throw catRes.error
         if (incRes.error) throw incRes.error
-        setGoals((gRes.data ?? []) as Goal[])
-        setContribs((cRes.data ?? []) as Contribution[])
-        setCategories((catRes.data ?? []) as Category[])
-        setReceived(
-          (incRes.data ?? []).reduce((s: number, r: { amount: number }) => s + Number(r.amount), 0),
+        const goalsData = (gRes.data ?? []) as Goal[]
+        const contribsData = (cRes.data ?? []) as Contribution[]
+        const catsData = (catRes.data ?? []) as Category[]
+        const receivedSum = (incRes.data ?? []).reduce(
+          (s: number, r: { amount: number }) => s + Number(r.amount),
+          0,
         )
+        setGoals(goalsData)
+        setContribs(contribsData)
+        setCategories(catsData)
+        setReceived(receivedSum)
         setSplit(splitVal)
+        writeCache(ck, {
+          goals: goalsData,
+          contribs: contribsData,
+          categories: catsData,
+          received: receivedSum,
+          split: splitVal,
+        })
       } catch (e) {
         if (active) setError((e as Error).message)
       } finally {

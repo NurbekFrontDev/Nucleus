@@ -23,10 +23,14 @@ import {
   type Portfolio,
   type TxType,
 } from '../lib/crypto'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 type Props = {
   portfolio: Portfolio
 }
+
+// Кэш портфеля (спот/мем) для мгновенного открытия; сеть обновляет в фоне.
+type PortfolioCache = { assets: AssetStats[]; pricedAt: string | null }
 
 const todayISO = () => new Date().toISOString().slice(0, 10)
 
@@ -52,8 +56,9 @@ export default function CryptoPortfolio({ portfolio }: Props) {
   const { t } = useLang()
   const { user } = useAuth()
 
-  const [assets, setAssets] = useState<AssetStats[]>([])
-  const [loading, setLoading] = useState(true)
+  const cachedPf0 = readCache<PortfolioCache>(`crypto-pf:${user?.id ?? 'anon'}:${portfolio}`)
+  const [assets, setAssets] = useState<AssetStats[]>(cachedPf0?.assets ?? [])
+  const [loading, setLoading] = useState(!cachedPf0)
   const [error, setError] = useState<string | null>(null)
   const [expandedId, setExpandedId] = useState<string | null>(null)
   // Фильтр списка активов: все / только открытые / только закрытые.
@@ -90,11 +95,19 @@ export default function CryptoPortfolio({ portfolio }: Props) {
   const [autoExpense, setAutoExpense] = useState(true)
 
   // Время последнего обновления живых цен (для индикатора «Цены обновлены: HH:MM»).
-  const [pricedAt, setPricedAt] = useState<string | null>(null)
+  const [pricedAt, setPricedAt] = useState<string | null>(cachedPf0?.pricedAt ?? null)
 
   const reload = useCallback(async () => {
     if (!user) return
-    setLoading(true)
+    const ck = `crypto-pf:${user.id}:${portfolio}`
+    const cachedPf = readCache<PortfolioCache>(ck)
+    if (cachedPf) {
+      setAssets(cachedPf.assets)
+      setPricedAt(cachedPf.pricedAt)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     try {
       const data = await loadPortfolio(user.id, portfolio)
       // Подтягиваем живые цены по открытым монетам (по тикеру и по адресу контракта)
@@ -106,15 +119,17 @@ export default function CryptoPortfolio({ portfolio }: Props) {
         .filter((c): c is string => !!c)
       const prices = await loadCryptoPrices({ symbols, contracts })
       if (Object.keys(prices).length > 0) {
-        setAssets(await loadPortfolio(user.id, portfolio, prices))
-        setPricedAt(
-          new Date().toLocaleTimeString('ru-RU', {
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-        )
+        const withPrices = await loadPortfolio(user.id, portfolio, prices)
+        const at = new Date().toLocaleTimeString('ru-RU', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+        setAssets(withPrices)
+        setPricedAt(at)
+        writeCache(ck, { assets: withPrices, pricedAt: at })
       } else {
         setAssets(data)
+        writeCache(ck, { assets: data, pricedAt: cachedPf?.pricedAt ?? null })
       }
     } catch {
       setError(t('common.error'))

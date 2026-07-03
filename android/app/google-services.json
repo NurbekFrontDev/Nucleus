@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "663445496051",
+    "project_id": "nucleus-194",
+    "storage_bucket": "nucleus-194.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:663445496051:android:1d3cd7bcaabf0e8c679786",
+        "android_client_info": {
+          "package_name": "com.nucleus.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDXOwIlhobyC_NOqRzBMpatT_7f8DPFXNM"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

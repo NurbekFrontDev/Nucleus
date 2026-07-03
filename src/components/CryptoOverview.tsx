@@ -13,6 +13,7 @@ import {
   type CryptoSnapshot,
   type MonthlyStats,
 } from '../lib/crypto'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 const cardCls =
   'rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50'
@@ -26,14 +27,23 @@ const labelCls = 'mb-1 block text-xs font-medium text-neutral-500 dark:text-neut
 
 const now = new Date()
 
+// Кэш вкладки «Обзор» для мгновенного открытия (обновляется сетью в фоне).
+type OverviewCache = {
+  snapshot: CryptoSnapshot
+  monthly: MonthlyStats[]
+  buys: Record<string, number>
+  pricedAt: string | null
+}
+
 export default function CryptoOverview() {
   const { user } = useAuth()
   const { t } = useLang()
 
-  const [snapshot, setSnapshot] = useState<CryptoSnapshot | null>(null)
-  const [monthly, setMonthly] = useState<MonthlyStats[]>([])
-  const [buys, setBuys] = useState<Record<string, number>>({})
-  const [loading, setLoading] = useState(true)
+  const cachedOv = readCache<OverviewCache>(`crypto-ov:${user?.id ?? 'anon'}`)
+  const [snapshot, setSnapshot] = useState<CryptoSnapshot | null>(cachedOv?.snapshot ?? null)
+  const [monthly, setMonthly] = useState<MonthlyStats[]>(cachedOv?.monthly ?? [])
+  const [buys, setBuys] = useState<Record<string, number>>(cachedOv?.buys ?? {})
+  const [loading, setLoading] = useState(!cachedOv)
   const [error, setError] = useState<string | null>(null)
 
   // Форма добавления месяца
@@ -49,11 +59,21 @@ export default function CryptoOverview() {
   const [addOpen, setAddOpen] = useState(false)
 
   // Время последнего обновления живых цен (для индикатора «Цены обновлены: HH:MM»).
-  const [pricedAt, setPricedAt] = useState<string | null>(null)
+  const [pricedAt, setPricedAt] = useState<string | null>(cachedOv?.pricedAt ?? null)
 
   const reload = useCallback(async () => {
     if (!user) return
-    setLoading(true)
+    const ck = `crypto-ov:${user.id}`
+    const cached = readCache<OverviewCache>(ck)
+    if (cached) {
+      setSnapshot(cached.snapshot)
+      setMonthly(cached.monthly)
+      setBuys(cached.buys)
+      setPricedAt(cached.pricedAt)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     setError(null)
     try {
       const [snap, months, buysMap] = await Promise.all([
@@ -61,15 +81,15 @@ export default function CryptoOverview() {
         loadMonthly(user.id),
         loadNetDepositByMonth(user.id),
       ])
+      const at = new Date().toLocaleTimeString('ru-RU', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
       setSnapshot(snap)
       setMonthly(months)
       setBuys(buysMap)
-      setPricedAt(
-        new Date().toLocaleTimeString('ru-RU', {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-      )
+      setPricedAt(at)
+      writeCache(ck, { snapshot: snap, monthly: months, buys: buysMap, pricedAt: at })
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {

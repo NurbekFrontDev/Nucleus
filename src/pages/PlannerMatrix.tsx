@@ -9,6 +9,7 @@ import {
   type PlannerItem,
   type Quadrant,
 } from '../lib/planner'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 // Экран «Матрица» (П-8): зеркало дня по матрице Эйзенхауэра.
 //   Берём дела сегодняшнего дня (как на экране «Сегодня») и раскладываем по
@@ -41,13 +42,22 @@ export default function PlannerMatrix() {
   useEffect(() => {
     if (!user) return
     let active = true
+    // Мгновенно показываем кэш (без спиннера и без интернета), сеть обновляет в фоне.
+    const ck = `planmatrix:${user.id}:${today}`
+    const cached = readCache<PlannerItem[]>(ck)
+    if (cached) {
+      setItems(cached)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     ;(async () => {
       try {
-        setLoading(true)
         const day = await loadDay(user.id, today)
         if (!active) return
         setItems(day.items)
         setError(null)
+        writeCache(ck, day.items)
       } catch (e) {
         if (active) setError((e as Error).message)
       } finally {

@@ -11,6 +11,13 @@ import {
   OFFSET_OPTIONS,
   type NotifSettings,
 } from '../lib/notifications'
+import {
+  batteryAvailable,
+  batteryIsIgnoring,
+  batteryRequestIgnore,
+  openAutoStartSettings,
+  openAppDetailsSettings,
+} from '../lib/battery'
 
 // Экран «Настройки» планировщика (П-10): настройки, относящиеся
 //   именно к планировщику. Пока здесь переключатель деления дня на
@@ -21,13 +28,17 @@ const cardCls =
 
 export default function PlannerSettings() {
   const { user } = useAuth()
-  const { t } = useLang()
+  const { t, lang } = useLang()
 
   const [daySections, setDaySections] = useState(false)
   const [ready, setReady] = useState(false)
 
   const [notif, setNotif] = useState<NotifSettings>(NOTIF_DEFAULTS)
   const [notifReady, setNotifReady] = useState(false)
+
+  // Энергосбережение (А-8): статус исключения из оптимизации батареи.
+  const [batteryReady, setBatteryReady] = useState(false)
+  const [batteryIgnoring, setBatteryIgnoring] = useState(false)
 
   useEffect(() => {
     if (!user) return
@@ -64,6 +75,28 @@ export default function PlannerSettings() {
       active = false
     }
   }, [user])
+
+  // Проверяем статус исключения из энергосбережения.
+  const refreshBattery = async () => {
+    if (!batteryAvailable()) return
+    try {
+      const ok = await batteryIsIgnoring()
+      setBatteryIgnoring(ok)
+    } finally {
+      setBatteryReady(true)
+    }
+  }
+
+  const handleBatteryRequest = async () => {
+    await batteryRequestIgnore()
+    // Пользователь вернётся из системного диалога — обновим статус чуть позже.
+    setTimeout(() => void refreshBattery(), 800)
+  }
+
+  useEffect(() => {
+    void refreshBattery()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   // Сохраняем настройки уведомлений и сразу пересобираем расписание на устройстве.
   const updateNotif = async (patch: Partial<NotifSettings>) => {
@@ -148,6 +181,52 @@ export default function PlannerSettings() {
           </div>
         )}
       </div>
+
+      {/* 🔋 Работа в фоне (энергосбережение MIUI/Android) */}
+      {batteryAvailable() && (
+        <div className={`flex flex-col gap-3 ${cardCls}`}>
+          <div className="flex items-center justify-between gap-3">
+            <p className="font-semibold">🔋 {lang === 'ru' ? 'Работа в фоне' : 'Background work'}</p>
+            {batteryReady && (
+              <span
+                className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-medium ${
+                  batteryIgnoring
+                    ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                    : 'bg-amber-500/15 text-amber-600 dark:text-amber-400'
+                }`}
+              >
+                {batteryIgnoring
+                  ? lang === 'ru'
+                    ? 'Настроено'
+                    : 'Configured'
+                  : lang === 'ru'
+                    ? 'Требует настройки'
+                    : 'Needs setup'}
+              </span>
+            )}
+          </div>
+          <div className="flex flex-col gap-2">
+            <button
+              onClick={handleBatteryRequest}
+              className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 active:scale-[.99]"
+            >
+              {lang === 'ru' ? 'Отключить оптимизацию батареи' : 'Disable battery optimization'}
+            </button>
+            <button
+              onClick={() => void openAutoStartSettings()}
+              className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium transition hover:bg-neutral-100 active:scale-[.99] dark:border-neutral-700 dark:hover:bg-neutral-800"
+            >
+              {lang === 'ru' ? 'Автозапуск (Xiaomi/MIUI)' : 'Autostart (Xiaomi/MIUI)'}
+            </button>
+            <button
+              onClick={() => void openAppDetailsSettings()}
+              className="rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium transition hover:bg-neutral-100 active:scale-[.99] dark:border-neutral-700 dark:hover:bg-neutral-800"
+            >
+              {lang === 'ru' ? 'Настройки приложения' : 'App settings'}
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

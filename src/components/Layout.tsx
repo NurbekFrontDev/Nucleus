@@ -1,10 +1,11 @@
-import { useEffect, useRef } from 'react'
+import { Suspense, useEffect, useRef } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import BackupReminder from './BackupReminder'
 import AssistantWidget from './AssistantWidget'
 import Toaster from './Toaster'
 import { useLang } from '../lib/i18n'
 import { MODULES, moduleForPath } from '../lib/modules'
+import { saveModulePath, loadModulePath } from '../lib/moduleNav'
 
 export default function Layout() {
   const { t } = useLang()
@@ -32,6 +33,12 @@ export default function Layout() {
     window.scrollTo(0, 0)
   }, [location.pathname, navItems])
 
+  // Запоминаем последнюю подвкладку каждого модуля, чтобы при переключении
+  // между FinLit и Планировщиком возвращаться туда, где был в этом модуле.
+  useEffect(() => {
+    saveModulePath(activeModule.id, location.pathname)
+  }, [location.pathname, activeModule.id])
+
   const moduleSwitcher = (
     <div className="flex w-full gap-1 rounded-xl bg-neutral-200/60 p-1 dark:bg-neutral-800/60">
       {MODULES.map((m) => {
@@ -39,7 +46,7 @@ export default function Layout() {
         return (
           <button
             key={m.id}
-            onClick={() => navigate(m.home)}
+            onClick={() => navigate(loadModulePath(m.id, m.home))}
             className={`flex min-w-0 flex-1 items-center justify-center gap-1 rounded-lg px-2 py-1.5 text-xs font-medium transition ${
               isActive
                 ? 'bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100'
@@ -100,7 +107,12 @@ export default function Layout() {
       {/* Content (scroll container) */}
       <main ref={mainRef} className="flex-1 overflow-y-auto pb-20 [scrollbar-gutter:stable_both-edges] md:pb-0">
         <div className="mx-auto max-w-3xl px-4 pb-6">
-          <Outlet />
+          {/* Оболочка (шапка + нижняя навигация) видна мгновенно; тело страницы
+              подгружается ленивым чанком под Suspense. fallback={null} — без
+              спиннера: пустое тело на доли секунды, пока грузится чанк. */}
+          <Suspense fallback={null}>
+            <Outlet />
+          </Suspense>
         </div>
       </main>
 

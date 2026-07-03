@@ -13,6 +13,7 @@ import {
   type WaterDay,
   type WaterLog,
 } from '../lib/water'
+import { readCache, writeCache } from '../lib/offlineCache'
 import Select from '../components/Select'
 import TimePicker from '../components/TimePicker'
 import {
@@ -23,6 +24,8 @@ import {
   WATER_EVERY_OPTIONS,
   type NotifSettings,
 } from '../lib/notifications'
+
+type WaterCache = { day: WaterDay; portion: number }
 
 const cardCls =
   'rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50'
@@ -145,7 +148,17 @@ export default function WaterTracker() {
       return
     }
     let active = true
-    setLoading(true)
+    // Мгновенно показываем кэш (без спиннера и без интернета), сеть обновляет в фоне.
+    const ck = `water:${user.id}:${today}`
+    const cached = readCache<WaterCache>(ck)
+    if (cached) {
+      setDay(cached.day)
+      setGoalDraft(String(cached.day.goal))
+      setSelMl(cached.portion)
+      setLoading(false)
+    } else {
+      setLoading(true)
+    }
     ;(async () => {
       try {
         const [d, portion] = await Promise.all([
@@ -156,6 +169,7 @@ export default function WaterTracker() {
         setDay(d)
         setGoalDraft(String(d.goal))
         setSelMl(portion)
+        writeCache(ck, { day: d, portion })
       } finally {
         if (active) setLoading(false)
       }

@@ -2,14 +2,17 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
 import Select from '../components/Select'
+import { showToast } from '../lib/toast'
+import { enableFocusDnd, disableFocusDnd, dndHasPermission, openDndSettings } from '../lib/dnd'
+import { showFocusNotification, hideFocusNotification, focusNotifyAvailable } from '../lib/focusNotify'
 import {
   loadDay,
   loadPomoSettings,
+  loadPomoSettingsCache,
   savePomoSettings,
   logPomodoro,
   loadPomoToday,
   todayStr,
-  POMO_DEFAULTS,
   type PlannerItem,
   type PomoSettings,
   type PomoKind,
@@ -106,19 +109,23 @@ const DIAL_R = 78
 
 export default function PlannerFocus() {
   const { user } = useAuth()
-  const { t } = useLang()
+  const { t, lang } = useLang()
 
-  const [settings, setSettings] = useState<PomoSettings>(POMO_DEFAULTS)
+  // Кэш настроек таймера: экран «Фокус» открывается мгновенно и работает
+  // офлайн — сразу показываем сохранённые настройки, сеть обновит их в фоне.
+  const [settings, setSettings] = useState<PomoSettings>(() => loadPomoSettingsCache())
   const [mode, setMode] = useState<PomoKind>('focus')
   const [running, setRunning] = useState(false)
-  const [remaining, setRemaining] = useState(POMO_DEFAULTS.focusMin * 60)
+  const [remaining, setRemaining] = useState(() => loadPomoSettingsCache().focusMin * 60)
   const [focusDone, setFocusDone] = useState(0)
   const [focusMinToday, setFocusMinToday] = useState(0)
   const [items, setItems] = useState<PlannerItem[]>([])
   const [itemId, setItemId] = useState<string>('')
   const [showSettings, setShowSettings] = useState(false)
-  const [draft, setDraft] = useState<PomoSettings>(POMO_DEFAULTS)
-  const [ready, setReady] = useState(false)
+  const [draft, setDraft] = useState<PomoSettings>(() => loadPomoSettingsCache())
+  // Экран доступен сразу (без спиннера ожидания сети): таймер по кэшу, а свежие
+  // данные подгружаются в фоне.
+  const [ready, setReady] = useState(true)
   const [pressed, setPressed] = useState(false)
 
   // Жестовый «пульт».
@@ -146,6 +153,15 @@ export default function PlannerFocus() {
   const durMin = (m: PomoKind, s: PomoSettings = settings): number =>
     m === 'focus' ? s.focusMin : m === 'break' ? s.breakMin : s.longBreakMin
 
+  // Подпись постоянного уведомления таймера: показываем задачу, на которой
+  // сейчас фокус (вместо старой подсказки «нажми, чтобы открыть»). Если задача
+  // не выбрана — мягкая подсказка открыть экран.
+  const focusNotifBody = (): string => {
+    const it = items.find((i) => i.id === itemId)
+    if (it) return `${it.icon ? it.icon + ' ' : ''}${it.title}`
+    return lang === 'ru' ? 'Нажми, чтобы открыть' : 'Tap to open'
+  }
+
   // Начальная загрузка: настройки, дела на сегодня, статистика фокуса.
   useEffect(() => {
     if (!user) return
@@ -160,10 +176,14 @@ export default function PlannerFocus() {
         if (!active) return
         setSettings(s)
         setDraft(s)
-        setRemaining(s.focusMin * 60)
         setItems(day.items)
         setFocusDone(today.focusCount)
         setFocusMinToday(today.focusMin)
+        // Обновляем оставшееся время из настроек только если таймер ещё не
+        // запускали — чтобы не затирать идущий/приостановленный отсчёт.
+        if (endRef.current == null && !running) {
+          setRemaining(s.focusMin * 60)
+        }
       } catch {
         // оставляем значения по умолчанию
       } finally {
@@ -179,6 +199,96 @@ export default function PlannerFocus() {
   useEffect(() => {
     return () => {
       if (pressTimer.current) window.clearTimeout(pressTimer.current)
+    }
+  }, [])
+
+  // ===== Тихий режим (DND) во время фокуса =====
+  // Пока таймер идёт — на телефоне включаем режим «только звонки»: обычные
+  // уведомления и звуки не шумят, звонки слышны. По паузе/остановке/выходу —
+  // возвращаем звук. Работает только в приложении (Android); в браузере ничего
+  // не делает. Требуется разовое разрешение «Доступ к режиму Не беспокоить».
+  const dndPromptedRef = useRef(false)
+  useEffect(() => {
+    let cancelled = false
+    if (running) {
+      ;(async () => {
+        const ok = await enableFocusDnd()
+        if (!ok && !cancelled && !dndPromptedRef.current) {
+          const granted = await dndHasPermission()
+          if (!granted && !cancelled) {
+            dndPromptedRef.current = true
+            showToast(
+              lang === 'ru'
+                ? 'Разреши «Доступ к режиму Не беспокоить», чтобы во время фокуса всё, кроме звонков, было беззвучно'
+                : 'Allow "Do Not Disturb access" so everything except calls stays silent during focus',
+            )
+            await openDndSettings()
+          }
+        }
+      })()
+    } else {
+      void disableFocusDnd()
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [running, lang])
+
+  // ===== Постоянное уведомление о состоянии Помодоро (Android) =====
+  // Пока идёт таймер — показываем несмахиваемое уведомление с названием фазы и
+  // живым обратным отсчётом времени справа (как в GoodTime). Работает в фоне
+  // благодаря нативному foreground-сервису. На паузе — «Пауза», при остановке
+  // или уходе с экрана — убираем. Только в приложении (в браузере нет).
+  // Ref со свежим значением running — нужен в очистке при размонтировании
+  // (у эффекта очистки пустой список зависимостей и он не видит актуальный state).
+  const runningRef = useRef(false)
+  useEffect(() => {
+    runningRef.current = running
+  }, [running])
+
+  // Было ли уведомление реально показано. Нужно, чтобы при первом заходе на
+  // экран (таймер ещё не запускали) НЕ дёргать сервис вызовом stop зря — иначе
+  // foreground-сервис стартует и тут же гасится, что и роняло приложение.
+  const notifShownRef = useRef(false)
+  useEffect(() => {
+    if (!focusNotifyAvailable()) return
+    const label =
+      mode === 'focus' ? t('focus.focus') : mode === 'break' ? t('focus.break') : t('focus.longBreak')
+    if (running && endRef.current != null) {
+      notifShownRef.current = true
+      void showFocusNotification({
+        title: label,
+        body: focusNotifBody(),
+        remainingSec: Math.max(0, Math.round((endRef.current - Date.now()) / 1000)),
+        running: true,
+      })
+    } else if (remaining > 0 && remaining < durMin(mode) * 60) {
+      notifShownRef.current = true
+      const it = items.find((i) => i.id === itemId)
+      const task = it ? `${it.icon ? it.icon + ' ' : ''}${it.title}` : ''
+      void showFocusNotification({
+        title: label,
+        body: (lang === 'ru' ? 'Пауза' : 'Paused') + (task ? ` · ${task}` : ''),
+        remainingSec: 0,
+        running: false,
+      })
+    } else if (notifShownRef.current) {
+      notifShownRef.current = false
+      void hideFocusNotification()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, mode, lang, itemId, items])
+
+  // Уход с экрана «Фокус». Если таймер ИДЁТ — оставляем тихий режим и
+  // уведомление активными, чтобы фокус продолжался в фоне (при переходе на
+  // другие вкладки и в другие приложения). Если таймер не идёт — возвращаем
+  // обычный звук и убираем уведомление.
+  useEffect(() => {
+    return () => {
+      if (!runningRef.current) {
+        void disableFocusDnd()
+        void hideFocusNotification()
+      }
     }
   }, [])
 
@@ -241,6 +351,23 @@ export default function PlannerFocus() {
     setRemaining(base)
     endRef.current = Date.now() + base * 1000
     setRunning(true)
+    // Показываем уведомление сразу в обработчике нажатия, не дожидаясь
+    // ре-рендера и эффекта — плашка таймера появляется мгновенно по тапу.
+    if (focusNotifyAvailable()) {
+      const label =
+        mode === 'focus'
+          ? t('focus.focus')
+          : mode === 'break'
+            ? t('focus.break')
+            : t('focus.longBreak')
+      notifShownRef.current = true
+      void showFocusNotification({
+        title: label,
+        body: focusNotifBody(),
+        remainingSec: base,
+        running: true,
+      })
+    }
   }
   const pause = () => {
     setRunning(false)
@@ -261,7 +388,19 @@ export default function PlannerFocus() {
   }
   const addMinute = () => {
     setRemaining((r) => r + 60)
-    if (running && endRef.current != null) endRef.current += 60000
+    if (running && endRef.current != null) {
+      endRef.current += 60000
+      if (focusNotifyAvailable()) {
+        const label =
+          mode === 'focus' ? t('focus.focus') : mode === 'break' ? t('focus.break') : t('focus.longBreak')
+        void showFocusNotification({
+          title: label,
+          body: focusNotifBody(),
+          remainingSec: Math.max(0, Math.round((endRef.current - Date.now()) / 1000)),
+          running: true,
+        })
+      }
+    }
   }
   const stopAll = () => {
     setRunning(false)

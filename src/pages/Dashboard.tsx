@@ -18,9 +18,11 @@ import {
   type SavingsPotsStats,
 } from '../lib/db'
 import { loadCryptoSnapshotLive, fmtUsd, type CryptoSnapshot } from '../lib/crypto'
+import { readCache, writeCache } from '../lib/offlineCache'
 
 type Category = { id: string; name: string; percent: number; sort_order: number }
 type Row = { id: string; name: string; percent: number; plan: number; fact: number }
+type DashCache = { plannedIncome: number; actualIncome: number; totalSpent: number; rows: Row[] }
 
 function statusFor(plan: number, fact: number) {
   if (plan <= 0) return { bar: 'bg-neutral-400 dark:bg-neutral-600', emoji: '⚪', pct: 0 }
@@ -57,25 +59,52 @@ export default function Dashboard() {
     setViewMonth(d.getMonth() + 1)
   }
 
-  const [loading, setLoading] = useState(true)
+  // Мгновенное открытие без интернета: сразу показываем последние сохранённые
+  // данные из кэша, а сеть обновляет их в фоне (stale-while-revalidate).
+  const cachedDash = readCache<DashCache>(`dash:${user?.id ?? 'anon'}:${year}-${month}`)
+  const cachedPots = readCache<SavingsPotsStats>(`dash-pots:${user?.id ?? 'anon'}`)
+  // Подушка безопасности и криптоблок тоже показываем сразу из кэша, чтобы не
+  // мелькала серая подсказка «цель появится...» и криптоблок не подгружался в
+  // самом конце. Сеть обновит цифры в фоне (как в банковских приложениях:
+  // оболочка и блоки видны мгновенно, суммы уточняются позже).
+  const cachedCushionMonths =
+    readCache<number>(`dash-cushion-months:${user?.id ?? 'anon'}`) ?? DEFAULT_CUSHION_MONTHS
+  const cachedCushion = readCache<CushionStats>(
+    `dash-cushion:${user?.id ?? 'anon'}:${cachedCushionMonths}`,
+  )
+  const cachedCrypto = readCache<{ snap: CryptoSnapshot; pricedAt: string | null }>(
+    `dash-crypto:${user?.id ?? 'anon'}`,
+  )
+
+  const [loading, setLoading] = useState(!cachedDash)
   const [error, setError] = useState<string | null>(null)
-  const [plannedIncome, setPlannedIncome] = useState(0)
-  const [actualIncome, setActualIncome] = useState(0)
-  const [totalSpent, setTotalSpent] = useState(0)
-  const [rows, setRows] = useState<Row[]>([])
-  const [cushionMonths, setCushionMonths] = useState(DEFAULT_CUSHION_MONTHS)
-  const [cushion, setCushion] = useState<CushionStats | null>(null)
-  const [pots, setPots] = useState<SavingsPotsStats>({ cushion: 0, free: 0, charity: 0, total: 0 })
-  const [cryptoSnap, setCryptoSnap] = useState<CryptoSnapshot | null>(null)
+  const [plannedIncome, setPlannedIncome] = useState(cachedDash?.plannedIncome ?? 0)
+  const [actualIncome, setActualIncome] = useState(cachedDash?.actualIncome ?? 0)
+  const [totalSpent, setTotalSpent] = useState(cachedDash?.totalSpent ?? 0)
+  const [rows, setRows] = useState<Row[]>(cachedDash?.rows ?? [])
+  const [cushionMonths, setCushionMonths] = useState(cachedCushionMonths)
+  const [cushion, setCushion] = useState<CushionStats | null>(cachedCushion)
+  const [pots, setPots] = useState<SavingsPotsStats>(cachedPots ?? { cushion: 0, free: 0, charity: 0, total: 0 })
+  const [cryptoSnap, setCryptoSnap] = useState<CryptoSnapshot | null>(cachedCrypto?.snap ?? null)
   const [cryptoLoading, setCryptoLoading] = useState(false)
-  const [cryptoPricedAt, setCryptoPricedAt] = useState<string | null>(null)
+  const [cryptoPricedAt, setCryptoPricedAt] = useState<string | null>(cachedCrypto?.pricedAt ?? null)
 
   useEffect(() => {
     if (!user) return
     let active = true
     ;(async () => {
-      try {
+      const ck = `dash:${user.id}:${year}-${month}`
+      const cached = readCache<DashCache>(ck)
+      if (cached) {
+        setPlannedIncome(cached.plannedIncome)
+        setActualIncome(cached.actualIncome)
+        setTotalSpent(cached.totalSpent)
+        setRows(cached.rows)
+        setLoading(false)
+      } else {
         setLoading(true)
+      }
+      try {
         const m = await getOrCreateMonth(user.id, year, month)
         const mm = String(month).padStart(2, '0')
         const monthStart = `${year}-${mm}-01`
@@ -149,18 +178,23 @@ export default function Dashboard() {
           .filter((e) => !e.category_id || (!savingsCatIds.has(e.category_id) && !charityCatIds.has(e.category_id)))
           .reduce((s, e) => s + Number(e.amount), 0)
         const planned = Number(m.planned_income) || 0
+        const newRows: Row[] = cats.map((c) => ({
+          id: c.id,
+          name: c.name,
+          percent: Number(c.percent),
+          plan: (incomeSum * Number(c.percent)) / 100,
+          fact: factByCat[c.id] ?? 0,
+        }))
         setPlannedIncome(planned)
         setActualIncome(incomeSum)
         setTotalSpent(expenseSum)
-        setRows(
-          cats.map((c) => ({
-            id: c.id,
-            name: c.name,
-            percent: Number(c.percent),
-            plan: (incomeSum * Number(c.percent)) / 100,
-            fact: factByCat[c.id] ?? 0,
-          })),
-        )
+        setRows(newRows)
+        writeCache(ck, {
+          plannedIncome: planned,
+          actualIncome: incomeSum,
+          totalSpent: expenseSum,
+          rows: newRows,
+        })
       } catch (e) {
         if (active) setError((e as Error).message)
       } finally {
@@ -178,6 +212,7 @@ export default function Dashboard() {
     ;(async () => {
       const n = await loadCushionMonths(user.id)
       if (active) setCushionMonths(n)
+      writeCache(`dash-cushion-months:${user.id}`, n)
     })()
     return () => {
       active = false
@@ -187,12 +222,17 @@ export default function Dashboard() {
   useEffect(() => {
     if (!user) return
     let active = true
+    // Сразу подставляем кэш для выбранного периода подушки, потом обновляем сетью.
+    const ck = `dash-cushion:${user.id}:${cushionMonths}`
+    const cached = readCache<CushionStats>(ck)
+    if (cached) setCushion(cached)
     ;(async () => {
       try {
         const stats = await loadCushionStats(user.id, cushionMonths)
         if (active) setCushion(stats)
+        writeCache(ck, stats)
       } catch {
-        if (active) setCushion(null)
+        // офлайн/ошибка — оставляем ранее показанные (кэшированные) значения
       }
     })()
     return () => {
@@ -207,8 +247,9 @@ export default function Dashboard() {
       try {
         const p = await loadSavingsPots(user.id)
         if (active) setPots(p)
+        writeCache(`dash-pots:${user.id}`, p)
       } catch {
-        if (active) setPots({ cushion: 0, free: 0, charity: 0, total: 0 })
+        // офлайн/ошибка — оставляем ранее показанные (кэшированные) значения
       }
     })()
     return () => {
@@ -221,15 +262,15 @@ export default function Dashboard() {
     setCryptoLoading(true)
     try {
       const snap = await loadCryptoSnapshotLive(user.id)
+      const at = new Date().toLocaleTimeString('ru-RU', {
+        hour: '2-digit',
+        minute: '2-digit',
+      })
       setCryptoSnap(snap)
-      setCryptoPricedAt(
-        new Date().toLocaleTimeString('ru-RU', {
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-      )
+      setCryptoPricedAt(at)
+      writeCache(`dash-crypto:${user.id}`, { snap, pricedAt: at })
     } catch {
-      setCryptoSnap(null)
+      // офлайн/ошибка — оставляем ранее показанный (кэшированный) снимок
     } finally {
       setCryptoLoading(false)
     }
