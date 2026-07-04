@@ -9,6 +9,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
 import android.media.AudioAttributes;
+import android.media.Ringtone;
+import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
@@ -16,6 +18,8 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
+import android.os.VibratorManager;
+import android.provider.Settings;
 
 import androidx.core.app.NotificationCompat;
 
@@ -24,12 +28,16 @@ import androidx.core.app.NotificationCompat;
  *
  * Пока таймер идёт — показывает постоянное уведомление с названием фазы
  * (Фокус / Перерыв) и живым отсчётом. Когда отсчёт доходит до 0 — выключает
- * «Не беспокоить», вибрирует и показывает громкое уведомление с нашим звуком;
- * по тапу открывает вкладку Помодоро (deep link com.nucleus.app://focus).
+ * «Не беспокоить», вибрирует и несколько раз быстро проигрывает системный звук
+ * уведомления; показывает уведомление «завершено»; по тапу открывает
+ * вкладку Помодоро (deep link com.nucleus.app://focus).
  */
 public class FocusTimerService extends Service {
     public static final String CHANNEL_ID = "focus_timer";
-    public static final String CHANNEL_DONE_ID = "focus_done";
+    // Новый id канала: старый focus_done уже создан с нашим WAV, а Android
+    // не даёт менять звук уже созданного канала. Здесь канал тихий — звук
+    // проигрываем сами (системный, несколько раз).
+    public static final String CHANNEL_DONE_ID = "focus_done_v2";
     public static final int NOTIF_ID = 4711;
     public static final int NOTIF_DONE_ID = 4712;
 
@@ -117,8 +125,8 @@ public class FocusTimerService extends Service {
         }
     }
 
-    // Сигнал окончания фазы: выключаем «Не беспокоить», вибрируем и
-    // показываем громкое уведомление с нашим звуком; по тапу — вкладка Помодоро.
+    // Сигнал окончания фазы: выключаем «Не беспокоить», вибрируем,
+    // несколько раз быстро проигрываем системный звук и показываем уведомление.
     private void fireDone() {
         curRunning = false;
         stopTicking();
@@ -135,21 +143,13 @@ public class FocusTimerService extends Service {
         } catch (Exception ignored) {
         }
 
-        // 2) Вибрация.
-        try {
-            Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
-            long[] pattern = new long[]{0, 400, 200, 400};
-            if (v != null && v.hasVibrator()) {
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    v.vibrate(VibrationEffect.createWaveform(pattern, -1));
-                } else {
-                    v.vibrate(pattern, -1);
-                }
-            }
-        } catch (Exception ignored) {
-        }
+        // 2) Вибрация (через VibratorManager на Android 12+, иначе старым API).
+        vibrateDone();
 
-        // 3) Громкое уведомление о завершении (наш звук из канала focus_done).
+        // 3) Системный звук уведомления по умолчанию, несколько раз подряд.
+        playSystemSoundTimes(4);
+
+        // 4) Уведомление о завершении (тихий канал — звук даём сами выше).
         try {
             ensureDoneChannel(this);
             if (nm != null) {
@@ -158,13 +158,75 @@ public class FocusTimerService extends Service {
         } catch (Exception ignored) {
         }
 
-        // 4) Убираем постоянное уведомление таймера и останавливаем сервис.
+        // 5) Убираем постоянное уведомление таймера.
         try {
             if (nm != null) nm.cancel(NOTIF_ID);
         } catch (Exception ignored) {
         }
         stopForegroundCompat();
-        stopSelf();
+
+        // Останавливаем сервис с задержкой, чтобы успели проиграться звуки/вибрация.
+        handler.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                stopSelf();
+            }
+        }, 3000L);
+    }
+
+    // Несколько коротких вибро-импульсов подряд.
+    private void vibrateDone() {
+        try {
+            Vibrator v = getVibrator();
+            if (v == null || !v.hasVibrator()) return;
+            long[] pattern = new long[]{0, 400, 200, 400, 200, 400};
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                v.vibrate(VibrationEffect.createWaveform(pattern, -1));
+            } else {
+                v.vibrate(pattern, -1);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private Vibrator getVibrator() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                VibratorManager vm =
+                        (VibratorManager) getSystemService(Context.VIBRATOR_MANAGER_SERVICE);
+                return vm == null ? null : vm.getDefaultVibrator();
+            }
+            return (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    // Проигрывает системный звук уведомления несколько раз быстро подряд
+    // (как в старом приложении). Берёт то, что у пользователя выбрано по умолчанию.
+    private void playSystemSoundTimes(final int times) {
+        Uri uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
+        if (uri == null) uri = Settings.System.DEFAULT_NOTIFICATION_URI;
+        final Uri soundUri = uri;
+        for (int i = 0; i < times; i++) {
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        Ringtone r = RingtoneManager.getRingtone(getApplicationContext(), soundUri);
+                        if (r == null) return;
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                            r.setAudioAttributes(new AudioAttributes.Builder()
+                                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                    .build());
+                        }
+                        r.play();
+                    } catch (Exception ignored) {
+                    }
+                }
+            }, i * 350L);
+        }
     }
 
     private Notification buildNotification(String title, String body, long endTime, boolean running) {
@@ -207,7 +269,8 @@ public class FocusTimerService extends Service {
         return b.build();
     }
 
-    // Громкое уведомление окончания фазы (по тапу — deep link на вкладку Фокус).
+    // Уведомление окончания фазы (по тапу — deep link на вкладку Фокус). Звук
+    // проигрывается отдельно (несколько раз), поэтому само уведомление тихое.
     static Notification buildDoneNotif(Context ctx, String title, String body) {
         if (title == null || title.isEmpty()) title = "Nucleus";
         if (body == null) body = "";
@@ -221,31 +284,16 @@ public class FocusTimerService extends Service {
         }
         PendingIntent pi = PendingIntent.getActivity(ctx, 1, open, piFlags);
 
-        NotificationCompat.Builder b = new NotificationCompat.Builder(ctx, CHANNEL_DONE_ID)
+        return new NotificationCompat.Builder(ctx, CHANNEL_DONE_ID)
                 .setSmallIcon(R.drawable.ic_stat_focus)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setAutoCancel(true)
                 .setContentIntent(pi)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
-                .setCategory(NotificationCompat.CATEGORY_ALARM);
-        // До Android 8 звук задаётся на самом уведомлении (каналов ещё нет).
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
-            b.setSound(soundUri(ctx));
-        }
-        return b.build();
-    }
-
-    // URI нашего звука из res/raw/notify_sound.wav; если файла нет — системный по умолчанию.
-    static Uri soundUri(Context ctx) {
-        try {
-            int id = ctx.getResources().getIdentifier("notify_sound", "raw", ctx.getPackageName());
-            if (id != 0) {
-                return Uri.parse("android.resource://" + ctx.getPackageName() + "/" + id);
-            }
-        } catch (Exception ignored) {
-        }
-        return android.provider.Settings.System.DEFAULT_NOTIFICATION_URI;
+                .setSilent(true)
+                .setCategory(NotificationCompat.CATEGORY_ALARM)
+                .build();
     }
 
     private void startForegroundCompat(Notification notif) {
@@ -302,23 +350,23 @@ public class FocusTimerService extends Service {
         }
     }
 
-    // Канал сигнала окончания фазы: высокая важность, наш звук. Вибрация канала
-    // выключена — вибрируем отдельно в fireDone(), чтобы не было двойной вибрации.
+    // Канал сигнала окончания фазы: высокая важность, без собственного звука и
+    // вибрации канала — звук и вибрацию даём сами в fireDone(). Старый канал удаляем.
     static void ensureDoneChannel(Context ctx) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm == null) return;
+            try {
+                nm.deleteNotificationChannel("focus_done");
+            } catch (Exception ignored) {
+            }
             if (nm.getNotificationChannel(CHANNEL_DONE_ID) == null) {
                 NotificationChannel ch = new NotificationChannel(
                         CHANNEL_DONE_ID, "Помодоро — сигнал окончания", NotificationManager.IMPORTANCE_HIGH);
-                ch.setDescription("Звук и вибрация при завершении фокуса или перерыва");
+                ch.setDescription("Сигнал при завершении фокуса или перерыва");
                 ch.enableVibration(false);
+                ch.setSound(null, null);
                 ch.setShowBadge(false);
-                AudioAttributes aa = new AudioAttributes.Builder()
-                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                        .build();
-                ch.setSound(soundUri(ctx), aa);
                 nm.createNotificationChannel(ch);
             }
         }

@@ -16,6 +16,7 @@ import {
   type WaterDay,
 } from '../lib/water'
 import { readCache, writeCache } from '../lib/offlineCache'
+import { showToast } from '../lib/toast'
 import Select from '../components/Select'
 import TimePicker from '../components/TimePicker'
 import {
@@ -324,11 +325,24 @@ export default function WaterTracker() {
   }
 
   const saveGoal = async () => {
+    if (!user) return
     const v = Number(goalDraft)
-    if (!user || !v || v <= 0) return
-    await saveWaterGoal(user.id, v)
-    setDay((prev) => (prev ? { ...prev, goal: v } : prev))
-    setGoalDraft(String(v))
+    try {
+      if (v && v > 0) {
+        await saveWaterGoal(user.id, v)
+        setDay((prev) => (prev ? { ...prev, goal: v } : prev))
+        setGoalDraft(String(v))
+      }
+      // Порции тоже сохраняем по кнопке «Сохранить» (в Supabase, синхронизация).
+      await saveWaterPresets(user.id, presets)
+    } catch {
+      showToast(
+        lang === 'ru'
+          ? 'Не удалось сохранить. Проверь миграцию базы (water_presets).'
+          : 'Save failed. Check DB migration (water_presets).',
+      )
+      return
+    }
     setGoalEdit(false)
   }
 
