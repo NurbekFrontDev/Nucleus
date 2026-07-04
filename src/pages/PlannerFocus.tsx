@@ -149,6 +149,8 @@ export default function PlannerFocus() {
   const endRef = useRef<number | null>(null)
   const completeRef = useRef<() => void>(() => {})
   const notifShownRef = useRef(false)
+  // Флаг момента завершения фазы: чтобы не погасить нативный сигнал окончания.
+  const justCompletedRef = useRef(false)
   // Было ли восстановлено состояние таймера (чтобы начальная загрузка не затёрла его).
   const runtimeRestoredRef = useRef(false)
   const restoreDoneRef = useRef(false)
@@ -160,12 +162,12 @@ export default function PlannerFocus() {
   const doneFor = (m: PomoKind): { title: string; body: string } => {
     if (lang === 'ru') {
       return m === 'focus'
-        ? { title: 'Фокус завершён', body: 'Пора на перерыв' }
-        : { title: 'Перерыв завершён', body: 'Пора за дело' }
+        ? { title: 'Фокус завершён', body: 'Нажми, чтобы открыть' }
+        : { title: 'Перерыв завершён', body: 'Нажми, чтобы открыть' }
     }
     return m === 'focus'
-      ? { title: 'Focus finished', body: 'Time for a break' }
-      : { title: 'Break finished', body: 'Back to focus' }
+      ? { title: 'Focus finished', body: 'Tap to open' }
+      : { title: 'Break finished', body: 'Tap to open' }
   }
 
   const focusNotifBody = (): string => {
@@ -272,7 +274,8 @@ export default function PlannerFocus() {
   const dndPromptedRef = useRef(false)
   useEffect(() => {
     let cancelled = false
-    if (running) {
+    // Тихий режим включаем ТОЛЬКО во время фокуса, не во время перерыва.
+    if (running && mode === 'focus') {
       ;(async () => {
         const ok = await enableFocusDnd()
         if (!ok && !cancelled && !dndPromptedRef.current) {
@@ -294,7 +297,7 @@ export default function PlannerFocus() {
     return () => {
       cancelled = true
     }
-  }, [running, lang])
+  }, [running, mode, lang])
 
   const runningRef = useRef(false)
   useEffect(() => {
@@ -304,6 +307,13 @@ export default function PlannerFocus() {
   // ===== Постоянное уведомление таймера (Android) =====
   useEffect(() => {
     if (!focusNotifyAvailable()) return
+    // Момент завершения фазы: НЕ трогаем нативное уведомление — нативный
+    // сервис сам покажет «завершено» со звуком и вибрацией. Иначе мы бы погасили
+    // сервис раньше, чем он успеет дать сигнал.
+    if (justCompletedRef.current) {
+      justCompletedRef.current = false
+      return
+    }
     const label = mode === 'focus' ? t('focus.focus') : t('focus.break')
     const d = doneFor(mode)
     if (running && endRef.current != null) {
@@ -345,6 +355,9 @@ export default function PlannerFocus() {
 
   // Логика завершения фазы (через ref, чтобы тик видел свежие значения).
   completeRef.current = () => {
+    // На телефоне сигнал окончания (звук+вибрация+уведомление) даёт нативный
+    // сервис — поэтому здесь НЕ гасим его уведомление (см. guard в эффекте).
+    justCompletedRef.current = true
     setRunning(false)
     endRef.current = null
     // В приложении звук/вибрацию даёт нативный сервис; веб-звук — только в браузере.
