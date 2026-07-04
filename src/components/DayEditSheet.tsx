@@ -8,6 +8,7 @@ import {
   clearDayOverride,
   todayStr,
   type PlannerItem,
+  type PlannerDayOverride,
   type Priority,
   type TimeOfDay,
 } from '../lib/planner'
@@ -23,6 +24,9 @@ type Props = {
   date: string
   item: PlannerItem
   hasOverride: boolean
+  // Существующая правка дня (если есть) — нужна, чтобы при сохранении сохранить
+  // прежний снимок названия/иконки (напр. от заморозки прошлого дня).
+  existing?: PlannerDayOverride | null
   onClose: () => void
   onSaved: () => void
 }
@@ -49,7 +53,7 @@ const chipCls = (sel: boolean) =>
       : 'border-neutral-300 hover:border-emerald-500 dark:border-neutral-700'
   }`
 
-export default function DayEditSheet({ userId, date, item, hasOverride, onClose, onSaved }: Props) {
+export default function DayEditSheet({ userId, date, item, hasOverride, existing, onClose, onSaved }: Props) {
   const { t } = useLang()
   const [open, setOpen] = useState(true)
   const visible = useAnimatedMount(open, 220)
@@ -84,6 +88,10 @@ export default function DayEditSheet({ userId, date, item, hasOverride, onClose,
     setBusy(true)
     try {
       await saveDayOverride(userId, item.id, date, {
+        // Название/иконку в этом окне не меняем: сохраняем прежний снимок, если он
+        // был (напр. заморозка прошлого дня), иначе null -> берётся из шаблона.
+        title: existing?.title ?? null,
+        icon: existing?.icon ?? null,
         time_of_day: timeOfDay,
         at_time_start: start || null,
         at_time_end: end || null,

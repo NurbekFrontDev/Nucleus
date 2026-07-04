@@ -261,11 +261,14 @@ export function isItemOnDate(item: PlannerItem, dateStr: string): boolean {
 // этого дня. Другие дни и сам шаблон остаются нетронутыми.
 export type PlannerDayOverride = {
   item_id: string
+  title: string | null
+  icon: string | null
   time_of_day: TimeOfDay
   at_time_start: string | null
   at_time_end: string | null
   priority: Priority | null
   note: string | null
+  frozen: boolean
 }
 
 export type DayData = {
@@ -295,7 +298,7 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
       .eq('date', dateStr),
     supabase
       .from('planner_day_overrides')
-      .select('item_id, time_of_day, at_time_start, at_time_end, priority, note')
+      .select('item_id, title, icon, time_of_day, at_time_start, at_time_end, priority, note, frozen')
       .eq('user_id', userId)
       .eq('date', dateStr),
   ])
@@ -318,6 +321,8 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
       if (!ov) return it
       return {
         ...it,
+        title: ov.title ?? it.title,
+        icon: ov.icon ?? it.icon,
         time_of_day: ov.time_of_day,
         at_time_start: ov.at_time_start,
         at_time_end: ov.at_time_end,
@@ -407,6 +412,8 @@ export async function saveDayOrder(
 // шаблон «Мои дела» (planner_items) и другие дни. При загрузке дня loadDay
 // наложит эти поля поверх шаблона (см. planner_day_overrides).
 export type DayOverridePatch = {
+  title: string | null
+  icon: string | null
   time_of_day: TimeOfDay
   at_time_start: string | null
   at_time_end: string | null
@@ -425,11 +432,15 @@ export async function saveDayOverride(
       user_id: userId,
       item_id: itemId,
       date: dateStr,
+      title: patch.title,
+      icon: patch.icon,
       time_of_day: patch.time_of_day,
       at_time_start: patch.at_time_start,
       at_time_end: patch.at_time_end,
       priority: patch.priority,
       note: patch.note,
+      // Ручная правка дня (не заморозка) -> показываем значок ✎ и кнопку сброса.
+      frozen: false,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'user_id,item_id,date' },
@@ -563,11 +574,27 @@ export async function createItem(userId: string, input: ItemInput): Promise<Plan
 }
 
 // Обновляет существующее дело и возвращает его.
+// ВАЖНО: перед изменением «замораживает» прошлые дни — записывает СТАРЫЕ
+// значения дела в planner_day_overrides (frozen=true) для всех прошедших дат,
+// где дело показывалось. Так изменение (название, время, важность и т. п.)
+// применяется только к сегодняшнему и будущим дням, а прошлые дни остаются
+// такими, какими были (см. freezePastDays ниже).
 export async function updateItem(
   userId: string,
   id: string,
   input: ItemInput,
 ): Promise<PlannerItem> {
+  // 1) Читаем текущие (старые) значения дела и фиксируем ими прошлые дни.
+  const { data: oldData, error: oldErr } = await supabase
+    .from('planner_items')
+    .select(ITEM_COLS)
+    .eq('user_id', userId)
+    .eq('id', id)
+    .single()
+  if (oldErr) throw oldErr
+  if (oldData) await freezePastDays(userId, oldData as PlannerItem)
+
+  // 2) Обновляем шаблон — это затронет только сегодня и будущие дни.
   const { data, error } = await supabase
     .from('planner_items')
     .update(itemRow(input))
@@ -577,6 +604,63 @@ export async function updateItem(
     .single()
   if (error) throw error
   return data as PlannerItem
+}
+
+// «Замораживает» прошлые дни дела: для каждой прошедшей даты (от старта дела,
+// но не глубже ~400 дней, до вчера включительно), где дело показывалось и где
+// ещё нет правки этого дня, создаёт снимок ТЕКУЩИХ (старых) значений дела с
+// frozen=true. Благодаря этому после изменения шаблона в «Мои дела» прошлые
+// дни продолжают показывать старые значения, а правка касается только сегодня
+// и будущего. Разовые дела (repeat_rule='none') не трогаем — у них один день,
+// он и есть само дело, поэтому правка применяется к нему напрямую.
+export async function freezePastDays(userId: string, item: PlannerItem): Promise<void> {
+  if (item.repeat_rule === 'none') return
+  const today = todayStr()
+  const yesterday = addDays(today, -1)
+  const lowerBound = addDays(today, -400)
+  const start = item.start_date && item.start_date > lowerBound ? item.start_date : lowerBound
+  if (start > yesterday) return // прошедших дней нет
+
+  // Уже существующие правки дней этого дела в диапазоне — их НЕ трогаем
+  // (там либо ручная правка пользователя, либо уже сделанная заморозка).
+  const { data: existing, error: exErr } = await supabase
+    .from('planner_day_overrides')
+    .select('date')
+    .eq('user_id', userId)
+    .eq('item_id', item.id)
+    .gte('date', start)
+    .lte('date', yesterday)
+  if (exErr) throw exErr
+  const taken = new Set((existing ?? []).map((r) => (r as { date: string }).date))
+
+  // Собираем снимки для всех прошедших дат, где дело реально показывалось.
+  const nowIso = new Date().toISOString()
+  const rows: Array<Record<string, unknown>> = []
+  let d = start
+  while (d <= yesterday) {
+    if (!taken.has(d) && isItemOnDate(item, d)) {
+      rows.push({
+        user_id: userId,
+        item_id: item.id,
+        date: d,
+        title: item.title,
+        icon: item.icon,
+        time_of_day: item.time_of_day,
+        at_time_start: item.at_time_start,
+        at_time_end: item.at_time_end,
+        priority: item.priority,
+        note: item.note,
+        frozen: true,
+        updated_at: nowIso,
+      })
+    }
+    d = addDays(d, 1)
+  }
+  if (rows.length === 0) return
+  const { error } = await supabase
+    .from('planner_day_overrides')
+    .upsert(rows, { onConflict: 'user_id,item_id,date' })
+  if (error) throw error
 }
 
 // Мягко удаляет дело (archived=true): оно пропадает из списков, но отметки

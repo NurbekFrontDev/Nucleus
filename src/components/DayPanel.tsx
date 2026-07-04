@@ -168,7 +168,7 @@ export default function DayPanel({ userId, date, onClose, onChanged }: Props) {
             }`}
           >
             <span className="break-words">{item.title}</span>
-            {overrides[item.id] && (
+            {overrides[item.id] && !overrides[item.id].frozen && (
               <span
                 title={t('today.edited')}
                 className="ml-1 align-middle text-xs text-emerald-600 dark:text-emerald-400"
@@ -296,7 +296,8 @@ export default function DayPanel({ userId, date, onClose, onChanged }: Props) {
           userId={userId}
           date={date}
           item={editItem}
-          hasOverride={!!overrides[editItem.id]}
+          hasOverride={!!overrides[editItem.id] && !overrides[editItem.id].frozen}
+          existing={overrides[editItem.id] ?? null}
           onClose={() => setEditItem(null)}
           onSaved={() => {
             void reload()
