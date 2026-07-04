@@ -621,19 +621,26 @@ export async function freezePastDays(userId: string, item: PlannerItem): Promise
   const start = item.start_date && item.start_date > lowerBound ? item.start_date : lowerBound
   if (start > yesterday) return // прошедших дней нет
 
-  // Уже существующие правки дней этого дела в диапазоне — их НЕ трогаем
-  // (там либо ручная правка пользователя, либо уже сделанная заморозка).
+  // Уже существующие правки дней этого дела в диапазоне. Нам нужны их даты и
+  // текущее название снимка: если у прошлого дня есть правка, но БЕЗ снимка
+  // названия (title IS NULL — напр. старая ручная правка дня, где менялись
+  // только время/важность), то без заморозки названия этот день «поедет» за
+  // новым названием шаблона (именно это давало баг «через день»). Такие
+  // дни мы отдельно до-заполняем старым названием/иконкой (backfill).
   const { data: existing, error: exErr } = await supabase
     .from('planner_day_overrides')
-    .select('date')
+    .select('date, title')
     .eq('user_id', userId)
     .eq('item_id', item.id)
     .gte('date', start)
     .lte('date', yesterday)
   if (exErr) throw exErr
-  const taken = new Set((existing ?? []).map((r) => (r as { date: string }).date))
+  const existingRows = (existing ?? []) as { date: string; title: string | null }[]
+  const taken = new Set(existingRows.map((r) => r.date))
+  // Даты, где правка дня есть, но снимка названия нет -> до-заполним старым.
+  const backfillDates = existingRows.filter((r) => r.title === null).map((r) => r.date)
 
-  // Собираем снимки для всех прошедших дат, где дело реально показывалось.
+  // Собираем снимки для всех прошедших дат БЕЗ правки, где дело показывалось.
   const nowIso = new Date().toISOString()
   const rows: Array<Record<string, unknown>> = []
   let d = start
@@ -656,11 +663,26 @@ export async function freezePastDays(userId: string, item: PlannerItem): Promise
     }
     d = addDays(d, 1)
   }
-  if (rows.length === 0) return
-  const { error } = await supabase
-    .from('planner_day_overrides')
-    .upsert(rows, { onConflict: 'user_id,item_id,date' })
-  if (error) throw error
+  if (rows.length > 0) {
+    const { error } = await supabase
+      .from('planner_day_overrides')
+      .upsert(rows, { onConflict: 'user_id,item_id,date' })
+    if (error) throw error
+  }
+
+  // До-заполняем название/иконку у прошлых дней, где правка была, но снимка
+  // названия не было — берём СТАРЫЕ значения дела. Прочие поля (время,
+  // важность, заметка) не трогаем.
+  if (backfillDates.length > 0) {
+    const { error: bfErr } = await supabase
+      .from('planner_day_overrides')
+      .update({ title: item.title, icon: item.icon, updated_at: nowIso })
+      .eq('user_id', userId)
+      .eq('item_id', item.id)
+      .is('title', null)
+      .in('date', backfillDates)
+    if (bfErr) throw bfErr
+  }
 }
 
 // Мягко удаляет дело (archived=true): оно пропадает из списков, но отметки
