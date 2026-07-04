@@ -7,11 +7,13 @@ import {
   saveWaterGoal,
   loadWaterPortion,
   saveWaterPortion,
+  loadWaterPresets,
+  saveWaterPresets,
   addWaterLog,
   removeWaterLog,
   loadWaterRange,
+  DEFAULT_WATER_PRESETS,
   type WaterDay,
-  type WaterLog,
 } from '../lib/water'
 import { readCache, writeCache } from '../lib/offlineCache'
 import Select from '../components/Select'
@@ -25,12 +27,10 @@ import {
   type NotifSettings,
 } from '../lib/notifications'
 
-type WaterCache = { day: WaterDay; portion: number }
+type WaterCache = { day: WaterDay; portion: number; presets: number[] }
 
 const cardCls =
   'rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50'
-
-const QUICK_STEPS = [150, 200, 250, 300, 350, 400, 450, 500, 550, 600]
 
 const R = 100
 const C = 2 * Math.PI * R
@@ -42,15 +42,7 @@ const iso = (y: number, m: number, d: number) => `${y}-${pad2(m + 1)}-${pad2(d)}
 const dm = (date: string) => `${date.slice(8, 10)}.${date.slice(5, 7)}`
 
 // Стакан с уровнем воды (по референсу Mi «Drink water»).
-function GlassIcon({
-  fill,
-  active,
-  plus,
-}: {
-  fill: number
-  active: boolean
-  plus?: boolean
-}) {
+function GlassIcon({ fill, active, plus }: { fill: number; active: boolean; plus?: boolean }) {
   const uid = useId().replace(/[:]/g, '')
   const clip = `glass-${uid}`
   const grad = `glassg-${uid}`
@@ -86,21 +78,9 @@ function GlassIcon({
           className="transition-all duration-300"
         />
       )}
-      <path
-        d={path}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinejoin="round"
-      />
+      <path d={path} fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" />
       {plus && (
-        <text
-          x="20"
-          y="31"
-          textAnchor="middle"
-          fontSize="15"
-          className="fill-sky-400 font-bold"
-        >
+        <text x="20" y="31" textAnchor="middle" fontSize="15" className="fill-sky-400 font-bold">
           +
         </text>
       )}
@@ -117,6 +97,8 @@ export default function WaterTracker() {
   const [trend, setTrend] = useState<Record<string, number>>({})
   const [loading, setLoading] = useState(true)
   const [selMl, setSelMl] = useState(250)
+  const [presets, setPresets] = useState<number[]>(DEFAULT_WATER_PRESETS)
+  const [presetDraft, setPresetDraft] = useState('')
   const [goalEdit, setGoalEdit] = useState(false)
   const [goalDraft, setGoalDraft] = useState('')
   // Настройки напоминаний пить воду (перенесены сюда из настроек планировщика).
@@ -138,7 +120,7 @@ export default function WaterTracker() {
       cont.getBoundingClientRect().left -
       (cont.clientWidth - el.clientWidth) / 2
     cont.scrollTo({ left: Math.max(0, target), behavior: 'smooth' })
-  }, [selMl, loading])
+  }, [selMl, loading, presets])
 
   // Загрузка дня (сегодня)
   useEffect(() => {
@@ -155,21 +137,24 @@ export default function WaterTracker() {
       setDay(cached.day)
       setGoalDraft(String(cached.day.goal))
       setSelMl(cached.portion)
+      if (Array.isArray(cached.presets) && cached.presets.length) setPresets(cached.presets)
       setLoading(false)
     } else {
       setLoading(true)
     }
     ;(async () => {
       try {
-        const [d, portion] = await Promise.all([
+        const [d, portion, pr] = await Promise.all([
           loadWaterDay(user.id, today),
           loadWaterPortion(user.id),
+          loadWaterPresets(user.id),
         ])
         if (!active) return
         setDay(d)
         setGoalDraft(String(d.goal))
         setSelMl(portion)
-        writeCache(ck, { day: d, portion })
+        setPresets(pr)
+        writeCache(ck, { day: d, portion, presets: pr })
       } finally {
         if (active) setLoading(false)
       }
@@ -243,74 +228,86 @@ export default function WaterTracker() {
     }
   }, [user, period.start, period.end])
 
-  const cupVolumes = useMemo(() => {
-    const step = Math.max(1, selMl)
-    const target = Math.max(step, goal)
-    const parts: number[] = []
-    let remaining = target
-    while (remaining > 0) {
-      const part = Math.min(step, remaining)
-      parts.push(part)
-      remaining -= part
-    }
-    return parts
-  }, [goal, selMl])
-
-  const cupFills = useMemo(() => {
-    let remaining = drunk
-    return cupVolumes.map((cap) => {
-      const fill = Math.max(0, Math.min(cap, remaining))
-      remaining = Math.max(0, remaining - cap)
-      return cap > 0 ? fill / cap : 0
-    })
-  }, [drunk, cupVolumes])
-
-  const nextEmpty = cupFills.findIndex((f) => f < 0.999)
+  // ===== Стаканы =====
+  // Выпитые стаканы = реальные записи (каждый со своим объёмом, полный),
+  // пустые шаблонные стаканы = выбранная порция selMl, их число подстраивается
+  // под цель (допускается небольшой перебор, напр. 300×7=2100).
+  const logsAsc = useMemo(
+    () =>
+      [...(day?.logs ?? [])].sort((a, b) =>
+        a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : 0,
+      ),
+    [day],
+  )
+  const remainingToGoal = Math.max(0, goal - drunk)
+  const emptyCount = remainingToGoal > 0 ? Math.ceil(remainingToGoal / Math.max(1, selMl)) : 1
+  const cups: Array<{ amount: number; filled: boolean; id?: string }> = [
+    ...logsAsc.map((l) => ({ amount: l.amount, filled: true, id: l.id })),
+    ...Array.from({ length: emptyCount }, () => ({ amount: selMl, filled: false })),
+  ]
+  const firstEmptyIdx = logsAsc.length
 
   const syncTrendToday = (total: number) =>
     setTrend((prev) => ({ ...prev, [today]: Math.max(0, total) }))
 
-  // Точно выставляет итог за сегодня: убирает свежие логи и при нехватке добавляет один.
-  const setTotal = async (target: number) => {
+  // Выпить порцию: добавляет отдельную запись (отдельный стакан).
+  const addDrink = async (ml: number) => {
     if (!user || !day) return
-    const tgt = Math.max(0, Math.round(target))
-    const logs = [...day.logs]
-    let current = day.drunk
-    const removeIds: string[] = []
-    while (current > tgt && logs.length > 0) {
-      const l = logs.shift() as WaterLog
-      removeIds.push(l.id)
-      current -= l.amount
+    const amt = Math.max(1, Math.round(ml))
+    try {
+      const added = await addWaterLog(user.id, today, amt)
+      setDay((prev) => (prev ? { ...prev, drunk: prev.drunk + amt, logs: [added, ...prev.logs] } : prev))
+      syncTrendToday(drunk + amt)
+    } catch {
+      /* ignore */
     }
-    let newLogs = logs
-    if (current < tgt) {
-      const added = await addWaterLog(user.id, today, tgt - current)
-      current = tgt
-      newLogs = [added, ...newLogs]
-    }
-    for (const id of removeIds) {
-      try {
-        await removeWaterLog(user.id, id)
-      } catch {
-        /* ignore */
-      }
-    }
-    setDay((prev) => (prev ? { ...prev, drunk: current, logs: newLogs } : prev))
-    syncTrendToday(current)
   }
 
-  // Кумулятивный тап: до этого бокала — наполнить, по полному — обнулить от него.
-  const tapCup = async (idx: number) => {
-    let through = 0
-    for (let k = 0; k <= idx; k++) through += cupVolumes[k] ?? 0
-    const before = through - (cupVolumes[idx] ?? 0)
-    const target = drunk >= through ? before : through
-    await setTotal(target)
+  // Убрать конкретный выпитый стакан (тап по полному).
+  const removeLog = async (id: string, amount: number) => {
+    if (!user || !day) return
+    setDay((prev) =>
+      prev
+        ? { ...prev, drunk: Math.max(0, prev.drunk - amount), logs: prev.logs.filter((l) => l.id !== id) }
+        : prev,
+    )
+    syncTrendToday(Math.max(0, drunk - amount))
+    try {
+      await removeWaterLog(user.id, id)
+    } catch {
+      /* ignore */
+    }
   }
 
   const chooseMl = (ml: number) => {
     setSelMl(ml)
     if (user) void saveWaterPortion(user.id, ml)
+  }
+
+  const addPreset = async () => {
+    const v = Math.round(Number(presetDraft))
+    if (!user || !v || v <= 0) return
+    const next = Array.from(new Set([...presets, v])).sort((a, b) => a - b)
+    setPresets(next)
+    setPresetDraft('')
+    setSelMl(v)
+    try {
+      await saveWaterPresets(user.id, next)
+      void saveWaterPortion(user.id, v)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const removePreset = async (ml: number) => {
+    if (!user || presets.length <= 1) return
+    const next = presets.filter((p) => p !== ml)
+    setPresets(next)
+    try {
+      await saveWaterPresets(user.id, next)
+    } catch {
+      /* ignore */
+    }
   }
 
   // Сохраняем настройки уведомлений и сразу пересобираем расписание на устройстве.
@@ -374,12 +371,10 @@ export default function WaterTracker() {
               <p className="text-sm font-medium text-neutral-500 dark:text-neutral-400">
                 {t('water.quickAdd')}
               </p>
-              <span className="text-lg font-semibold text-sky-600 dark:text-sky-400">
-                {selMl} ml
-              </span>
+              <span className="text-lg font-semibold text-sky-600 dark:text-sky-400">{selMl} ml</span>
             </div>
             <div ref={quickRef} className="flex gap-1.5 overflow-x-auto pb-1">
-              {QUICK_STEPS.map((ml) => (
+              {presets.map((ml) => (
                 <button
                   key={ml}
                   ref={(el) => {
@@ -444,23 +439,21 @@ export default function WaterTracker() {
             </div>
 
             <div className="grid w-full grid-cols-4 gap-1 sm:grid-cols-5">
-              {cupVolumes.map((cupMl, i) => {
-                const fill = cupFills[i] ?? 0
-                const active = fill > 0.001
-                return (
-                  <button
-                    key={`${cupMl}-${i}`}
-                    type="button"
-                    onClick={() => tapCup(i)}
-                    className="flex cursor-pointer flex-col items-center gap-0.5 rounded-2xl py-1 transition active:scale-90"
-                  >
-                    <GlassIcon fill={fill} active={active} plus={i === nextEmpty} />
-                    <span className="text-[10px] font-medium text-neutral-400">
-                      {cupMl} ml
-                    </span>
-                  </button>
-                )
-              })}
+              {cups.map((cup, i) => (
+                <button
+                  key={cup.id ?? `empty-${i}`}
+                  type="button"
+                  onClick={() => (cup.filled ? removeLog(cup.id as string, cup.amount) : addDrink(selMl))}
+                  className="flex cursor-pointer flex-col items-center gap-0.5 rounded-2xl py-1 transition active:scale-90"
+                >
+                  <GlassIcon
+                    fill={cup.filled ? 1 : 0}
+                    active={cup.filled}
+                    plus={!cup.filled && i === firstEmptyIdx}
+                  />
+                  <span className="text-[10px] font-medium text-neutral-400">{cup.amount} ml</span>
+                </button>
+              ))}
             </div>
 
             {isFull && (
@@ -476,7 +469,7 @@ export default function WaterTracker() {
               onClick={() => setGoalEdit(false)}
             >
               <div
-                className="w-full max-w-sm rounded-2xl border border-neutral-200 bg-white p-5 shadow-xl dark:border-neutral-800 dark:bg-neutral-900"
+                className="max-h-[85vh] w-full max-w-sm overflow-y-auto rounded-2xl border border-neutral-200 bg-white p-5 shadow-xl dark:border-neutral-800 dark:bg-neutral-900"
                 onClick={(e) => e.stopPropagation()}
               >
                 <p className="mb-3 text-base font-semibold">🎯 {t('water.dailyGoal')}</p>
@@ -495,6 +488,54 @@ export default function WaterTracker() {
                     className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-sky-400 dark:border-neutral-700 dark:bg-neutral-950"
                   />
                   <span className="text-sm text-neutral-400">ml</span>
+                </div>
+
+                {/* 🥤 Порции быстрого добавления (можно добавлять свои). */}
+                <div className="mt-5 border-t border-neutral-200 pt-4 dark:border-neutral-800">
+                  <p className="mb-2 text-sm font-semibold">
+                    🥤 {lang === 'en' ? 'Portions (ml)' : 'Порции (мл)'}
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {presets.map((ml) => (
+                      <span
+                        key={ml}
+                        className="flex items-center gap-1 rounded-lg bg-neutral-100 px-2.5 py-1.5 text-sm dark:bg-neutral-800"
+                      >
+                        {ml}
+                        <button
+                          type="button"
+                          onClick={() => removePreset(ml)}
+                          aria-label={lang === 'en' ? 'Remove' : 'Удалить'}
+                          className="cursor-pointer text-neutral-400 transition hover:text-red-500"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                  <div className="mt-2 flex items-center gap-2">
+                    <input
+                      type="number"
+                      inputMode="numeric"
+                      value={presetDraft}
+                      onChange={(e) => setPresetDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          e.preventDefault()
+                          void addPreset()
+                        }
+                      }}
+                      placeholder={lang === 'en' ? 'Custom, ml' : 'Своё, мл'}
+                      className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-sky-400 dark:border-neutral-700 dark:bg-neutral-950"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void addPreset()}
+                      className="shrink-0 cursor-pointer rounded-lg bg-sky-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-sky-400"
+                    >
+                      {lang === 'en' ? 'Add' : 'Добавить'}
+                    </button>
+                  </div>
                 </div>
 
                 {/* 💧 Напоминания пить воду (перенесено сюда из настроек планировщика). */}
@@ -536,19 +577,13 @@ export default function WaterTracker() {
                         <p className="text-sm text-neutral-600 dark:text-neutral-300">
                           {t('notif.from')}
                         </p>
-                        <TimePicker
-                          value={notif.waterFrom}
-                          onChange={(v) => updateNotif({ waterFrom: v })}
-                        />
+                        <TimePicker value={notif.waterFrom} onChange={(v) => updateNotif({ waterFrom: v })} />
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-sm text-neutral-600 dark:text-neutral-300">
                           {t('notif.to')}
                         </p>
-                        <TimePicker
-                          value={notif.waterTo}
-                          onChange={(v) => updateNotif({ waterTo: v })}
-                        />
+                        <TimePicker value={notif.waterTo} onChange={(v) => updateNotif({ waterTo: v })} />
                       </div>
                     </div>
                   )}
@@ -579,9 +614,7 @@ export default function WaterTracker() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm font-semibold">📊 Статистика</p>
-                <p className="text-xs text-neutral-400">
-                  Сред. {avg} мл/день
-                </p>
+                <p className="text-xs text-neutral-400">Сред. {avg} мл/день</p>
               </div>
               <div className="flex rounded-lg bg-neutral-100 p-0.5 text-xs font-medium dark:bg-neutral-800">
                 {(['week', 'month'] as const).map((m) => (
@@ -612,9 +645,7 @@ export default function WaterTracker() {
               >
                 ‹
               </button>
-              <span className="font-medium text-neutral-500 dark:text-neutral-300">
-                {periodLabel}
-              </span>
+              <span className="font-medium text-neutral-500 dark:text-neutral-300">{periodLabel}</span>
               <button
                 type="button"
                 disabled={statOffset >= 0}
@@ -639,11 +670,7 @@ export default function WaterTracker() {
                   const hp = goal > 0 ? Math.min(100, (v / goal) * 100) : 0
                   const isToday = d === today
                   return (
-                    <div
-                      key={d}
-                      className="flex h-full flex-1 items-end"
-                      title={`${dm(d)}: ${v} ml`}
-                    >
+                    <div key={d} className="flex h-full flex-1 items-end" title={`${dm(d)}: ${v} ml`}>
                       <div
                         className={`w-full rounded-t transition-all ${
                           isToday
@@ -668,10 +695,7 @@ export default function WaterTracker() {
                         ? String(dayNum)
                         : ''
                   return (
-                    <span
-                      key={d}
-                      className="flex-1 text-center text-[9px] text-neutral-400"
-                    >
+                    <span key={d} className="flex-1 text-center text-[9px] text-neutral-400">
                       {label}
                     </span>
                   )

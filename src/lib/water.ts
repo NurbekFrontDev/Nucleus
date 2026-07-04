@@ -58,6 +58,37 @@ export async function saveWaterPortion(userId: string, ml: number): Promise<void
   )
 }
 
+// Список порций быстрого добавления (мл) по умолчанию.
+export const DEFAULT_WATER_PRESETS = [150, 200, 250, 300, 350, 400, 450, 500, 550, 600]
+
+// Список порций пользователя (мл) — хранится в app_settings.water_presets и синхронизируется.
+export async function loadWaterPresets(userId: string): Promise<number[]> {
+  const { data } = await supabase
+    .from('app_settings')
+    .select('water_presets')
+    .eq('user_id', userId)
+    .maybeSingle()
+  const v = (data as { water_presets?: unknown } | null)?.water_presets
+  if (Array.isArray(v)) {
+    const clean = v
+      .map((n) => Math.round(Number(n)))
+      .filter((n) => Number.isFinite(n) && n > 0)
+    const uniq = Array.from(new Set(clean)).sort((a, b) => a - b)
+    if (uniq.length) return uniq
+  }
+  return [...DEFAULT_WATER_PRESETS]
+}
+
+export async function saveWaterPresets(userId: string, presets: number[]): Promise<void> {
+  const clean = Array.from(
+    new Set(presets.map((n) => Math.round(Number(n))).filter((n) => Number.isFinite(n) && n > 0)),
+  ).sort((a, b) => a - b)
+  await supabase.from('app_settings').upsert(
+    { user_id: userId, water_presets: clean, updated_at: new Date().toISOString() },
+    { onConflict: 'user_id' },
+  )
+}
+
 export async function loadWaterDay(userId: string, date: string): Promise<WaterDay> {
   const [goal, { data: logs }] = await Promise.all([
     loadWaterGoal(userId),
