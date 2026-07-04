@@ -1105,22 +1105,18 @@ export async function loadDaySummaries(
 // ====================================================================
 
 // Фаза таймера: фокус, короткий перерыв, длинный перерыв.
-export type PomoKind = 'focus' | 'break' | 'long_break'
+export type PomoKind = 'focus' | 'break'
 
 export type PomoSettings = {
   focusMin: number // длительность фокуса, мин
-  breakMin: number // короткий перерыв, мин
-  longBreakMin: number // длинный перерыв, мин
-  cycles: number // сколько фокусов до длинного перерыва
-  sound: string // идентификатор звука сигнала окончания фазы
-  volume: number // громкость сигнала, 0-100
+  breakMin: number // перерыв, мин
+  sound: string // идентификатор звука сигнала окончания фазы (веб)
+  volume: number // громкость сигнала, 0-100 (веб)
 }
 
 export const POMO_DEFAULTS: PomoSettings = {
   focusMin: 25,
   breakMin: 5,
-  longBreakMin: 15,
-  cycles: 4,
   sound: 'chime',
   volume: 100,
 }
@@ -1137,8 +1133,6 @@ export function loadPomoSettingsCache(): PomoSettings {
     return {
       focusMin: typeof p.focusMin === 'number' ? p.focusMin : POMO_DEFAULTS.focusMin,
       breakMin: typeof p.breakMin === 'number' ? p.breakMin : POMO_DEFAULTS.breakMin,
-      longBreakMin: typeof p.longBreakMin === 'number' ? p.longBreakMin : POMO_DEFAULTS.longBreakMin,
-      cycles: typeof p.cycles === 'number' ? p.cycles : POMO_DEFAULTS.cycles,
       sound: typeof p.sound === 'string' ? p.sound : POMO_DEFAULTS.sound,
       volume: typeof p.volume === 'number' ? p.volume : POMO_DEFAULTS.volume,
     }
@@ -1159,23 +1153,19 @@ export function savePomoSettingsCache(s: PomoSettings): void {
 export async function loadPomoSettings(userId: string): Promise<PomoSettings> {
   const { data, error } = await supabase
     .from('app_settings')
-    .select('pomo_focus_min, pomo_break_min, pomo_long_break_min, pomo_cycles, pomo_sound, pomo_volume')
+    .select('pomo_focus_min, pomo_break_min, pomo_sound, pomo_volume')
     .eq('user_id', userId)
     .maybeSingle()
   if (error || !data) return { ...POMO_DEFAULTS }
   const row = data as {
     pomo_focus_min?: number | null
     pomo_break_min?: number | null
-    pomo_long_break_min?: number | null
-    pomo_cycles?: number | null
     pomo_sound?: string | null
     pomo_volume?: number | null
   }
   const result: PomoSettings = {
     focusMin: row.pomo_focus_min ?? POMO_DEFAULTS.focusMin,
     breakMin: row.pomo_break_min ?? POMO_DEFAULTS.breakMin,
-    longBreakMin: row.pomo_long_break_min ?? POMO_DEFAULTS.longBreakMin,
-    cycles: row.pomo_cycles ?? POMO_DEFAULTS.cycles,
     sound: row.pomo_sound ?? POMO_DEFAULTS.sound,
     volume: row.pomo_volume ?? POMO_DEFAULTS.volume,
   }
@@ -1193,8 +1183,6 @@ export async function savePomoSettings(userId: string, s: PomoSettings): Promise
       user_id: userId,
       pomo_focus_min: s.focusMin,
       pomo_break_min: s.breakMin,
-      pomo_long_break_min: s.longBreakMin,
-      pomo_cycles: s.cycles,
       pomo_sound: s.sound,
       pomo_volume: s.volume,
       updated_at: new Date().toISOString(),
@@ -1202,6 +1190,57 @@ export async function savePomoSettings(userId: string, s: PomoSettings): Promise
     { onConflict: 'user_id' },
   )
   if (error) throw error
+}
+
+// ===== Состояние идущего таймера Помодоро (локально на устройстве) =====
+// Помодоро — вещь локальная для телефона. Сохраняем текущую фазу, время
+// окончания и выбранное дело в localStorage, чтобы при возврате в приложение
+// (даже после его закрытия) продолжить отсчёт, а если сессия уже завершилась
+// в фоне — сразу перейти к следующей фазе.
+export type PomoRuntime = {
+  mode: PomoKind
+  running: boolean
+  endTime: number // мс, когда фаза заканчивается (при running=true)
+  remaining: number // сек, сколько осталось (для паузы/остановки)
+  totalSec: number // длительность фазы в секундах
+  itemId: string | null
+}
+
+const POMO_RUNTIME_KEY = 'nucleus:pomoRuntime'
+
+export function loadPomoRuntime(): PomoRuntime | null {
+  try {
+    const raw = localStorage.getItem(POMO_RUNTIME_KEY)
+    if (!raw) return null
+    const p = JSON.parse(raw) as Partial<PomoRuntime>
+    if (p.mode !== 'focus' && p.mode !== 'break') return null
+    return {
+      mode: p.mode,
+      running: !!p.running,
+      endTime: typeof p.endTime === 'number' ? p.endTime : 0,
+      remaining: typeof p.remaining === 'number' ? p.remaining : 0,
+      totalSec: typeof p.totalSec === 'number' ? p.totalSec : 0,
+      itemId: typeof p.itemId === 'string' ? p.itemId : null,
+    }
+  } catch {
+    return null
+  }
+}
+
+export function savePomoRuntime(rt: PomoRuntime): void {
+  try {
+    localStorage.setItem(POMO_RUNTIME_KEY, JSON.stringify(rt))
+  } catch {
+    // не критично
+  }
+}
+
+export function clearPomoRuntime(): void {
+  try {
+    localStorage.removeItem(POMO_RUNTIME_KEY)
+  } catch {
+    // не критично
+  }
 }
 
 // Записывает завершённую сессию Помодоро (для статистики фокуса).

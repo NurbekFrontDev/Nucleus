@@ -26,6 +26,14 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="com.nucleus.app" android:host="login-callback" />
             </intent-filter>
+
+            <!-- Deep link для перехода на вкладку Помодоро по тапу на уведомление о завершении -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="com.nucleus.app" android:host="focus" />
+            </intent-filter>
         </activity>
 
         <provider
@@ -50,6 +58,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Управление режимом «Не беспокоить» (тихий режим во время Помодоро-фокуса) -->
     <uses-permission android:name="android.permission.ACCESS_NOTIFICATION_POLICY" />
+    <!-- Вибрация при завершении фокуса/перерыва -->
+    <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Постоянное уведомление таймера Помодоро (работа в фоне) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />

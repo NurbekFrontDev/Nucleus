@@ -8,28 +8,30 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.media.AudioAttributes;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
+import android.os.VibrationEffect;
+import android.os.Vibrator;
 
 import androidx.core.app.NotificationCompat;
-
-import java.util.Locale;
 
 /**
  * Foreground-сервис таймера Помодоро.
  *
- * Показывает постоянное (несмахиваемое) уведомление с названием фазы
- * (Фокус / Перерыв / Длинный перерыв) и живым обратным отсчётом mm:ss.
- *
- * Сервис сам перерисовывает уведомление раз в секунду, поэтому отсчёт виден
- * на любой прошивке (в т.ч. MIUI/HyperOS, где системный хронометр в шторке
- * может не отображаться). Работает в фоне благодаря foreground-сервису.
+ * Пока таймер идёт — показывает постоянное уведомление с названием фазы
+ * (Фокус / Перерыв) и живым отсчётом. Когда отсчёт доходит до 0 — выключает
+ * «Не беспокоить», вибрирует и показывает громкое уведомление с нашим звуком;
+ * по тапу открывает вкладку Помодоро (deep link com.nucleus.app://focus).
  */
 public class FocusTimerService extends Service {
     public static final String CHANNEL_ID = "focus_timer";
+    public static final String CHANNEL_DONE_ID = "focus_done";
     public static final int NOTIF_ID = 4711;
+    public static final int NOTIF_DONE_ID = 4712;
 
     public static final String ACTION_SHOW = "com.nucleus.app.FOCUS_SHOW";
     public static final String ACTION_STOP = "com.nucleus.app.FOCUS_STOP";
@@ -39,6 +41,8 @@ public class FocusTimerService extends Service {
 
     private String curTitle = "Nucleus";
     private String curBody = "";
+    private String curDoneTitle = "";
+    private String curDoneBody = "";
     private long curEndTime = 0L;
     private boolean curRunning = false;
 
@@ -52,9 +56,7 @@ public class FocusTimerService extends Service {
         createChannel();
         String action = intent == null ? null : intent.getAction();
 
-        // ВАЖНО: сервис стартует через startForegroundService(), поэтому в ЛЮБОЙ
-        // ветке нужно хотя бы один раз вызвать startForeground(), иначе система
-        // убивает приложение (ForegroundServiceDidNotStartInTimeException).
+        // В ЛЮБОЙ ветке нужен startForeground(), иначе система убивает приложение.
         if (intent == null || ACTION_STOP.equals(action)) {
             startForegroundCompat(buildNotification("Nucleus", "", 0L, false));
             stopTicking();
@@ -65,10 +67,14 @@ public class FocusTimerService extends Service {
 
         curTitle = intent.getStringExtra("title");
         curBody = intent.getStringExtra("body");
+        curDoneTitle = intent.getStringExtra("doneTitle");
+        curDoneBody = intent.getStringExtra("doneBody");
         curEndTime = intent.getLongExtra("endTime", 0L);
         curRunning = intent.getBooleanExtra("running", false);
         if (curTitle == null) curTitle = "Nucleus";
         if (curBody == null) curBody = "";
+        if (curDoneTitle == null) curDoneTitle = "";
+        if (curDoneBody == null) curDoneBody = "";
 
         startForegroundCompat(buildNotification(curTitle, curBody, curEndTime, curRunning));
 
@@ -80,19 +86,22 @@ public class FocusTimerService extends Service {
         return START_NOT_STICKY;
     }
 
-    // Каждую секунду перерисовываем уведомление, чтобы отсчёт mm:ss обновлялся
-    // вручную (надёжно на любых прошивках).
+    // Каждую секунду перерисовываем уведомление; когда время вышло — fireDone().
     private void startTicking() {
         stopTicking();
         ticker = new Runnable() {
             @Override
             public void run() {
+                long remainingMs = curEndTime - System.currentTimeMillis();
+                if (curRunning && remainingMs <= 0) {
+                    fireDone();
+                    return;
+                }
                 NotificationManager nm =
                         (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
                 if (nm != null) {
                     nm.notify(NOTIF_ID, buildNotification(curTitle, curBody, curEndTime, curRunning));
                 }
-                long remainingMs = curEndTime - System.currentTimeMillis();
                 if (curRunning && remainingMs > 0) {
                     handler.postDelayed(this, 1000L);
                 }
@@ -108,22 +117,61 @@ public class FocusTimerService extends Service {
         }
     }
 
-    // Оставшееся время в формате mm:ss (не меньше 00:00).
-    private String remainingText(long endTime) {
-        long ms = endTime - System.currentTimeMillis();
-        if (ms < 0) ms = 0;
-        long totalSec = ms / 1000L;
-        long m = totalSec / 60L;
-        long s = totalSec % 60L;
-        return String.format(Locale.US, "%02d:%02d", m, s);
+    // Сигнал окончания фазы: выключаем «Не беспокоить», вибрируем и
+    // показываем громкое уведомление с нашим звуком; по тапу — вкладка Помодоро.
+    private void fireDone() {
+        curRunning = false;
+        stopTicking();
+
+        NotificationManager nm =
+                (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+
+        // 1) Возвращаем звук (выключаем режим «Не беспокоить»), чтобы сигнал был слышен.
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M
+                    && nm != null && nm.isNotificationPolicyAccessGranted()) {
+                nm.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_ALL);
+            }
+        } catch (Exception ignored) {
+        }
+
+        // 2) Вибрация.
+        try {
+            Vibrator v = (Vibrator) getSystemService(Context.VIBRATOR_SERVICE);
+            long[] pattern = new long[]{0, 400, 200, 400};
+            if (v != null && v.hasVibrator()) {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    v.vibrate(VibrationEffect.createWaveform(pattern, -1));
+                } else {
+                    v.vibrate(pattern, -1);
+                }
+            }
+        } catch (Exception ignored) {
+        }
+
+        // 3) Громкое уведомление о завершении (наш звук из канала focus_done).
+        try {
+            ensureDoneChannel(this);
+            if (nm != null) {
+                nm.notify(NOTIF_DONE_ID, buildDoneNotif(this, curDoneTitle, curDoneBody));
+            }
+        } catch (Exception ignored) {
+        }
+
+        // 4) Убираем постоянное уведомление таймера и останавливаем сервис.
+        try {
+            if (nm != null) nm.cancel(NOTIF_ID);
+        } catch (Exception ignored) {
+        }
+        stopForegroundCompat();
+        stopSelf();
     }
 
     private Notification buildNotification(String title, String body, long endTime, boolean running) {
         return buildNotif(this, title, body, endTime, running);
     }
 
-    // Статическая сборка уведомления — используется и сервисом, и плагином
-    // (мгновенный показ по нажатию «старт», до холодного старта foreground-сервиса).
+    // Статическая сборка постоянного уведомления — используется и сервисом, и плагином.
     static Notification buildNotif(Context ctx, String title, String body, long endTime, boolean running) {
         Intent open = new Intent(ctx, MainActivity.class);
         open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
@@ -138,9 +186,6 @@ public class FocusTimerService extends Service {
         NotificationCompat.Builder b = new NotificationCompat.Builder(ctx, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_focus)
                 .setContentTitle(title)
-                // Отсчёт показываем только справа в шапке (хронометр на одной
-                // строке с названием, как в GoodTime). В теле — только подпись
-                // (без времени), чтобы отсчёт не дублировался.
                 .setContentText(body)
                 .setOngoing(true)
                 .setOnlyAlertOnce(true)
@@ -150,8 +195,6 @@ public class FocusTimerService extends Service {
                 .setCategory(NotificationCompat.CATEGORY_STATUS);
 
         if (live) {
-            // Отсчёт справа в шапке на одной строке с названием (как GoodTime):
-            // время окончания в setWhen + режим обратного отсчёта.
             b.setWhen(endTime);
             b.setShowWhen(true);
             b.setUsesChronometer(true);
@@ -162,6 +205,47 @@ public class FocusTimerService extends Service {
         }
 
         return b.build();
+    }
+
+    // Громкое уведомление окончания фазы (по тапу — deep link на вкладку Фокус).
+    static Notification buildDoneNotif(Context ctx, String title, String body) {
+        if (title == null || title.isEmpty()) title = "Nucleus";
+        if (body == null) body = "";
+        Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse("com.nucleus.app://focus"));
+        open.setPackage(ctx.getPackageName());
+        open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_NEW_TASK);
+        int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            piFlags |= PendingIntent.FLAG_IMMUTABLE;
+        }
+        PendingIntent pi = PendingIntent.getActivity(ctx, 1, open, piFlags);
+
+        NotificationCompat.Builder b = new NotificationCompat.Builder(ctx, CHANNEL_DONE_ID)
+                .setSmallIcon(R.drawable.ic_stat_focus)
+                .setContentTitle(title)
+                .setContentText(body)
+                .setAutoCancel(true)
+                .setContentIntent(pi)
+                .setPriority(NotificationCompat.PRIORITY_HIGH)
+                .setCategory(NotificationCompat.CATEGORY_ALARM);
+        // До Android 8 звук задаётся на самом уведомлении (каналов ещё нет).
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+            b.setSound(soundUri(ctx));
+        }
+        return b.build();
+    }
+
+    // URI нашего звука из res/raw/notify_sound.wav; если файла нет — системный по умолчанию.
+    static Uri soundUri(Context ctx) {
+        try {
+            int id = ctx.getResources().getIdentifier("notify_sound", "raw", ctx.getPackageName());
+            if (id != 0) {
+                return Uri.parse("android.resource://" + ctx.getPackageName() + "/" + id);
+            }
+        } catch (Exception ignored) {
+        }
+        return android.provider.Settings.System.DEFAULT_NOTIFICATION_URI;
     }
 
     private void startForegroundCompat(Notification notif) {
@@ -202,8 +286,7 @@ public class FocusTimerService extends Service {
         ensureChannel(this);
     }
 
-    // Статический вариант — чтобы канал можно было создать из плагина ДО старта
-    // сервиса (нужно для мгновенного показа уведомления по нажатию «старт»).
+    // Канал постоянного уведомления — низкая важность, без звука.
     static void ensureChannel(Context ctx) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
@@ -214,6 +297,28 @@ public class FocusTimerService extends Service {
                 ch.setDescription("Текущее состояние таймера Помодоро");
                 ch.setShowBadge(false);
                 ch.setSound(null, null);
+                nm.createNotificationChannel(ch);
+            }
+        }
+    }
+
+    // Канал сигнала окончания фазы: высокая важность, наш звук. Вибрация канала
+    // выключена — вибрируем отдельно в fireDone(), чтобы не было двойной вибрации.
+    static void ensureDoneChannel(Context ctx) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            NotificationManager nm = (NotificationManager) ctx.getSystemService(Context.NOTIFICATION_SERVICE);
+            if (nm == null) return;
+            if (nm.getNotificationChannel(CHANNEL_DONE_ID) == null) {
+                NotificationChannel ch = new NotificationChannel(
+                        CHANNEL_DONE_ID, "Помодоро — сигнал окончания", NotificationManager.IMPORTANCE_HIGH);
+                ch.setDescription("Звук и вибрация при завершении фокуса или перерыва");
+                ch.enableVibration(false);
+                ch.setShowBadge(false);
+                AudioAttributes aa = new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                        .build();
+                ch.setSound(soundUri(ctx), aa);
                 nm.createNotificationChannel(ch);
             }
         }

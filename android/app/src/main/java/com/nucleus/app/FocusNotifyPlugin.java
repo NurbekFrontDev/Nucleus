@@ -21,6 +21,8 @@ public class FocusNotifyPlugin extends Plugin {
     public void update(PluginCall call) {
         String title = call.getString("title", "Nucleus");
         String body = call.getString("body", "");
+        String doneTitle = call.getString("doneTitle", "");
+        String doneBody = call.getString("doneBody", "");
         Boolean runningB = call.getBoolean("running", false);
         boolean running = Boolean.TRUE.equals(runningB);
         // Оставшиеся секунды — маленькое целое, надёжно проходит через мост
@@ -54,6 +56,8 @@ public class FocusNotifyPlugin extends Plugin {
         i.putExtra("body", body);
         i.putExtra("endTime", endTime);
         i.putExtra("running", running);
+        i.putExtra("doneTitle", doneTitle);
+        i.putExtra("doneBody", doneBody);
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 getContext().startForegroundService(i);

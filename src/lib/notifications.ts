@@ -80,6 +80,29 @@ export async function saveNotifSettings(userId: string, s: NotifSettings): Promi
 const TASK_ID_BASE = 100000
 const WATER_ID_BASE = 200000
 
+// Канал напоминаний с нашим звуком (без вибрации — вибрация только у Помодоро).
+// Звук — файл res/raw/notify_sound.wav (генерируется scripts/gen-notify-sound.mjs).
+const REMINDER_CHANNEL_ID = 'reminders'
+const REMINDER_SOUND = 'notify_sound.wav'
+
+async function ensureReminderChannel(): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return
+  try {
+    const { LocalNotifications } = await import('@capacitor/local-notifications')
+    await LocalNotifications.createChannel({
+      id: REMINDER_CHANNEL_ID,
+      name: 'Напоминания',
+      description: 'Напоминания о делах и воде',
+      importance: 5,
+      sound: REMINDER_SOUND,
+      vibration: false,
+      visibility: 1,
+    })
+  } catch {
+    // канал не создан — не критично, уведомления придут на канале по умолчанию
+  }
+}
+
 // 'HH:MM' -> Date на сегодня. null при неверном формате.
 function timeToday(hhmm: string): Date | null {
   const m = /^(\d{1,2}):(\d{2})$/.exec((hhmm ?? '').trim())
@@ -123,6 +146,8 @@ export async function rescheduleAll(userId: string): Promise<void> {
     const perm = await LocalNotifications.checkPermissions()
     if (perm.display !== 'granted') return
 
+    await ensureReminderChannel()
+
     // Снимаем ранее запланированные наши уведомления (id из наших диапазонов).
     const pending = await LocalNotifications.getPending()
     const toCancel = pending.notifications.filter((n) => n.id >= TASK_ID_BASE)
@@ -153,6 +178,8 @@ export async function rescheduleAll(userId: string): Promise<void> {
                 ? `Через ${settings.tasksOffsetMin} мин`
                 : 'Пора начинать',
             schedule: { at, allowWhileIdle: true },
+            channelId: REMINDER_CHANNEL_ID,
+            sound: REMINDER_SOUND,
             extra: { kind: 'task', path: '/planner' },
           })
           i++
@@ -177,6 +204,8 @@ export async function rescheduleAll(userId: string): Promise<void> {
               title: '💧 Время попить воды',
               body: 'Выпей воды и занеси в приложение',
               schedule: { at: new Date(t), allowWhileIdle: true },
+              channelId: REMINDER_CHANNEL_ID,
+              sound: REMINDER_SOUND,
               extra: { kind: 'water', path: '/planner/water' },
             })
           }

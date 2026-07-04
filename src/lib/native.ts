@@ -84,6 +84,11 @@ export function initNativeAuth(): () => void {
 
   // Возврат из системного браузера после входа через Google.
   void CapacitorApp.addListener('appUrlOpen', async ({ url }) => {
+    // Тап по уведомлению о завершении Помодоро — открываем вкладку Фокус.
+    if (url.includes('://focus')) {
+      window.dispatchEvent(new CustomEvent('nucleus-open-focus'))
+      return
+    }
     if (!url.includes('login-callback')) return
     try {
       const parsed = new URL(url)

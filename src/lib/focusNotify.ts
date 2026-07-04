@@ -9,6 +9,8 @@ interface FocusNotifyPlugin {
     body: string
     remainingSec: number
     running: boolean
+    doneTitle?: string
+    doneBody?: string
   }): Promise<void>
   stop(): Promise<void>
 }
@@ -32,6 +34,9 @@ export async function showFocusNotification(options: {
   body: string
   remainingSec: number
   running: boolean
+  // Тексты для сигнала окончания фазы (покажет нативный сервис, когда таймер дойдёт до 0).
+  doneTitle?: string
+  doneBody?: string
 }): Promise<void> {
   if (!Capacitor.isNativePlatform()) return
   try {

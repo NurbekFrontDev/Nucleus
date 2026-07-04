@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
 import Select from '../components/Select'
-import { showToast } from '../lib/toast'
 import { enableFocusDnd, disableFocusDnd, dndHasPermission, openDndSettings } from '../lib/dnd'
+import { showToast } from '../lib/toast'
 import { showFocusNotification, hideFocusNotification, focusNotifyAvailable } from '../lib/focusNotify'
 import {
   loadDay,
@@ -12,18 +12,22 @@ import {
   savePomoSettings,
   logPomodoro,
   loadPomoToday,
+  loadPomoRuntime,
+  savePomoRuntime,
+  clearPomoRuntime,
   todayStr,
   type PlannerItem,
   type PomoSettings,
   type PomoKind,
+  type PomoRuntime,
 } from '../lib/planner'
 
-// Экран «Фокус» (П-7 + редизайн П-10): Помодоро в стиле GoodTime.
-//   Без вкладок и кнопок: нажатие на время = старт/пауза, управление жестами.
-//   Тянешь от центра — появляется круглый «пульт» с 4 секторами: вверх ＋ (+1
-//   минута), вправо › (вперёд/следующая фаза), влево ‹ (назад), вниз ✕ (стоп).
-//   Отпускаешь на секторе — действие. Фазы (фокус/перерыв/длинный перерыв)
-//   переключаются автоматически и жестами.
+// Экран «Фокус»: Помодоро в стиле GoodTime. Две фазы: Фокус и Перерыв
+// (длинный перерыв убран). Нажатие на время = старт/пауза; тянешь от центра —
+// появляется жестовый «пульт» (➕ +1 мин, › вперёд, ‹ назад, ✕ стоп).
+// Завершение фазы в фоне/при закрытом приложении обрабатывает нативный сервис
+// (звук + вибрация + выкл. «Не беспокоить»), а при возврате экран сам переходит
+// к следующей фазе.
 
 const cardCls =
   'rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50'
@@ -32,9 +36,9 @@ const inputCls =
 const btnGhost =
   'rounded-xl border border-neutral-300 px-4 py-2.5 text-sm transition hover:bg-neutral-100 active:scale-[.97] dark:border-neutral-700 dark:hover:bg-neutral-800'
 
-// Цвет кольца по фазе.
+// Цвет кольца по фазе (фокус — зелёный, перерыв — голубой).
 const ringColor = (m: PomoKind): string =>
-  m === 'focus' ? 'text-emerald-500' : m === 'break' ? 'text-sky-500' : 'text-violet-500'
+  m === 'focus' ? 'text-emerald-500' : 'text-sky-500'
 
 const mmss = (sec: number): string => {
   const s = Math.max(0, Math.floor(sec))
@@ -46,7 +50,7 @@ const mmss = (sec: number): string => {
 const clamp = (n: number, lo: number, hi: number): number =>
   Number.isFinite(n) ? Math.max(lo, Math.min(hi, Math.round(n))) : lo
 
-// Доступные сигналы окончания фазы (id должны совпадать с ключами i18n focus.sound_*).
+// Доступные сигналы окончания фазы в вебе (id совпадают с ключами i18n focus.sound_*).
 const POMO_SOUNDS = ['chime', 'bell', 'double'] as const
 type PomoSound = (typeof POMO_SOUNDS)[number]
 
@@ -68,7 +72,8 @@ const SOUND_SPECS: Record<PomoSound, ToneSpec[]> = {
   ],
 }
 
-// Проигрывает выбранный сигнал с заданной громкостью (0-100) через Web Audio.
+// Проигрывает выбранный сигнал (веб, Web Audio). На телефоне сигнал окончания
+// даёт нативный сервис (наш WAV), поэтому здесь только для браузера и превью.
 function playPomoSound(sound: string, volume: number) {
   try {
     const Ctx =
@@ -78,23 +83,23 @@ function playPomoSound(sound: string, volume: number) {
     const vol = Math.max(0, Math.min(1, volume / 100))
     if (vol <= 0) return
     const ac = new Ctx()
-    const specs = SOUND_SPECS[(sound as PomoSound)] ?? SOUND_SPECS.double
+    const specs = SOUND_SPECS[sound as PomoSound] ?? SOUND_SPECS.double
     let end = 0
-    for (const n of specs) {
+    for (const nSpec of specs) {
       const o = ac.createOscillator()
-      const g = ac.createGain()
-      o.connect(g)
-      g.connect(ac.destination)
-      o.type = n.type ?? 'sine'
-      o.frequency.value = n.freq
-      const t0 = ac.currentTime + n.start
-      const peak = Math.max(0.0005, Math.min(1, 0.75 * (n.gain ?? 1) * vol))
-      g.gain.setValueAtTime(0.0001, t0)
-      g.gain.exponentialRampToValueAtTime(peak, t0 + 0.02)
-      g.gain.exponentialRampToValueAtTime(0.0001, t0 + n.dur)
+      const gg = ac.createGain()
+      o.connect(gg)
+      gg.connect(ac.destination)
+      o.type = nSpec.type ?? 'sine'
+      o.frequency.value = nSpec.freq
+      const t0 = ac.currentTime + nSpec.start
+      const peak = Math.max(0.0005, Math.min(1, 0.75 * (nSpec.gain ?? 1) * vol))
+      gg.gain.setValueAtTime(0.0001, t0)
+      gg.gain.exponentialRampToValueAtTime(peak, t0 + 0.02)
+      gg.gain.exponentialRampToValueAtTime(0.0001, t0 + nSpec.dur)
       o.start(t0)
-      o.stop(t0 + n.dur + 0.03)
-      end = Math.max(end, n.start + n.dur)
+      o.stop(t0 + nSpec.dur + 0.03)
+      end = Math.max(end, nSpec.start + nSpec.dur)
     }
     window.setTimeout(() => ac.close(), (end + 0.4) * 1000)
   } catch {
@@ -103,7 +108,8 @@ function playPomoSound(sound: string, volume: number) {
 }
 
 type Dir = 'add' | 'skip' | 'back' | 'stop' | null
-const PHASE_ORDER: PomoKind[] = ['focus', 'break', 'long_break']
+// Две фазы: фокус и перерыв (длинный перерыв убран).
+const PHASE_ORDER: PomoKind[] = ['focus', 'break']
 const DEADZONE = 26
 const DIAL_R = 78
 
@@ -111,8 +117,6 @@ export default function PlannerFocus() {
   const { user } = useAuth()
   const { t, lang } = useLang()
 
-  // Кэш настроек таймера: экран «Фокус» открывается мгновенно и работает
-  // офлайн — сразу показываем сохранённые настройки, сеть обновит их в фоне.
   const [settings, setSettings] = useState<PomoSettings>(() => loadPomoSettingsCache())
   const [mode, setMode] = useState<PomoKind>('focus')
   const [running, setRunning] = useState(false)
@@ -123,12 +127,9 @@ export default function PlannerFocus() {
   const [itemId, setItemId] = useState<string>('')
   const [showSettings, setShowSettings] = useState(false)
   const [draft, setDraft] = useState<PomoSettings>(() => loadPomoSettingsCache())
-  // Экран доступен сразу (без спиннера ожидания сети): таймер по кэшу, а свежие
-  // данные подгружаются в фоне.
   const [ready, setReady] = useState(true)
   const [pressed, setPressed] = useState(false)
 
-  // Жестовый «пульт».
   const [dial, setDial] = useState<{ active: boolean; dx: number; dy: number; dir: Dir }>({
     active: false,
     dx: 0,
@@ -137,8 +138,6 @@ export default function PlannerFocus() {
   })
   const startRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 })
   const pressedRef = useRef(false)
-  // Таймер, удерживающий анимацию нажатия видимой хотя бы ~160 мс даже при
-  // быстром тапе (иначе scale возвращается мгновенно и анимации не видно).
   const pressTimer = useRef<number | null>(null)
   const dialRef = useRef<{ active: boolean; dx: number; dy: number; dir: Dir }>({
     active: false,
@@ -149,18 +148,87 @@ export default function PlannerFocus() {
 
   const endRef = useRef<number | null>(null)
   const completeRef = useRef<() => void>(() => {})
+  const notifShownRef = useRef(false)
+  // Было ли восстановлено состояние таймера (чтобы начальная загрузка не затёрла его).
+  const runtimeRestoredRef = useRef(false)
+  const restoreDoneRef = useRef(false)
 
   const durMin = (m: PomoKind, s: PomoSettings = settings): number =>
-    m === 'focus' ? s.focusMin : m === 'break' ? s.breakMin : s.longBreakMin
+    m === 'focus' ? s.focusMin : s.breakMin
 
-  // Подпись постоянного уведомления таймера: показываем задачу, на которой
-  // сейчас фокус (вместо старой подсказки «нажми, чтобы открыть»). Если задача
-  // не выбрана — мягкая подсказка открыть экран.
+  // Тексты сигнала окончания фазы (для нативного уведомления).
+  const doneFor = (m: PomoKind): { title: string; body: string } => {
+    if (lang === 'ru') {
+      return m === 'focus'
+        ? { title: 'Фокус завершён', body: 'Пора на перерыв' }
+        : { title: 'Перерыв завершён', body: 'Пора за дело' }
+    }
+    return m === 'focus'
+      ? { title: 'Focus finished', body: 'Time for a break' }
+      : { title: 'Break finished', body: 'Back to focus' }
+  }
+
   const focusNotifBody = (): string => {
     const it = items.find((i) => i.id === itemId)
     if (it) return `${it.icon ? it.icon + ' ' : ''}${it.title}`
     return lang === 'ru' ? 'Нажми, чтобы открыть' : 'Tap to open'
   }
+
+  // Завершение фазы, истёкшей в фоне: логируем и переходим к следующей.
+  const finishElapsed = (rt: PomoRuntime) => {
+    const mins = Math.round(rt.totalSec / 60)
+    if (user && mins > 0) {
+      logPomodoro(user.id, {
+        kind: rt.mode,
+        durationMin: mins,
+        itemId: rt.mode === 'focus' ? rt.itemId || null : null,
+        completed: true,
+      }).catch(() => {})
+    }
+    const next: PomoKind = rt.mode === 'focus' ? 'break' : 'focus'
+    setMode(next)
+    setRunning(false)
+    endRef.current = null
+    setRemaining(durMin(next) * 60)
+    if (rt.mode === 'focus') {
+      setFocusDone((d) => d + 1)
+      setFocusMinToday((v) => v + mins)
+    }
+    savePomoRuntime({
+      mode: next,
+      running: false,
+      endTime: 0,
+      remaining: durMin(next) * 60,
+      totalSec: durMin(next) * 60,
+      itemId: rt.itemId,
+    })
+  }
+
+  // Восстановление состояния таймера при входе (один раз).
+  useEffect(() => {
+    if (!user || restoreDoneRef.current) return
+    restoreDoneRef.current = true
+    const rt = loadPomoRuntime()
+    if (!rt) return
+    runtimeRestoredRef.current = true
+    if (rt.running && rt.endTime > 0) {
+      const left = Math.round((rt.endTime - Date.now()) / 1000)
+      if (left > 0) {
+        setMode(rt.mode)
+        setItemId(rt.itemId ?? '')
+        setRemaining(left)
+        endRef.current = rt.endTime
+        setRunning(true)
+      } else {
+        finishElapsed(rt)
+      }
+    } else {
+      setMode(rt.mode)
+      setItemId(rt.itemId ?? '')
+      if (rt.remaining > 0) setRemaining(rt.remaining)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
 
   // Начальная загрузка: настройки, дела на сегодня, статистика фокуса.
   useEffect(() => {
@@ -179,9 +247,7 @@ export default function PlannerFocus() {
         setItems(day.items)
         setFocusDone(today.focusCount)
         setFocusMinToday(today.focusMin)
-        // Обновляем оставшееся время из настроек только если таймер ещё не
-        // запускали — чтобы не затирать идущий/приостановленный отсчёт.
-        if (endRef.current == null && !running) {
+        if (endRef.current == null && !running && !runtimeRestoredRef.current) {
           setRemaining(s.focusMin * 60)
         }
       } catch {
@@ -193,9 +259,9 @@ export default function PlannerFocus() {
     return () => {
       active = false
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
-  // Очистка таймера анимации нажатия при размонтировании.
   useEffect(() => {
     return () => {
       if (pressTimer.current) window.clearTimeout(pressTimer.current)
@@ -203,10 +269,6 @@ export default function PlannerFocus() {
   }, [])
 
   // ===== Тихий режим (DND) во время фокуса =====
-  // Пока таймер идёт — на телефоне включаем режим «только звонки»: обычные
-  // уведомления и звуки не шумят, звонки слышны. По паузе/остановке/выходу —
-  // возвращаем звук. Работает только в приложении (Android); в браузере ничего
-  // не делает. Требуется разовое разрешение «Доступ к режиму Не беспокоить».
   const dndPromptedRef = useRef(false)
   useEffect(() => {
     let cancelled = false
@@ -234,26 +296,16 @@ export default function PlannerFocus() {
     }
   }, [running, lang])
 
-  // ===== Постоянное уведомление о состоянии Помодоро (Android) =====
-  // Пока идёт таймер — показываем несмахиваемое уведомление с названием фазы и
-  // живым обратным отсчётом времени справа (как в GoodTime). Работает в фоне
-  // благодаря нативному foreground-сервису. На паузе — «Пауза», при остановке
-  // или уходе с экрана — убираем. Только в приложении (в браузере нет).
-  // Ref со свежим значением running — нужен в очистке при размонтировании
-  // (у эффекта очистки пустой список зависимостей и он не видит актуальный state).
   const runningRef = useRef(false)
   useEffect(() => {
     runningRef.current = running
   }, [running])
 
-  // Было ли уведомление реально показано. Нужно, чтобы при первом заходе на
-  // экран (таймер ещё не запускали) НЕ дёргать сервис вызовом stop зря — иначе
-  // foreground-сервис стартует и тут же гасится, что и роняло приложение.
-  const notifShownRef = useRef(false)
+  // ===== Постоянное уведомление таймера (Android) =====
   useEffect(() => {
     if (!focusNotifyAvailable()) return
-    const label =
-      mode === 'focus' ? t('focus.focus') : mode === 'break' ? t('focus.break') : t('focus.longBreak')
+    const label = mode === 'focus' ? t('focus.focus') : t('focus.break')
+    const d = doneFor(mode)
     if (running && endRef.current != null) {
       notifShownRef.current = true
       void showFocusNotification({
@@ -261,6 +313,8 @@ export default function PlannerFocus() {
         body: focusNotifBody(),
         remainingSec: Math.max(0, Math.round((endRef.current - Date.now()) / 1000)),
         running: true,
+        doneTitle: d.title,
+        doneBody: d.body,
       })
     } else if (remaining > 0 && remaining < durMin(mode) * 60) {
       notifShownRef.current = true
@@ -279,10 +333,7 @@ export default function PlannerFocus() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [running, mode, lang, itemId, items])
 
-  // Уход с экрана «Фокус». Если таймер ИДЁТ — оставляем тихий режим и
-  // уведомление активными, чтобы фокус продолжался в фоне (при переходе на
-  // другие вкладки и в другие приложения). Если таймер не идёт — возвращаем
-  // обычный звук и убираем уведомление.
+  // Уход с экрана: если таймер идёт — оставляем тихий режим и уведомление.
   useEffect(() => {
     return () => {
       if (!runningRef.current) {
@@ -292,11 +343,12 @@ export default function PlannerFocus() {
     }
   }, [])
 
-  // Логика завершения фазы (через ref, чтобы тик всегда видел свежие значения).
+  // Логика завершения фазы (через ref, чтобы тик видел свежие значения).
   completeRef.current = () => {
     setRunning(false)
     endRef.current = null
-    playPomoSound(settings.sound, settings.volume)
+    // В приложении звук/вибрацию даёт нативный сервис; веб-звук — только в браузере.
+    if (!focusNotifyAvailable()) playPomoSound(settings.sound, settings.volume)
     if (mode === 'focus') {
       const elapsedSec = Math.max(0, total - remaining)
       const mins = Math.round(elapsedSec / 60)
@@ -308,12 +360,19 @@ export default function PlannerFocus() {
           completed: true,
         }).catch(() => {})
       }
-      const done = focusDone + 1
-      setFocusDone(done)
+      setFocusDone((d) => d + 1)
       setFocusMinToday((v) => v + mins)
-      const next: PomoKind = done % settings.cycles === 0 ? 'long_break' : 'break'
+      const next: PomoKind = 'break'
       setMode(next)
       setRemaining(durMin(next) * 60)
+      savePomoRuntime({
+        mode: next,
+        running: false,
+        endTime: 0,
+        remaining: durMin(next) * 60,
+        totalSec: durMin(next) * 60,
+        itemId: itemId || null,
+      })
     } else {
       const breakElapsed = Math.max(0, total - remaining)
       const breakMins = Math.round(breakElapsed / 60)
@@ -325,8 +384,17 @@ export default function PlannerFocus() {
           completed: true,
         }).catch(() => {})
       }
-      setMode('focus')
+      const next: PomoKind = 'focus'
+      setMode(next)
       setRemaining(settings.focusMin * 60)
+      savePomoRuntime({
+        mode: next,
+        running: false,
+        endTime: 0,
+        remaining: settings.focusMin * 60,
+        totalSec: settings.focusMin * 60,
+        itemId: itemId || null,
+      })
     }
   }
 
@@ -349,35 +417,56 @@ export default function PlannerFocus() {
   const start = () => {
     const base = remaining > 0 ? remaining : durMin(mode) * 60
     setRemaining(base)
-    endRef.current = Date.now() + base * 1000
+    const end = Date.now() + base * 1000
+    endRef.current = end
     setRunning(true)
-    // Показываем уведомление сразу в обработчике нажатия, не дожидаясь
-    // ре-рендера и эффекта — плашка таймера появляется мгновенно по тапу.
+    savePomoRuntime({
+      mode,
+      running: true,
+      endTime: end,
+      remaining: base,
+      totalSec: durMin(mode) * 60,
+      itemId: itemId || null,
+    })
     if (focusNotifyAvailable()) {
-      const label =
-        mode === 'focus'
-          ? t('focus.focus')
-          : mode === 'break'
-            ? t('focus.break')
-            : t('focus.longBreak')
+      const label = mode === 'focus' ? t('focus.focus') : t('focus.break')
+      const d = doneFor(mode)
       notifShownRef.current = true
       void showFocusNotification({
         title: label,
         body: focusNotifBody(),
         remainingSec: base,
         running: true,
+        doneTitle: d.title,
+        doneBody: d.body,
       })
     }
   }
   const pause = () => {
     setRunning(false)
     endRef.current = null
+    savePomoRuntime({
+      mode,
+      running: false,
+      endTime: 0,
+      remaining,
+      totalSec: durMin(mode) * 60,
+      itemId: itemId || null,
+    })
   }
   const switchMode = (m: PomoKind) => {
     setRunning(false)
     endRef.current = null
     setMode(m)
     setRemaining(durMin(m) * 60)
+    savePomoRuntime({
+      mode: m,
+      running: false,
+      endTime: 0,
+      remaining: durMin(m) * 60,
+      totalSec: durMin(m) * 60,
+      itemId: itemId || null,
+    })
   }
 
   // ===== Жесты =====
@@ -390,14 +479,25 @@ export default function PlannerFocus() {
     setRemaining((r) => r + 60)
     if (running && endRef.current != null) {
       endRef.current += 60000
+      const rem = Math.max(0, Math.round((endRef.current - Date.now()) / 1000))
+      savePomoRuntime({
+        mode,
+        running: true,
+        endTime: endRef.current,
+        remaining: rem,
+        totalSec: durMin(mode) * 60,
+        itemId: itemId || null,
+      })
       if (focusNotifyAvailable()) {
-        const label =
-          mode === 'focus' ? t('focus.focus') : mode === 'break' ? t('focus.break') : t('focus.longBreak')
+        const label = mode === 'focus' ? t('focus.focus') : t('focus.break')
+        const d = doneFor(mode)
         void showFocusNotification({
           title: label,
           body: focusNotifBody(),
-          remainingSec: Math.max(0, Math.round((endRef.current - Date.now()) / 1000)),
+          remainingSec: rem,
           running: true,
+          doneTitle: d.title,
+          doneBody: d.body,
         })
       }
     }
@@ -407,6 +507,7 @@ export default function PlannerFocus() {
     endRef.current = null
     setMode('focus')
     setRemaining(settings.focusMin * 60)
+    clearPomoRuntime()
   }
 
   const dirFrom = (dx: number, dy: number): Dir => {
@@ -415,7 +516,6 @@ export default function PlannerFocus() {
     return dy > 0 ? 'stop' : 'add'
   }
 
-  // Тап/жест засчитываем только если он начался внутри круга кольца, а не по углам квадрата.
   const insideRing = (e: React.PointerEvent): boolean => {
     const r = (e.currentTarget as HTMLElement).getBoundingClientRect()
     const cx = r.left + r.width / 2
@@ -434,17 +534,14 @@ export default function PlannerFocus() {
     pressedRef.current = true
     if (pressTimer.current) window.clearTimeout(pressTimer.current)
     setPressed(true)
-    // Do NOT show the dial on press - only after a drag past deadzone.
     const next = { active: false, dx: 0, dy: 0, dir: null as Dir }
     dialRef.current = next
     setDial(next)
   }
   const onDialMove = (e: React.PointerEvent) => {
-    // Only process move when the pointer is actually pressed (mouse drag or touch).
     if (!pressedRef.current) return
     const dx = e.clientX - startRef.current.x
     const dy = e.clientY - startRef.current.y
-    // Only show the dial once the pointer moves beyond the deadzone.
     if (Math.hypot(dx, dy) < DEADZONE) return
     const next = { active: true, dx, dy, dir: dirFrom(dx, dy) }
     dialRef.current = next
@@ -464,9 +561,7 @@ export default function PlannerFocus() {
     const cleared = { active: false, dx: 0, dy: 0, dir: null as Dir }
     dialRef.current = cleared
     setDial(cleared)
-    // Нажатие началось вне круга — игнорируем (ни тап, ни жест).
     if (!wasPressed) return
-    // If dial was shown (dragged past deadzone), perform the directional action.
     if (d.active) {
       if (d.dir === 'add') addMinute()
       else if (d.dir === 'skip') cyclePhase(1)
@@ -474,7 +569,6 @@ export default function PlannerFocus() {
       else if (d.dir === 'stop') stopAll()
       return
     }
-    // Otherwise it was a tap (no drag past deadzone) = toggle start/pause.
     if (running) pause()
     else start()
   }
@@ -492,8 +586,6 @@ export default function PlannerFocus() {
     const clean: PomoSettings = {
       focusMin: clamp(draft.focusMin, 1, 180),
       breakMin: clamp(draft.breakMin, 1, 60),
-      longBreakMin: clamp(draft.longBreakMin, 1, 90),
-      cycles: clamp(draft.cycles, 1, 12),
       sound,
       volume: clamp(draft.volume, 0, 100),
     }
@@ -513,11 +605,7 @@ export default function PlannerFocus() {
   const C = 2 * Math.PI * R
   const offset = C * (1 - frac)
 
-  const phaseLabel =
-    mode === 'focus' ? t('focus.focus') : mode === 'break' ? t('focus.break') : t('focus.longBreak')
-
-  const cycleNow = (focusDone % settings.cycles) + 1
-  const filledDots = focusDone % settings.cycles
+  const phaseLabel = mode === 'focus' ? t('focus.focus') : t('focus.break')
 
   const taskOptions = [
     { value: '', label: t('focus.noTask') },
@@ -534,7 +622,6 @@ export default function PlannerFocus() {
       dial.dy * kf,
     )}px))`,
   }
-  // Анимация нажатия применяется только к кругу (не во время жеста-«пульта»).
   const dialPressStyle: React.CSSProperties = {
     transform: pressed && !dial.active ? 'scale(0.93)' : undefined,
   }
@@ -611,15 +698,12 @@ export default function PlannerFocus() {
           </svg>
           <div
             className={`pointer-events-none absolute inset-0 flex flex-col items-center justify-center ${
-              !running && remaining > 0 && remaining < durMin(mode) * 60
-                ? 'animate-timer-pulse'
-                : ''
+              !running && remaining > 0 && remaining < durMin(mode) * 60 ? 'animate-timer-pulse' : ''
             }`}
           >
             <div className="text-xs uppercase tracking-wide text-neutral-400">{phaseLabel}</div>
-            <div className="text-6xl font-bold tabular-nums transition-transform duration-150 active:scale-95">{mmss(remaining)}</div>
-            <div className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">
-              {t('focus.cycleDots', { n: cycleNow, m: settings.cycles })}
+            <div className="text-6xl font-bold tabular-nums transition-transform duration-150 active:scale-95">
+              {mmss(remaining)}
             </div>
           </div>
 
@@ -650,19 +734,6 @@ export default function PlannerFocus() {
             </div>
           )}
         </div>
-
-        {/* Точки циклов */}
-        <div className="flex items-center gap-2">
-          {Array.from({ length: settings.cycles }).map((_, i) => (
-            <span
-              key={i}
-              className={`h-2.5 w-2.5 rounded-full ${
-                i < filledDots ? 'bg-emerald-500' : 'bg-neutral-300 dark:bg-neutral-700'
-              }`}
-            />
-          ))}
-        </div>
-
       </div>
 
       {/* Дело, на котором фокус */}
@@ -690,108 +761,76 @@ export default function PlannerFocus() {
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-base font-semibold">{t('focus.settings')}</h2>
-          <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                  {t('focus.focusMin')}
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={180}
+                  className={inputCls}
+                  value={draft.focusMin}
+                  onChange={(e) => setDraft((d) => ({ ...d, focusMin: Number(e.target.value) }))}
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                  {t('focus.breakMin')}
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={60}
+                  className={inputCls}
+                  value={draft.breakMin}
+                  onChange={(e) => setDraft((d) => ({ ...d, breakMin: Number(e.target.value) }))}
+                />
+              </div>
+            </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                {t('focus.focusMin')}
+                {t('focus.sound')}
               </label>
-              <input
-                type="number"
-                min={1}
-                max={180}
-                className={inputCls}
-                value={draft.focusMin}
-                onChange={(e) => setDraft((d) => ({ ...d, focusMin: Number(e.target.value) }))}
+              <Select
+                value={draft.sound}
+                options={POMO_SOUNDS.map((s) => ({ value: s, label: t(`focus.sound_${s}`) }))}
+                onChange={(v) => setDraft((d) => ({ ...d, sound: v }))}
               />
             </div>
             <div>
               <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                {t('focus.breakMin')}
+                {t('focus.volume')} {draft.volume}%
               </label>
               <input
-                type="number"
-                min={1}
-                max={60}
-                className={inputCls}
-                value={draft.breakMin}
-                onChange={(e) => setDraft((d) => ({ ...d, breakMin: Number(e.target.value) }))}
+                type="range"
+                min={0}
+                max={100}
+                className="w-full accent-emerald-500"
+                value={draft.volume}
+                onChange={(e) => setDraft((d) => ({ ...d, volume: Number(e.target.value) }))}
               />
             </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                {t('focus.longBreakMin')}
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={90}
-                className={inputCls}
-                value={draft.longBreakMin}
-                onChange={(e) =>
-                  setDraft((d) => ({ ...d, longBreakMin: Number(e.target.value) }))
-                }
-              />
-            </div>
-            <div>
-              <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
-                {t('focus.cycles')}
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={12}
-                className={inputCls}
-                value={draft.cycles}
-                onChange={(e) => setDraft((d) => ({ ...d, cycles: Number(e.target.value) }))}
-              />
-            </div>
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
-              {t('focus.sound')}
-            </label>
-            <Select
-              value={draft.sound}
-              options={POMO_SOUNDS.map((s) => ({ value: s, label: t(`focus.sound_${s}`) }))}
-              onChange={(v) => setDraft((d) => ({ ...d, sound: v }))}
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-medium text-neutral-500 dark:text-neutral-400">
-              {t('focus.volume')} {draft.volume}%
-            </label>
-            <input
-              type="range"
-              min={0}
-              max={100}
-              className="w-full accent-emerald-500"
-              value={draft.volume}
-              onChange={(e) => setDraft((d) => ({ ...d, volume: Number(e.target.value) }))}
-            />
-          </div>
-          <button
-            type="button"
-            onClick={() => playPomoSound(draft.sound, draft.volume)}
-            className={btnGhost}
-          >
-            {t('focus.preview')}
-          </button>
-          <div className="flex justify-end gap-2">
             <button
               type="button"
-              onClick={() => setShowSettings(false)}
+              onClick={() => playPomoSound(draft.sound, draft.volume)}
               className={btnGhost}
             >
-              {t('common.cancel')}
+              {t('focus.preview')}
             </button>
-            <button
-              type="button"
-              onClick={saveSettings}
-              className="rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400"
-            >
-              {t('common.save')}
-            </button>
-          </div>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setShowSettings(false)} className={btnGhost}>
+                {t('common.cancel')}
+              </button>
+              <button
+                type="button"
+                onClick={saveSettings}
+                className="rounded-xl bg-emerald-500 px-4 py-2.5 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400"
+              >
+                {t('common.save')}
+              </button>
+            </div>
           </div>
         </div>
       )}

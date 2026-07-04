@@ -258,6 +258,14 @@ function App() {
     return () => window.removeEventListener('nucleus-push-open', onOpen)
   }, [navigate])
 
+  // Тап по уведомлению о завершении Помодоро (нативный deep link com.nucleus.app://focus)
+  // — открываем вкладку Фокус.
+  useEffect(() => {
+    const onFocus = () => navigate('/planner/focus')
+    window.addEventListener('nucleus-open-focus', onFocus)
+    return () => window.removeEventListener('nucleus-open-focus', onFocus)
+  }, [navigate])
+
   // Аппаратная кнопка «назад» на Android: сначала уходим на предыдущий
   // экран внутри приложения, и только с «корневых» экранов модулей (FinLit/Планировщик)
   // сворачиваем приложение, а не закрываем его совсем.
