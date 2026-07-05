@@ -147,7 +147,7 @@ public class FocusTimerService extends Service {
         vibrateDone();
 
         // 3) Системный звук уведомления по умолчанию, несколько раз подряд.
-        playSystemSoundTimes(4);
+        playSystemSoundTimes(3);
 
         // 4) Уведомление о завершении (тихий канал — звук даём сами выше).
         try {
@@ -174,18 +174,31 @@ public class FocusTimerService extends Service {
         }, 3000L);
     }
 
-    // Несколько коротких вибро-импульсов подряд.
+    // Несколько коротких вибро-импульсов подряд. USAGE_ALARM важен: без него
+    // на MIUI/новых Android вибрация часто подавляется (тихий режим/DND).
     private void vibrateDone() {
+        Vibrator v = getVibrator();
+        if (v == null) return;
+        long[] pattern = new long[]{0, 500, 250, 500, 250, 500};
+        AudioAttributes aa = new AudioAttributes.Builder()
+                .setUsage(AudioAttributes.USAGE_ALARM)
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .build();
         try {
-            Vibrator v = getVibrator();
-            if (v == null || !v.hasVibrator()) return;
-            long[] pattern = new long[]{0, 400, 200, 400, 200, 400};
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                v.vibrate(VibrationEffect.createWaveform(pattern, -1));
+                v.vibrate(VibrationEffect.createWaveform(pattern, -1), aa);
             } else {
-                v.vibrate(pattern, -1);
+                v.vibrate(pattern, -1, aa);
             }
-        } catch (Exception ignored) {
+        } catch (Exception e) {
+            try {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    v.vibrate(VibrationEffect.createOneShot(700, VibrationEffect.DEFAULT_AMPLITUDE));
+                } else {
+                    v.vibrate(700);
+                }
+            } catch (Exception ignored) {
+            }
         }
     }
 
@@ -202,8 +215,10 @@ public class FocusTimerService extends Service {
         }
     }
 
-    // Проигрывает системный звук уведомления несколько раз быстро подряд
-    // (как в старом приложении). Берёт то, что у пользователя выбрано по умолчанию.
+    private Ringtone doneRingtone;
+
+    // Проигрывает системный звук уведомления несколько раз подряд с небольшими
+    // паузами, чтобы каждый сигнал был слышен отдельно (не сливались).
     private void playSystemSoundTimes(final int times) {
         Uri uri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
         if (uri == null) uri = Settings.System.DEFAULT_NOTIFICATION_URI;
@@ -213,19 +228,27 @@ public class FocusTimerService extends Service {
                 @Override
                 public void run() {
                     try {
-                        Ringtone r = RingtoneManager.getRingtone(getApplicationContext(), soundUri);
-                        if (r == null) return;
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                            r.setAudioAttributes(new AudioAttributes.Builder()
-                                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                                    .build());
+                        if (doneRingtone == null) {
+                            doneRingtone = RingtoneManager.getRingtone(getApplicationContext(), soundUri);
+                            if (doneRingtone != null
+                                    && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+                                doneRingtone.setAudioAttributes(new AudioAttributes.Builder()
+                                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                                        .build());
+                            }
                         }
-                        r.play();
+                        if (doneRingtone != null) {
+                            try {
+                                doneRingtone.stop();
+                            } catch (Exception ignored) {
+                            }
+                            doneRingtone.play();
+                        }
                     } catch (Exception ignored) {
                     }
                 }
-            }, i * 350L);
+            }, i * 600L);
         }
     }
 

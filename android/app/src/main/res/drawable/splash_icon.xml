@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Иконка для системной заставки Android 12+ (windowSplashScreenAnimatedIcon).
+  Система обрезает иконку круглой маской (видима примерно внутренняя 2/3
+  области). Атом-логотип заполнял всю картинку, поэтому внешние орбиты срезались.
+  Добавляем прозрачные поля (inset 20%), чтобы атом помещался целиком внутри маски.
+-->
+<inset xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@mipmap/ic_launcher_foreground"
+    android:inset="20%" />
