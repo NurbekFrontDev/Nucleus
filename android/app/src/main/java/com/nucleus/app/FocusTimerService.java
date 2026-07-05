@@ -147,7 +147,7 @@ public class FocusTimerService extends Service {
         vibrateDone();
 
         // 3) Системный звук уведомления по умолчанию, несколько раз подряд.
-        playSystemSoundTimes(3);
+        playSystemSoundTimes(1);
 
         // 4) Уведомление о завершении (тихий канал — звук даём сами выше).
         try {
@@ -179,7 +179,7 @@ public class FocusTimerService extends Service {
     private void vibrateDone() {
         Vibrator v = getVibrator();
         if (v == null) return;
-        long[] pattern = new long[]{0, 500, 250, 500, 250, 500};
+        long[] pattern = new long[]{0, 500, 300, 500};
         AudioAttributes aa = new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
