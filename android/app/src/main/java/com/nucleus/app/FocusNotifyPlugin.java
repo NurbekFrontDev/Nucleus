@@ -43,6 +43,10 @@ public class FocusNotifyPlugin extends Plugin {
             NotificationManager nm = (NotificationManager)
                     getContext().getSystemService(Context.NOTIFICATION_SERVICE);
             if (nm != null) {
+                // Новая фаза (Фокус/Перерыв) стартует — убираем старое уведомление «завершено»
+                // (иначе оно остаётся висеть, если пользователь запустил следующую фазу из
+                // приложения, не нажимая на само уведомление).
+                nm.cancel(FocusTimerService.NOTIF_DONE_ID);
                 nm.notify(FocusTimerService.NOTIF_ID,
                         FocusTimerService.buildNotif(getContext(), title, body, endTime, running));
             }

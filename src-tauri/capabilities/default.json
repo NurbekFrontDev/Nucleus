@@ -8,6 +8,8 @@
     "notification:default",
     "updater:default",
     "process:default",
-    "autostart:default"
+    "autostart:default",
+    "deep-link:default",
+    "shell:allow-open"
   ]
 }

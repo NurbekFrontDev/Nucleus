@@ -2,7 +2,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import { lazy, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useAuth } from './lib/AuthContext'
 import { supabase } from './lib/supabase'
-import { initNativeAuth } from './lib/native'
+import { initNativeAuth, initDesktopAuth } from './lib/native'
 import { initNotifications } from './lib/notifications'
 import { initPush } from './lib/push'
 import { maybeAutoBackup, backupTargetLabel } from './lib/backup'
@@ -190,6 +190,13 @@ function App() {
   // обработка возврата из браузера после входа через Google (deep link).
   useEffect(() => {
     const cleanup = initNativeAuth()
+    return cleanup
+  }, [])
+
+  // То же самое для десктопа (Tauri): возврат из системного браузера после входа
+  // через Google по Tauri deep link. В вебе/на телефоне — no-op.
+  useEffect(() => {
+    const cleanup = initDesktopAuth()
     return cleanup
   }, [])
 

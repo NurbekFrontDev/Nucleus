@@ -43,6 +43,21 @@ const OAUTH_REDIRECT = 'com.nucleus.app://login-callback'
  */
 export async function signInWithGoogle(): Promise<{ error: string | null }> {
   try {
+    // Десктоп (Tauri): как и на телефоне — открываем системный браузер и ловим
+    // возврат по deep link (см. initDesktopAuth ниже). Обычный window.location.origin
+    // (tauri://localhost) не годится для Supabase OAuth redirect.
+    if (isDesktop()) {
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: { redirectTo: OAUTH_REDIRECT, skipBrowserRedirect: true },
+      })
+      if (error) return { error: error.message }
+      if (data?.url) {
+        const { open } = await import('@tauri-apps/plugin-shell')
+        await open(data.url)
+      }
+      return { error: null }
+    }
     if (!Capacitor.isNativePlatform()) {
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -125,6 +140,40 @@ export async function notifyDesktop(title: string, body: string): Promise<void> 
   } catch {
     // плагин недоступен — не критично
   }
+}
+
+/**
+ * Возврат из системного браузера после входа через Google на десктопе (Tauri deep
+ * link com.nucleus.app://). Аналог initNativeAuth для Android/iOS. Возвращает функцию
+ * очистки слушателя.
+ */
+export function initDesktopAuth(): () => void {
+  if (!isDesktop()) return () => {}
+  let unlisten: (() => void) | undefined
+  ;(async () => {
+    try {
+      const { onOpenUrl } = await import('@tauri-apps/plugin-deep-link')
+      unlisten = await onOpenUrl(async (urls: string[]) => {
+        for (const url of urls) {
+          if (url.includes('://focus')) {
+            window.dispatchEvent(new CustomEvent('nucleus-open-focus'))
+            continue
+          }
+          if (!url.includes('login-callback')) continue
+          try {
+            const parsed = new URL(url)
+            const code = parsed.searchParams.get('code')
+            if (code) await supabase.auth.exchangeCodeForSession(code)
+          } catch {
+            // не удалось разобрать ссылку — молча игнорируем
+          }
+        }
+      })
+    } catch {
+      // плагин недоступен — не критично
+    }
+  })()
+  return () => unlisten?.()
 }
 
 // ===== Автозапуск при старте Windows (только десктоп) =====
