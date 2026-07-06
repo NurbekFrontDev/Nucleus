@@ -33,7 +33,6 @@ type ChatMessage = { role: ChatRole; content: string }
 // Модели по умолчанию (перебор по очереди). Можно переопределить секретом
 // NVIDIA_MODEL (через запятую). Если основная модель устарела — сработает запасная.
 const DEFAULT_MODELS = [
-  'z-ai/glm-5.2',
   'meta/llama-3.3-70b-instruct',
   'meta/llama-3.1-70b-instruct',
 ]
