@@ -13,6 +13,7 @@ import { App as CapacitorApp } from '@capacitor/app'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import { initOta } from './lib/ota'
+import { checkDesktopUpdate } from './lib/desktopUpdate'
 
 // Код-сплиттинг (А-9, шаг 3): страницы грузятся отдельными чанками по мере
 // перехода на них, а не одним большим бандлом при старте — это ускоряет первый
@@ -198,6 +199,12 @@ function App() {
   // делает.
   useEffect(() => {
     void initOta()
+  }, [])
+
+  // Автообновление десктопа (Tauri, Windows): при запуске проверяем новую
+  // версию на GitHub Releases и ставим её. В вебе/на телефоне — no-op.
+  useEffect(() => {
+    void checkDesktopUpdate()
   }, [])
 
   // Локальные уведомления и авто-бэкап (А-6): при запуске планируем уведомления

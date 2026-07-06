@@ -258,8 +258,11 @@ public class FocusTimerService extends Service {
 
     // Статическая сборка постоянного уведомления — используется и сервисом, и плагином.
     static Notification buildNotif(Context ctx, String title, String body, long endTime, boolean running) {
-        Intent open = new Intent(ctx, MainActivity.class);
-        open.setFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP);
+        // Тап по постоянному уведомлению — открываем вкладку Фокус (deep link), откуда бы ни нажали.
+        Intent open = new Intent(Intent.ACTION_VIEW, Uri.parse("com.nucleus.app://focus"));
+        open.setPackage(ctx.getPackageName());
+        open.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP | Intent.FLAG_ACTIVITY_CLEAR_TOP
+                | Intent.FLAG_ACTIVITY_NEW_TASK);
         int piFlags = PendingIntent.FLAG_UPDATE_CURRENT;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             piFlags |= PendingIntent.FLAG_IMMUTABLE;
@@ -277,7 +280,8 @@ public class FocusTimerService extends Service {
                 .setSilent(true)
                 .setContentIntent(contentPi)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
-                .setCategory(NotificationCompat.CATEGORY_STATUS);
+                .setCategory(NotificationCompat.CATEGORY_STATUS)
+                .setVisibility(NotificationCompat.VISIBILITY_PUBLIC);
 
         if (live) {
             b.setWhen(endTime);
@@ -366,6 +370,8 @@ public class FocusTimerService extends Service {
                 NotificationChannel ch = new NotificationChannel(
                         CHANNEL_ID, "Помодоро / Focus", NotificationManager.IMPORTANCE_LOW);
                 ch.setDescription("Текущее состояние таймера Помодоро");
+                // Показывать на экране блокировки полностью (таймер виден).
+                ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
                 ch.setShowBadge(false);
                 ch.setSound(null, null);
                 nm.createNotificationChannel(ch);

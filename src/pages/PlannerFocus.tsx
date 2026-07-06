@@ -5,6 +5,7 @@ import Select from '../components/Select'
 import { enableFocusDnd, disableFocusDnd, dndHasPermission, openDndSettings } from '../lib/dnd'
 import { showToast } from '../lib/toast'
 import { showFocusNotification, hideFocusNotification, focusNotifyAvailable } from '../lib/focusNotify'
+import { notifyDesktop } from '../lib/native'
 import {
   loadDay,
   loadPomoSettings,
@@ -127,6 +128,9 @@ export default function PlannerFocus() {
   const [itemId, setItemId] = useState<string>('')
   const [showSettings, setShowSettings] = useState(false)
   const [draft, setDraft] = useState<PomoSettings>(() => loadPomoSettingsCache())
+  // Черновые строки полей Фокус/Перерыв — чтобы поле можно было очистить полностью (без принудительного 0).
+  const [focusStr, setFocusStr] = useState('')
+  const [breakStr, setBreakStr] = useState('')
   const [ready, setReady] = useState(true)
   const [pressed, setPressed] = useState(false)
 
@@ -362,6 +366,11 @@ export default function PlannerFocus() {
     endRef.current = null
     // В приложении звук/вибрацию даёт нативный сервис; веб-звук — только в браузере.
     if (!focusNotifyAvailable()) playPomoSound(settings.sound, settings.volume)
+    // На ПК (Tauri) показываем системное уведомление об окончании фазы.
+    {
+      const doneMsg = doneFor(mode)
+      void notifyDesktop(doneMsg.title, doneMsg.body)
+    }
     if (mode === 'focus') {
       const elapsedSec = Math.max(0, total - remaining)
       const mins = Math.round(elapsedSec / 60)
@@ -468,18 +477,37 @@ export default function PlannerFocus() {
     })
   }
   const switchMode = (m: PomoKind) => {
-    setRunning(false)
-    endRef.current = null
+    const wasRunning = running
+    const base = durMin(m) * 60
     setMode(m)
-    setRemaining(durMin(m) * 60)
-    savePomoRuntime({
-      mode: m,
-      running: false,
-      endTime: 0,
-      remaining: durMin(m) * 60,
-      totalSec: durMin(m) * 60,
-      itemId: itemId || null,
-    })
+    if (wasRunning) {
+      // Фокус/перерыв шёл — сразу запускаем новую фазу.
+      const end = Date.now() + base * 1000
+      endRef.current = end
+      setRemaining(base)
+      setRunning(true)
+      savePomoRuntime({
+        mode: m,
+        running: true,
+        endTime: end,
+        remaining: base,
+        totalSec: base,
+        itemId: itemId || null,
+      })
+    } else {
+      // Фокус не запущен — просто переключаем фазу без запуска.
+      endRef.current = null
+      setRemaining(base)
+      setRunning(false)
+      savePomoRuntime({
+        mode: m,
+        running: false,
+        endTime: 0,
+        remaining: base,
+        totalSec: base,
+        itemId: itemId || null,
+      })
+    }
   }
 
   // ===== Жесты =====
@@ -596,14 +624,19 @@ export default function PlannerFocus() {
 
   const saveSettings = async () => {
     const sound = (POMO_SOUNDS as readonly string[]).includes(draft.sound) ? draft.sound : 'double'
+    // Пустое поле — оставляем прежнее значение; иначе берём введённое.
+    const fRaw = focusStr.trim() === '' ? settings.focusMin : Number(focusStr)
+    const bRaw = breakStr.trim() === '' ? settings.breakMin : Number(breakStr)
     const clean: PomoSettings = {
-      focusMin: clamp(draft.focusMin, 1, 180),
-      breakMin: clamp(draft.breakMin, 1, 60),
+      focusMin: clamp(fRaw, 1, 180),
+      breakMin: clamp(bRaw, 1, 60),
       sound,
       volume: clamp(draft.volume, 0, 100),
     }
     setSettings(clean)
     setDraft(clean)
+    setFocusStr(String(clean.focusMin))
+    setBreakStr(String(clean.breakMin))
     setShowSettings(false)
     if (!running) {
       setRemaining(durMin(mode, clean) * 60)
@@ -664,6 +697,8 @@ export default function PlannerFocus() {
           type="button"
           onClick={() => {
             setDraft(settings)
+            setFocusStr(String(settings.focusMin))
+            setBreakStr(String(settings.breakMin))
             setShowSettings((v) => !v)
           }}
           className={btnGhost}
@@ -781,11 +816,12 @@ export default function PlannerFocus() {
                 </label>
                 <input
                   type="number"
+                  inputMode="numeric"
                   min={1}
                   max={180}
                   className={inputCls}
-                  value={draft.focusMin}
-                  onChange={(e) => setDraft((d) => ({ ...d, focusMin: Number(e.target.value) }))}
+                  value={focusStr}
+                  onChange={(e) => setFocusStr(e.target.value.replace(/\D/g, '').replace(/^0+(?=\d)/, ''))}
                 />
               </div>
               <div>
@@ -794,11 +830,12 @@ export default function PlannerFocus() {
                 </label>
                 <input
                   type="number"
+                  inputMode="numeric"
                   min={1}
                   max={60}
                   className={inputCls}
-                  value={draft.breakMin}
-                  onChange={(e) => setDraft((d) => ({ ...d, breakMin: Number(e.target.value) }))}
+                  value={breakStr}
+                  onChange={(e) => setBreakStr(e.target.value.replace(/\D/g, '').replace(/^0+(?=\d)/, ''))}
                 />
               </div>
             </div>

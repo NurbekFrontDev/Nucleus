@@ -2,18 +2,17 @@
 // Единая точка общения с ИИ-ассистентом «FinLit Бухгалтер».
 // Принимает историю сообщений и необязательный системный промпт, на сервере
 // ходит к провайдеру ИИ (ключ спрятан в секретах Supabase) и возвращает ответ.
-// Браузер ключ никогда не видит, как и в функции get-rate.
 //
-// Провайдер: GLM 5.1 (NVIDIA NIM, бесплатно), ключ NVIDIA_API_KEY. Grok и DeepSeek
-// убраны по просьбе пользователя (DeepSeek используется в другом месте отдельно).
-// OpenAI-совместимый эндпоинт, поэтому смену модели/базового URL можно сделать
-// без правки кода - через секреты NVIDIA_BASE_URL / NVIDIA_MODEL.
+// Провайдер: NVIDIA NIM (OpenAI-совместимый), ключ NVIDIA_API_KEY.
+// Модели — список через запятую в NVIDIA_MODEL (перебираем по очереди: если
+// первая модель недоступна/устарела — пробуем следующую). Так можно менять
+// модель/базовый URL без правки кода — через секреты.
 //
 // Тело запроса (POST, JSON):
-//   { messages: [{ role, content }], system?: string,
-//     temperature?: number, max_tokens?: number }
-// Ответ: { reply: string, provider: 'nvidia', model: string }
-//        либо { error: string } со статусом 4xx/5xx.
+//   { messages: [{ role, content }], system?: string, temperature?: number, max_tokens?: number }
+// Ответ: { reply, provider, model } либо { error, detail? }.
+// Обработанные ошибки возвращаем со статусом 200 и полем error/detail, чтобы
+// клиент мог показать причину, а не общее «network».
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -31,47 +30,53 @@ function reply(obj: Record<string, unknown>, status = 200): Response {
 type ChatRole = 'system' | 'user' | 'assistant'
 type ChatMessage = { role: ChatRole; content: string }
 
-type Provider = {
-  name: 'nvidia'
-  baseUrl: string
-  apiKey: string | undefined
-  model: string
-}
+// Модели по умолчанию (перебор по очереди). Можно переопределить секретом
+// NVIDIA_MODEL (через запятую). Если основная модель устарела — сработает запасная.
+const DEFAULT_MODELS = [
+  'z-ai/glm-5.2',
+  'meta/llama-3.3-70b-instruct',
+  'meta/llama-3.1-70b-instruct',
+]
 
-// Один вызов к OpenAI-совместимому эндпоинту /chat/completions.
-// Возвращает текст ответа или null, если провайдер недоступен либо ответ пустой.
-async function callProvider(
-  p: Provider,
+// Один вызов к OpenAI-совместимому /chat/completions для конкретной модели.
+// Возвращает текст либо detail с причиной неудачи (для диагностики).
+async function callModel(
+  baseUrl: string,
+  apiKey: string,
+  model: string,
   messages: ChatMessage[],
   temperature: number,
   maxTokens: number,
-): Promise<string | null> {
-  if (!p.apiKey) return null
+): Promise<{ text: string | null; detail?: string }> {
   try {
-    const res = await fetch(p.baseUrl + '/chat/completions', {
+    const res = await fetch(baseUrl + '/chat/completions', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: 'Bearer ' + p.apiKey,
+        Authorization: 'Bearer ' + apiKey,
       },
       body: JSON.stringify({
-        model: p.model,
+        model,
         messages,
         temperature,
         max_tokens: maxTokens,
         stream: false,
       }),
     })
-    if (!res.ok) return null
+    if (!res.ok) {
+      const t = await res.text().catch(() => '')
+      return { text: null, detail: `HTTP ${res.status} (${model}): ${t.slice(0, 200)}` }
+    }
     const json = await res.json()
     const text = json?.choices?.[0]?.message?.content
-    return typeof text === 'string' && text.trim().length > 0 ? text : null
-  } catch {
-    return null
+    if (typeof text === 'string' && text.trim().length > 0) return { text }
+    return { text: null, detail: `empty completion (${model})` }
+  } catch (e) {
+    return { text: null, detail: `${model}: ${String(e)}` }
   }
 }
 
-// Приводим входящие сообщения к безопасному виду: только нужные роли и строковый текст.
+// Приводим входящие сообщения к безопасному виду: только нужные роли и текст.
 function normalizeMessages(raw: unknown): ChatMessage[] {
   if (!Array.isArray(raw)) return []
   const out: ChatMessage[] = []
@@ -100,33 +105,32 @@ Deno.serve(async (req: Request) => {
     const temperature = Number.isFinite(body?.temperature) ? Number(body.temperature) : 0.4
     const maxTokens = Number.isFinite(body?.max_tokens) ? Number(body.max_tokens) : 1024
 
-    // Если передан системный промпт и его ещё нет в начале истории, добавляем сверху.
     if (system && messages[0]?.role !== 'system') {
       messages = [{ role: 'system', content: system }, ...messages]
     }
-
     if (messages.length === 0) return reply({ error: 'no-messages' }, 400)
 
-    const providers: Provider[] = [
-      {
-        name: 'nvidia',
-        baseUrl: Deno.env.get('NVIDIA_BASE_URL') ?? 'https://integrate.api.nvidia.com/v1',
-        apiKey: Deno.env.get('NVIDIA_API_KEY'),
-        model: Deno.env.get('NVIDIA_MODEL') ?? 'z-ai/glm-5.1',
-      },
-    ]
+    const apiKey = Deno.env.get('NVIDIA_API_KEY')
+    if (!apiKey) return reply({ error: 'no-api-key' })
 
-    if (!providers.some((p) => p.apiKey)) {
-      return reply({ error: 'no-api-key' }, 500)
+    const baseUrl = Deno.env.get('NVIDIA_BASE_URL') ?? 'https://integrate.api.nvidia.com/v1'
+    const modelEnv = Deno.env.get('NVIDIA_MODEL') ?? ''
+    const models = modelEnv
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    const list = models.length > 0 ? models : DEFAULT_MODELS
+
+    const details: string[] = []
+    for (const model of list) {
+      const r = await callModel(baseUrl, apiKey, model, messages, temperature, maxTokens)
+      if (r.text) return reply({ reply: r.text, provider: 'nvidia', model })
+      if (r.detail) details.push(r.detail)
     }
 
-    for (const p of providers) {
-      const text = await callProvider(p, messages, temperature, maxTokens)
-      if (text) return reply({ reply: text, provider: p.name, model: p.model })
-    }
-
-    return reply({ error: 'ai-unavailable' }, 502)
+    // Все модели не ответили — возвращаем причину (статус 200, чтобы клиент её показал).
+    return reply({ error: 'ai-unavailable', detail: details.join(' | ').slice(0, 500) })
   } catch (e) {
-    return reply({ error: String(e) }, 500)
+    return reply({ error: 'server', detail: String(e) })
   }
 })

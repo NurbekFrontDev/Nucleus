@@ -107,3 +107,22 @@ export function initNativeAuth(): () => void {
 
   return () => handles.forEach((h) => h.remove())
 }
+
+// ===== Десктоп (Tauri) =====
+// В Tauri это НЕ Capacitor: окружение определяем по внутреннему объекту Tauri v2.
+export function isDesktop(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+// Системное уведомление на ПК (Tauri). Вне десктопа/при ошибке — тихо игнорируем.
+export async function notifyDesktop(title: string, body: string): Promise<void> {
+  if (!isDesktop()) return
+  try {
+    const n = await import('@tauri-apps/plugin-notification')
+    let granted = await n.isPermissionGranted()
+    if (!granted) granted = (await n.requestPermission()) === 'granted'
+    if (granted) n.sendNotification({ title, body })
+  } catch {
+    // плагин недоступен — не критично
+  }
+}

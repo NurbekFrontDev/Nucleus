@@ -11,4 +11,15 @@ export default defineConfig({
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
   ],
+  // Настройки для Tauri (десктоп): стабильный порт и игнор папки src-tauri.
+  clearScreen: false,
+  server: {
+    port: 5173,
+    strictPort: true,
+    watch: {
+      // НЕ следим за сборочными артефактами Rust/Tauri — иначе Vite падает с EBUSY
+      // на заблокированных .exe во время компиляции.
+      ignored: ['**/src-tauri/**'],
+    },
+  },
 })

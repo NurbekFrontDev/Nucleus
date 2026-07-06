@@ -1,0 +1,3 @@
+# Сборочные артефакты Rust/Tauri
+/target
+/gen/schemas

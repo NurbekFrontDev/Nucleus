@@ -12,6 +12,10 @@ interface DndPlugin {
 
 const Dnd = registerPlugin<DndPlugin>('Dnd')
 
+// Флаг: включён ли тихий режим НАМИ (модульный — переживает переходы между вкладками).
+// Защищает от повторного включения (и системного баннера «DND is on») при каждом заходе на Фокус.
+let dndActive = false
+
 /** Доступен ли тихий режим (только внутри нативного приложения). */
 export function dndAvailable(): boolean {
   return Capacitor.isNativePlatform()
@@ -40,13 +44,15 @@ export async function openDndSettings(): Promise<void> {
 
 /**
  * Включает тихий режим на время фокуса: слышны только звонки, остальные
- * уведомления и звуки не шумят. Возвращает true, если удалось (есть
- * разрешение и это нативное приложение).
+ * уведомления и звуки не шумят. Идемпотентно: если уже включён нами —
+ * повторно не трогаем (чтобы не было повторного баннера). Возвращает true, если включено.
  */
 export async function enableFocusDnd(): Promise<boolean> {
   if (!Capacitor.isNativePlatform()) return false
+  if (dndActive) return true
   try {
     const { granted } = await Dnd.enable()
+    if (granted) dndActive = true
     return granted
   } catch {
     return false
@@ -55,6 +61,7 @@ export async function enableFocusDnd(): Promise<boolean> {
 
 /** Возвращает обычный звук (выключает тихий режим). Безопасно в браузере. */
 export async function disableFocusDnd(): Promise<void> {
+  dndActive = false
   if (!Capacitor.isNativePlatform()) return
   try {
     await Dnd.disable()
