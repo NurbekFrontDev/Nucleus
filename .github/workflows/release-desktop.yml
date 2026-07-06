@@ -30,12 +30,17 @@ jobs:
       - name: Build and release
         uses: tauri-apps/tauri-action@v0
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
-          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          GITHUB_TOKEN: $ secrets.GITHUB_TOKEN 
+          TAURI_SIGNING_PRIVATE_KEY: $ secrets.TAURI_SIGNING_PRIVATE_KEY 
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: $ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD 
+          # Без этих переменных сборка проходит, но собранное приложение падает
+          # при запуске (supabase.ts бросает ошибку -> чёрный экран). Значения
+          # берутся из .env только локально, поэтому здесь нужны секреты репозитория.
+          VITE_SUPABASE_URL: $ secrets.VITE_SUPABASE_URL 
+          VITE_SUPABASE_ANON_KEY: $ secrets.VITE_SUPABASE_ANON_KEY 
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'Nucleus ${{ github.ref_name }}'
+          tagName: $ github.ref_name 
+          releaseName: 'Nucleus $ github.ref_name '
           releaseBody: 'Автоматическое обновление Nucleus.'
           releaseDraft: false
           prerelease: false

@@ -61,6 +61,11 @@ async function callModel(
         temperature,
         max_tokens: maxTokens,
         stream: false,
+        // Отключаем режим «раздумывания» (thinking/reasoning) у моделей, которые
+        // его поддерживают (GLM и т.п.). Приложение простое, долгие раздумья не
+        // нужны, особенно на короткие сообщения вроде «привет». Модели без этой
+        // опции просто игнорируют неизвестное поле.
+        chat_template_kwargs: { enable_thinking: false },
       }),
     })
     if (!res.ok) {

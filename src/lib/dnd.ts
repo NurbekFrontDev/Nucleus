@@ -61,6 +61,8 @@ export async function enableFocusDnd(): Promise<boolean> {
 
 /** Возвращает обычный звук (выключает тихий режим). Безопасно в браузере. */
 export async function disableFocusDnd(): Promise<void> {
+  // Идемпотентно: если мы не включали DND — не трогаем систему (без баннера).
+  if (!dndActive) return
   dndActive = false
   if (!Capacitor.isNativePlatform()) return
   try {

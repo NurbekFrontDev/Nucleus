@@ -158,6 +158,8 @@ export default function PlannerFocus() {
   // Было ли восстановлено состояние таймера (чтобы начальная загрузка не затёрла его).
   const runtimeRestoredRef = useRef(false)
   const restoreDoneRef = useRef(false)
+  // Проверено ли восстановление состояния таймера (чтобы DND-эффект не срабатывал до этого).
+  const [restoreChecked, setRestoreChecked] = useState(false)
 
   const durMin = (m: PomoKind, s: PomoSettings = settings): number =>
     m === 'focus' ? s.focusMin : s.breakMin
@@ -215,7 +217,10 @@ export default function PlannerFocus() {
     if (!user || restoreDoneRef.current) return
     restoreDoneRef.current = true
     const rt = loadPomoRuntime()
-    if (!rt) return
+    if (!rt) {
+      setRestoreChecked(true)
+      return
+    }
     runtimeRestoredRef.current = true
     if (rt.running && rt.endTime > 0) {
       const left = Math.round((rt.endTime - Date.now()) / 1000)
@@ -233,6 +238,7 @@ export default function PlannerFocus() {
       setItemId(rt.itemId ?? '')
       if (rt.remaining > 0) setRemaining(rt.remaining)
     }
+    setRestoreChecked(true)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
@@ -277,6 +283,9 @@ export default function PlannerFocus() {
   // ===== Тихий режим (DND) во время фокуса =====
   const dndPromptedRef = useRef(false)
   useEffect(() => {
+    // Ждём восстановления состояния таймера, чтобы не переключать DND на мгновенном
+    // running=false при возврате на вкладку (иначе повторный системный баннер).
+    if (!restoreChecked) return
     let cancelled = false
     // Тихий режим включаем ТОЛЬКО во время фокуса, не во время перерыва.
     if (running && mode === 'focus') {
@@ -301,7 +310,7 @@ export default function PlannerFocus() {
     return () => {
       cancelled = true
     }
-  }, [running, mode, lang])
+  }, [running, mode, lang, restoreChecked])
 
   const runningRef = useRef(false)
   useEffect(() => {
