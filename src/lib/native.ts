@@ -126,3 +126,27 @@ export async function notifyDesktop(title: string, body: string): Promise<void> 
     // плагин недоступен — не критично
   }
 }
+
+// ===== Автозапуск при старте Windows (только десктоп) =====
+// Показываем переключатель в настройках только внутри Tauri-приложения.
+export async function isAutostartEnabled(): Promise<boolean> {
+  if (!isDesktop()) return false
+  try {
+    const a = await import('@tauri-apps/plugin-autostart')
+    return await a.isEnabled()
+  } catch {
+    return false
+  }
+}
+
+export async function setAutostart(enabled: boolean): Promise<boolean> {
+  if (!isDesktop()) return false
+  try {
+    const a = await import('@tauri-apps/plugin-autostart')
+    if (enabled) await a.enable()
+    else await a.disable()
+    return true
+  } catch {
+    return false
+  }
+}

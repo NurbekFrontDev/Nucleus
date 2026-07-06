@@ -14,6 +14,7 @@ import {
   getSavedDirName,
 } from '../lib/backup'
 import { showToast } from '../lib/toast'
+import { isDesktop, isAutostartEnabled, setAutostart } from '../lib/native'
 
 export default function Settings() {
   const { user, signOut } = useAuth()
@@ -21,6 +22,8 @@ export default function Settings() {
   const { t, lang, setLang } = useLang()
 
   const [cryptoAuto, setCryptoAuto] = useState(true)
+  const [autostart, setAutostartState] = useState(false)
+  const onDesktop = isDesktop()
   const [backupAuto, setBackupAuto] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
   const [lastBackupAt, setLastBackupAt] = useState<string | null>(null)
@@ -80,6 +83,12 @@ export default function Settings() {
     void getSavedDirName().then((n) => setDirName(n))
   }, [canPickDir])
 
+  // Текущее состояние автозапуска (только десктоп).
+  useEffect(() => {
+    if (!onDesktop) return
+    void isAutostartEnabled().then((v) => setAutostartState(v))
+  }, [onDesktop])
+
   const toggleBackupAuto = async () => {
     if (!user) return
     const next = !backupAuto
@@ -133,6 +142,14 @@ export default function Settings() {
     } catch {
       setCryptoAuto(!next)
     }
+  }
+
+  // Вкл/выкл автозапуска при старте Windows (только десктоп).
+  const toggleAutostart = async () => {
+    const next = !autostart
+    setAutostartState(next)
+    const ok = await setAutostart(next)
+    if (!ok) setAutostartState(!next)
   }
 
   return (
@@ -193,6 +210,27 @@ export default function Settings() {
           {cryptoAuto ? t('set.cryptoAutoOn') : t('set.cryptoAutoOff')}
         </button>
       </div>
+
+      {/* Автозапуск при старте Windows (только в десктоп-приложении) */}
+      {onDesktop && (
+        <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50">
+          <div className="min-w-0">
+            <p className="font-medium">
+              🚀 {lang === 'en' ? 'Launch on Windows startup' : 'Запускать при старте Windows'}
+            </p>
+          </div>
+          <button
+            onClick={toggleAutostart}
+            className={`shrink-0 rounded-lg px-4 py-2 text-sm font-medium transition ${
+              autostart
+                ? 'bg-emerald-500 text-neutral-950 hover:bg-emerald-400'
+                : 'border border-neutral-300 hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800'
+            }`}
+          >
+            {autostart ? t('set.on') : t('set.off')}
+          </button>
+        </div>
+      )}
 
       {/* 🛡️ Бэкап данных одной кнопкой */}
       <div className="flex flex-col gap-3 rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50">

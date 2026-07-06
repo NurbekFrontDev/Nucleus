@@ -108,7 +108,10 @@ Deno.serve(async (req: Request) => {
     let messages = normalizeMessages(body?.messages)
     const system = typeof body?.system === 'string' ? body.system.trim() : ''
     const temperature = Number.isFinite(body?.temperature) ? Number(body.temperature) : 0.4
-    const maxTokens = Number.isFinite(body?.max_tokens) ? Number(body.max_tokens) : 1024
+    // Меньше max_tokens -> модели физически нечего генерировать после ответа,
+    // поэтому ответ приходит быстрее. Ассистент и так просят отвечать коротко
+    // (см. SOUL), 600 токенов с запасом хватает на обычный ответ и разбор покупки.
+    const maxTokens = Number.isFinite(body?.max_tokens) ? Number(body.max_tokens) : 600
 
     if (system && messages[0]?.role !== 'system') {
       messages = [{ role: 'system', content: system }, ...messages]
