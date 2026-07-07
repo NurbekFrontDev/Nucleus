@@ -27,6 +27,7 @@ import {
 } from '../lib/planner'
 import EnergyCharacter from '../components/EnergyCharacter'
 import { hapticTap } from '../lib/native'
+import { rescheduleAll } from '../lib/notifications'
 
 // Экран «Сегодня» (П-3 + П-6): один экран с переключателем вида в правом
 // верхнем углу — Сегодня / Неделя / Месяц / Год (как в TickTick).
@@ -341,6 +342,10 @@ export default function PlannerToday() {
         else delete next[item.id]
         return next
       })
+      // Отметка выполнения влияет на напоминания: пересобираем расписание,
+      // чтобы по выполненному делу уведомление не приходило (и вернулось,
+      // если снять галочку). Актуально только для сегодняшнего дня.
+      if (date === today) void rescheduleAll(user.id)
     } catch (e) {
       // Откат к прежнему состоянию.
       setLogs((prev) => {

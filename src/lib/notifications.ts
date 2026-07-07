@@ -166,6 +166,10 @@ export async function rescheduleAll(userId: string): Promise<void> {
         let i = 0
         for (const it of day.items) {
           if (!it.at_time_start) continue
+          // Уже выполненные (или осознанно пропущенные) дела не напоминаем:
+          // смотрим отметку за сегодня и пропускаем такое дело.
+          const st = day.logs[it.id]?.status
+          if (st === 'done' || st === 'skip') continue
           const base = timeToday(it.at_time_start)
           if (!base) continue
           const at = new Date(base.getTime() - settings.tasksOffsetMin * 60000)

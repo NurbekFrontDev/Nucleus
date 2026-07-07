@@ -6,8 +6,9 @@ insert into storage.buckets (id, name, public)
 values ('releases', 'releases', true)
 on conflict (id) do update set public = true;
 
--- Публичное чтение файлов из бакета releases (скачивание обновлений без авторизации).
+-- Отдельная политика чтения НЕ нужна: у публичного бакета файлы отдаются по
+-- публичной ссылке (.../object/public/releases/...), а загрузка идёт под
+-- service_role (обходит RLS). Политику SELECT на storage.objects не создаём,
+-- иначе Supabase предупреждает, что клиенты могут получить список всех файлов.
+-- Если такая политика осталась от старой версии — снимаем её.
 drop policy if exists "Public read releases" on storage.objects;
-create policy "Public read releases"
-  on storage.objects for select
-  using (bucket_id = 'releases');
