@@ -184,6 +184,8 @@ export default function PlannerFocus() {
   }
 
   // Завершение фазы, истёкшей в фоне: логируем и переходим к следующей.
+  // Если фокус завершился более 10 минут назад — перерыв уже бессмысленен,
+  // показываем сразу новую фокус-сессию.
   const finishElapsed = (rt: PomoRuntime) => {
     const mins = Math.round(rt.totalSec / 60)
     if (user && mins > 0) {
@@ -194,7 +196,16 @@ export default function PlannerFocus() {
         completed: true,
       }).catch(() => {})
     }
-    const next: PomoKind = rt.mode === 'focus' ? 'break' : 'focus'
+    // Сколько секунд прошло с момента, когда фаза должна была завершиться.
+    const elapsedSinceEnd = rt.endTime > 0 ? Math.round((Date.now() - rt.endTime) / 1000) : 0
+    const SKIP_BREAK_AFTER_SEC = 10 * 60 // 10 минут
+    let next: PomoKind
+    if (rt.mode === 'focus' && elapsedSinceEnd >= SKIP_BREAK_AFTER_SEC) {
+      // Фокус завершился давно — перерыв пропускаем, сразу новый фокус.
+      next = 'focus'
+    } else {
+      next = rt.mode === 'focus' ? 'break' : 'focus'
+    }
     setMode(next)
     setRunning(false)
     endRef.current = null
