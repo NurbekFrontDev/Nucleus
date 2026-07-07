@@ -199,3 +199,16 @@ export async function setAutostart(enabled: boolean): Promise<boolean> {
     return false
   }
 }
+
+// ===== «Не беспокоить» на ПК во время фокуса (только десктоп) =====
+// Гасит всплывающие уведомления Windows на время фокуса и возвращает их после.
+// Реализовано через Rust-команду set_dnd (reg.exe → ToastEnabled 0/1).
+export async function setDesktopDnd(enabled: boolean): Promise<void> {
+  if (!isDesktop()) return
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('set_dnd', { enabled })
+  } catch {
+    // команда недоступна — не критично
+  }
+}

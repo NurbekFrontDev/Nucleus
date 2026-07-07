@@ -3,10 +3,10 @@
 // Принимает историю сообщений и необязательный системный промпт, на сервере
 // ходит к провайдеру ИИ (ключ спрятан в секретах Supabase) и возвращает ответ.
 //
-// Провайдер: NVIDIA NIM (OpenAI-совместимый), ключ NVIDIA_API_KEY.
-// Модели — список через запятую в NVIDIA_MODEL (перебираем по очереди: если
-// первая модель недоступна/устарела — пробуем следующую). Так можно менять
-// модель/базовый URL без правки кода — через секреты.
+// ОСНОВНОЙ провайдер: Cerebras (самый быстрый, ~3000 токенов/с), модель gpt-oss-120b.
+//   Ключ: CEREBRAS_API_KEY. OpenAI-совместимый endpoint https://api.cerebras.ai/v1.
+// ЗАПАСНОЙ провайдер: NVIDIA NIM (ключ NVIDIA_API_KEY) — используется, если Cerebras
+//   недоступен или не настроен. Модели можно переопределить секретами (см. ниже).
 //
 // Тело запроса (POST, JSON):
 //   { messages: [{ role, content }], system?: string, temperature?: number, max_tokens?: number }
@@ -30,12 +30,21 @@ function reply(obj: Record<string, unknown>, status = 200): Response {
 type ChatRole = 'system' | 'user' | 'assistant'
 type ChatMessage = { role: ChatRole; content: string }
 
-// Модели по умолчанию (перебор по очереди). Можно переопределить секретом
-// NVIDIA_MODEL (через запятую). Если основная модель устарела — сработает запасная.
-const DEFAULT_MODELS = [
-  'meta/llama-3.3-70b-instruct',
-  'meta/llama-3.1-70b-instruct',
-]
+// Описание провайдера ИИ (OpenAI-совместимый /chat/completions).
+type Provider = {
+  name: string
+  baseUrl: string
+  apiKey: string
+  models: string[]
+  // Доп. поля тела запроса, специфичные для провайдера (например, уровень раздумий).
+  extraBody?: Record<string, unknown>
+}
+
+// Модели Cerebras по умолчанию (можно переопределить секретом CEREBRAS_MODEL).
+const CEREBRAS_DEFAULT_MODELS = ['gpt-oss-120b']
+
+// Модели NVIDIA по умолчанию (запасной провайдер; переопределяется NVIDIA_MODEL).
+const NVIDIA_DEFAULT_MODELS = ['meta/llama-3.3-70b-instruct', 'meta/llama-3.1-70b-instruct']
 
 // Один вызов к OpenAI-совместимому /chat/completions для конкретной модели.
 // Возвращает текст либо detail с причиной неудачи (для диагностики).
@@ -46,6 +55,7 @@ async function callModel(
   messages: ChatMessage[],
   temperature: number,
   maxTokens: number,
+  extraBody: Record<string, unknown>,
 ): Promise<{ text: string | null; detail?: string }> {
   try {
     const res = await fetch(baseUrl + '/chat/completions', {
@@ -60,11 +70,7 @@ async function callModel(
         temperature,
         max_tokens: maxTokens,
         stream: false,
-        // Отключаем режим «раздумывания» (thinking/reasoning) у моделей, которые
-        // его поддерживают (GLM и т.п.). Приложение простое, долгие раздумья не
-        // нужны, особенно на короткие сообщения вроде «привет». Модели без этой
-        // опции просто игнорируют неизвестное поле.
-        chat_template_kwargs: { enable_thinking: false },
+        ...extraBody,
       }),
     })
     if (!res.ok) {
@@ -78,6 +84,50 @@ async function callModel(
   } catch (e) {
     return { text: null, detail: `${model}: ${String(e)}` }
   }
+}
+
+// Собирает список провайдеров по приоритету: сначала Cerebras (быстрый),
+// потом NVIDIA (запасной). Провайдер включается, только если задан его ключ.
+function buildProviders(): Provider[] {
+  const providers: Provider[] = []
+
+  const cerebrasKey = Deno.env.get('CEREBRAS_API_KEY')
+  if (cerebrasKey) {
+    const modelEnv = Deno.env.get('CEREBRAS_MODEL') ?? ''
+    const models = modelEnv
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    providers.push({
+      name: 'cerebras',
+      baseUrl: Deno.env.get('CEREBRAS_BASE_URL') ?? 'https://api.cerebras.ai/v1',
+      apiKey: cerebrasKey,
+      models: models.length > 0 ? models : CEREBRAS_DEFAULT_MODELS,
+      // gpt-oss — reasoning-модель. Ставим самый низкий уровень раздумий, чтобы
+      // ответ приходил мгновенно (приложение простое, долгие раздумья не нужны).
+      extraBody: { reasoning_effort: 'low' },
+    })
+  }
+
+  const nvidiaKey = Deno.env.get('NVIDIA_API_KEY')
+  if (nvidiaKey) {
+    const modelEnv = Deno.env.get('NVIDIA_MODEL') ?? ''
+    const models = modelEnv
+      .split(',')
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0)
+    providers.push({
+      name: 'nvidia',
+      baseUrl: Deno.env.get('NVIDIA_BASE_URL') ?? 'https://integrate.api.nvidia.com/v1',
+      apiKey: nvidiaKey,
+      models: models.length > 0 ? models : NVIDIA_DEFAULT_MODELS,
+      // У моделей, поддерживающих thinking (GLM и т.п.), отключаем раздумья.
+      // Остальные модели просто игнорируют это поле.
+      extraBody: { chat_template_kwargs: { enable_thinking: false } },
+    })
+  }
+
+  return providers
 }
 
 // Приводим входящие сообщения к безопасному виду: только нужные роли и текст.
@@ -117,25 +167,27 @@ Deno.serve(async (req: Request) => {
     }
     if (messages.length === 0) return reply({ error: 'no-messages' }, 400)
 
-    const apiKey = Deno.env.get('NVIDIA_API_KEY')
-    if (!apiKey) return reply({ error: 'no-api-key' })
-
-    const baseUrl = Deno.env.get('NVIDIA_BASE_URL') ?? 'https://integrate.api.nvidia.com/v1'
-    const modelEnv = Deno.env.get('NVIDIA_MODEL') ?? ''
-    const models = modelEnv
-      .split(',')
-      .map((s) => s.trim())
-      .filter((s) => s.length > 0)
-    const list = models.length > 0 ? models : DEFAULT_MODELS
+    const providers = buildProviders()
+    if (providers.length === 0) return reply({ error: 'no-api-key' })
 
     const details: string[] = []
-    for (const model of list) {
-      const r = await callModel(baseUrl, apiKey, model, messages, temperature, maxTokens)
-      if (r.text) return reply({ reply: r.text, provider: 'nvidia', model })
-      if (r.detail) details.push(r.detail)
+    for (const p of providers) {
+      for (const model of p.models) {
+        const r = await callModel(
+          p.baseUrl,
+          p.apiKey,
+          model,
+          messages,
+          temperature,
+          maxTokens,
+          p.extraBody ?? {},
+        )
+        if (r.text) return reply({ reply: r.text, provider: p.name, model })
+        if (r.detail) details.push(r.detail)
+      }
     }
 
-    // Все модели не ответили — возвращаем причину (статус 200, чтобы клиент её показал).
+    // Ни один провайдер не ответил — возвращаем причину (статус 200, чтобы клиент её показал).
     return reply({ error: 'ai-unavailable', detail: details.join(' | ').slice(0, 500) })
   } catch (e) {
     return reply({ error: 'server', detail: String(e) })

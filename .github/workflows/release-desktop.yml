@@ -42,3 +42,30 @@ jobs:
           releaseDraft: false
           prerelease: false
           includeUpdaterJson: true
+
+      # Загружаем установщик и latest.json в Supabase Storage (бакет releases),
+      # чтобы авто-обновление шло через Supabase, а не через GitHub CDN.
+      - name: Upload to Supabase Storage (auto-update)
+        shell: pwsh
+        env:
+          SUPABASE_URL: https://ewgrcmswwvbtoxdxkvuv.supabase.co
+          # ВНИМАНИЕ: значение ниже — заглушка. Замените её в веб-редакторе GitHub
+          # на ссылку на секрет SUPABASE_SERVICE_ROLE_KEY (синтаксис GitHub Actions).
+          # Точный текст замены смотрите в сообщении ассистента в чате.
+          SUPABASE_SERVICE_ROLE_KEY: REPLACE_ME_IN_GITHUB_WEB_EDITOR
+        run: |
+          $bundle = "src-tauri/target/release/bundle/nsis"
+          $exe = Get-ChildItem -Path $bundle -Filter *-setup.exe | Select-Object -First 1
+          $sig = Get-ChildItem -Path $bundle -Filter *-setup.exe.sig | Select-Object -First 1
+          if (-not $exe -or -not $sig) { throw "NSIS installer or .sig not found in $bundle" }
+          $version = (Get-Content src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+          $signature = (Get-Content $sig.FullName -Raw).Trim()
+          $api = "$env:SUPABASE_URL/storage/v1/object/releases"
+          $pub = "$env:SUPABASE_URL/storage/v1/object/public/releases"
+          $exeHeaders = @{ Authorization = "Bearer $env:SUPABASE_SERVICE_ROLE_KEY"; "x-upsert" = "true"; "Content-Type" = "application/octet-stream" }
+          Invoke-RestMethod -Method Post -Uri "$api/$($exe.Name)" -Headers $exeHeaders -InFile $exe.FullName
+          $latest = [ordered]@{ version = $version; pub_date = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ"); platforms = @{ "windows-x86_64" = @{ signature = $signature; url = "$pub/$($exe.Name)" } } }
+          $latestPath = Join-Path $env:RUNNER_TEMP "latest.json"
+          $latest | ConvertTo-Json -Depth 6 | Out-File -FilePath $latestPath -Encoding utf8
+          $jsonHeaders = @{ Authorization = "Bearer $env:SUPABASE_SERVICE_ROLE_KEY"; "x-upsert" = "true"; "Content-Type" = "application/json" }
+          Invoke-RestMethod -Method Post -Uri "$api/latest.json" -Headers $jsonHeaders -InFile $latestPath

@@ -5,7 +5,8 @@ import Select from '../components/Select'
 import { enableFocusDnd, disableFocusDnd, dndHasPermission, openDndSettings } from '../lib/dnd'
 import { showToast } from '../lib/toast'
 import { showFocusNotification, hideFocusNotification, focusNotifyAvailable } from '../lib/focusNotify'
-import { notifyDesktop } from '../lib/native'
+import { notifyDesktop, setDesktopDnd } from '../lib/native'
+import { initPomoSync, broadcastPomoUpdate, broadcastPomoClear } from '../lib/pomoSync'
 import {
   loadDay,
   loadPomoSettings,
@@ -289,6 +290,8 @@ export default function PlannerFocus() {
     let cancelled = false
     // Тихий режим включаем ТОЛЬКО во время фокуса, не во время перерыва.
     if (running && mode === 'focus') {
+      // На ПК (Tauri) гасим всплывающие уведомления Windows на время фокуса.
+      void setDesktopDnd(true)
       ;(async () => {
         const ok = await enableFocusDnd()
         if (!ok && !cancelled && !dndPromptedRef.current) {
@@ -306,6 +309,7 @@ export default function PlannerFocus() {
       })()
     } else {
       void disableFocusDnd()
+      void setDesktopDnd(false)
     }
     return () => {
       cancelled = true
@@ -316,6 +320,87 @@ export default function PlannerFocus() {
   useEffect(() => {
     runningRef.current = running
   }, [running])
+
+  // ===== Синхронизация Помодоро между устройствами =====
+  // Зеркало настроек в ref — чтобы обработчик удалённых событий не переподписывался.
+  const settingsRef = useRef(settings)
+  useEffect(() => {
+    settingsRef.current = settings
+  }, [settings])
+  // Подавляем одну трансляцию после применения удалённого состояния (не эхо).
+  const suppressBroadcastRef = useRef(false)
+  // Первый прогон broadcast-эффекта пропускаем — чтобы не затереть другое устройство.
+  const syncInitRef = useRef(false)
+
+  // Применяет состояние таймера, пришедшее с другого устройства (без обратной трансляции).
+  const applyRemoteRuntime = (rt: PomoRuntime) => {
+    suppressBroadcastRef.current = true
+    window.setTimeout(() => {
+      suppressBroadcastRef.current = false
+    }, 400)
+    setMode(rt.mode)
+    setItemId(rt.itemId ?? '')
+    if (rt.running && rt.endTime > 0) {
+      const left = Math.round((rt.endTime - Date.now()) / 1000)
+      if (left > 0) {
+        setRemaining(left)
+        endRef.current = rt.endTime
+        setRunning(true)
+      } else {
+        endRef.current = null
+        setRunning(false)
+        setRemaining(0)
+      }
+    } else {
+      endRef.current = null
+      setRunning(false)
+      setRemaining(rt.remaining > 0 ? rt.remaining : durMin(rt.mode) * 60)
+    }
+    savePomoRuntime(rt)
+  }
+
+  // Подписка на удалённые события (телефон ⇄ десктоп ⇄ браузер).
+  useEffect(() => {
+    if (!user) return
+    const cleanup = initPomoSync(user.id, (msg) => {
+      if (msg.kind === 'clear') {
+        suppressBroadcastRef.current = true
+        window.setTimeout(() => {
+          suppressBroadcastRef.current = false
+        }, 400)
+        setRunning(false)
+        endRef.current = null
+        setMode('focus')
+        setRemaining(settingsRef.current.focusMin * 60)
+        clearPomoRuntime()
+      } else {
+        applyRemoteRuntime(msg.runtime)
+      }
+    })
+    return cleanup
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
+  // Трансляция нашего состояния при смене фазы/запуска/дела (не каждую секунду).
+  useEffect(() => {
+    if (!restoreChecked) return
+    // Первый прогон после восстановления не транслируем.
+    if (!syncInitRef.current) {
+      syncInitRef.current = true
+      return
+    }
+    if (suppressBroadcastRef.current) return
+    broadcastPomoUpdate({
+      mode,
+      running,
+      endTime: running ? endRef.current ?? 0 : 0,
+      remaining,
+      totalSec: durMin(mode) * 60,
+      itemId: itemId || null,
+    })
+    // Намеренно без remaining в зависимостях — иначе трансляция шла бы каждую секунду.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, mode, itemId, restoreChecked])
 
   // ===== Постоянное уведомление таймера (Android) =====
   useEffect(() => {
@@ -361,6 +446,7 @@ export default function PlannerFocus() {
     return () => {
       if (!runningRef.current) {
         void disableFocusDnd()
+        void setDesktopDnd(false)
         void hideFocusNotification()
       }
     }
@@ -558,6 +644,8 @@ export default function PlannerFocus() {
     setMode('focus')
     setRemaining(settings.focusMin * 60)
     clearPomoRuntime()
+    // Останавливаем таймер и на других устройствах.
+    broadcastPomoClear()
   }
 
   const dirFrom = (dx: number, dy: number): Dir => {

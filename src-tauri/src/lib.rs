@@ -15,6 +15,37 @@ fn show_main(app: &tauri::AppHandle) {
     }
 }
 
+// Windows: включить/выключить всплывающие уведомления (тосты) Windows — используется
+// как «Не беспокоить» во время фокуса. Гасит только тосты и их звуки, не трогая
+// медиа/громкость системы. enabled=true → тихо (ToastEnabled=0), false → вернуть (1).
+#[tauri::command]
+fn set_dnd(enabled: bool) {
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let value = if enabled { "0" } else { "1" };
+        let _ = std::process::Command::new("reg")
+            .args([
+                "add",
+                r"HKCU\Software\Microsoft\Windows\CurrentVersion\PushNotifications",
+                "/v",
+                "ToastEnabled",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                value,
+                "/f",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = enabled;
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -27,6 +58,7 @@ pub fn run() {
         ))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
+        .invoke_handler(tauri::generate_handler![set_dnd])
         .setup(|app| {
             // Меню трея: открыть окно и выйти.
             let show = MenuItem::with_id(app, "show", "Открыть Nucleus", true, None::<&str>)?;
