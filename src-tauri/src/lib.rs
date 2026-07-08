@@ -59,6 +59,23 @@ fn set_dnd(enabled: bool) {
             .creation_flags(CREATE_NO_WINDOW)
             .status();
 
+        // 2.5 Windows 11 Do Not Disturb (New DND key)
+        let dnd_value = if enabled { "1" } else { "0" };
+        let _ = std::process::Command::new("reg")
+            .args([
+                "add",
+                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings",
+                "/v",
+                "NOC_GLOBAL_SETTING_DND",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                dnd_value,
+                "/f",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+
         // 3. Windows Focus Assist Mode (Quiet Hours)
         let _ = std::process::Command::new("reg")
             .args([

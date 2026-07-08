@@ -14,4 +14,17 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BatteryPlugin.class);
         super.onCreate(savedInstanceState);
     }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        // ВАЖНО: Предотвращаем заморозку WebView (и WebSocket'ов) в фоне.
+        // Так как у нас работает Foreground Service (FocusNotifyPlugin), Android не убьет процесс.
+        // Но Capacitor по умолчанию ставит WebView на паузу. Мы отменяем это, чтобы 
+        // синхронизация с ПК продолжала работать, даже если приложение свернуто.
+        if (bridge != null && bridge.getWebView() != null) {
+            bridge.getWebView().resumeTimers();
+            bridge.getWebView().onResume();
+        }
+    }
 }
