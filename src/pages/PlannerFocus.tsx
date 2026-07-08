@@ -303,21 +303,24 @@ export default function PlannerFocus() {
     if (running && mode === 'focus') {
       // На ПК (Tauri) гасим всплывающие уведомления Windows на время фокуса.
       void setDesktopDnd(true)
-      ;(async () => {
-        const ok = await enableFocusDnd()
-        if (!ok && !cancelled && !dndPromptedRef.current) {
-          const granted = await dndHasPermission()
-          if (!granted && !cancelled) {
-            dndPromptedRef.current = true
-            showToast(
-              lang === 'ru'
-                ? 'Разреши «Доступ к режиму Не беспокоить», чтобы во время фокуса всё, кроме звонков, было беззвучно'
-                : 'Allow "Do Not Disturb access" so everything except calls stays silent during focus',
-            )
-            await openDndSettings()
+      
+      if (Capacitor.isNativePlatform()) {
+        ;(async () => {
+          const ok = await enableFocusDnd()
+          if (!ok && !cancelled && !dndPromptedRef.current) {
+            const granted = await dndHasPermission()
+            if (!granted && !cancelled) {
+              dndPromptedRef.current = true
+              showToast(
+                lang === 'ru'
+                  ? 'Разреши «Доступ к режиму Не беспокоить», чтобы во время фокуса всё, кроме звонков, было беззвучно'
+                  : 'Allow "Do Not Disturb access" so everything except calls stays silent during focus',
+              )
+              await openDndSettings()
+            }
           }
-        }
-      })()
+        })()
+      }
     } else {
       void disableFocusDnd()
       void setDesktopDnd(false)
