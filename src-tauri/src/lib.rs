@@ -34,16 +34,10 @@ fn set_dnd(enabled: bool) {
         // Записываем во временную папку (если его там нет или он старый)
         let _ = std::fs::write(&exe_path, helper_exe);
 
-        // 1. Вызываем toggle-dnd для клика по колокольчику (нажимает Win+N -> Клик -> Esc)
-        let _ = std::process::Command::new(&exe_path)
-            .arg("toggle-dnd")
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
-
-        // 2. Глушим звуки у мессенджеров (или возвращаем звук)
+        // Глушим звуки у мессенджеров (или возвращаем звук)
         let action = if enabled { "mute" } else { "unmute" };
         let _ = std::process::Command::new(&exe_path)
-            .args([action, "Telegram,Discord,Slack,Skype,Viber,WhatsApp,Teams"])
+            .args([action, "AyuGram,Discord"])
             .creation_flags(CREATE_NO_WINDOW)
             .status();
     }
