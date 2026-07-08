@@ -6,7 +6,7 @@ import { enableFocusDnd, disableFocusDnd, dndHasPermission, openDndSettings } fr
 import { showToast } from '../lib/toast'
 import { showFocusNotification, hideFocusNotification, focusNotifyAvailable } from '../lib/focusNotify'
 import { notifyDesktop, setDesktopDnd } from '../lib/native'
-import { initPomoSync, broadcastPomoUpdate, broadcastPomoClear } from '../lib/pomoSync'
+import { broadcastPomoUpdate, broadcastPomoClear } from '../lib/pomoSync'
 import {
   loadDay,
   loadPomoSettings,
