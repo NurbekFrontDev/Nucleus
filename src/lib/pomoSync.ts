@@ -17,13 +17,12 @@ export type PomoSyncMessage =
   | { kind: 'update'; runtime: PomoRuntime; from: string }
   | { kind: 'clear'; from: string }
 
-type Handler = (msg: PomoSyncMessage) => void
-
 // Текущий канал (один на экран Фокуса).
 let channel: ReturnType<typeof supabase.channel> | null = null
 
 // Подписка на синхронизацию Помодоро. Возвращает функцию очистки.
-export function initPomoSync(userId: string, onMessage: Handler): () => void {
+// Теперь шлет глобальное событие 'nucleus-pomo-sync' на window, чтобы DND работал везде.
+export function initPomoSync(userId: string): () => void {
   const ch = supabase.channel(`pomo-sync:${userId}`, {
     config: { broadcast: { self: false } },
   })
@@ -31,7 +30,7 @@ export function initPomoSync(userId: string, onMessage: Handler): () => void {
     const msg = (payload as { payload?: PomoSyncMessage }).payload
     // Свои же сообщения игнорируем.
     if (!msg || msg.from === DEVICE_ID) return
-    onMessage(msg)
+    window.dispatchEvent(new CustomEvent('nucleus-pomo-sync', { detail: msg }))
   })
   ch.subscribe()
   channel = ch

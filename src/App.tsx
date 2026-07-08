@@ -2,7 +2,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import { lazy, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useAuth } from './lib/AuthContext'
 import { supabase } from './lib/supabase'
-import { initNativeAuth, initDesktopAuth } from './lib/native'
+import { initNativeAuth, initDesktopAuth, setDesktopDnd } from './lib/native'
 import { initNotifications } from './lib/notifications'
 import { initPush } from './lib/push'
 import { maybeAutoBackup, backupTargetLabel } from './lib/backup'
@@ -14,6 +14,8 @@ import Layout from './components/Layout'
 import Login from './pages/Login'
 import { initOta } from './lib/ota'
 import { checkDesktopUpdate } from './lib/desktopUpdate'
+import { initPomoSync, type PomoSyncMessage } from './lib/pomoSync'
+import { enableFocusDnd, disableFocusDnd } from './lib/dnd'
 
 // Код-сплиттинг (А-9, шаг 3): страницы грузятся отдельными чанками по мере
 // перехода на них, а не одним большим бандлом при старте — это ускоряет первый
@@ -213,6 +215,36 @@ function App() {
   useEffect(() => {
     void checkDesktopUpdate()
   }, [])
+
+  // Глобальная синхронизация Помодоро (для включения режима «Не беспокоить»
+  // синхронно на всех устройствах, даже если вкладка Фокуса не открыта).
+  useEffect(() => {
+    if (!userId) return
+    const cleanup = initPomoSync(userId)
+    
+    const handler = (e: Event) => {
+       const msg = (e as CustomEvent<PomoSyncMessage>).detail
+       if (msg.kind === 'update') {
+          const rt = msg.runtime
+          if (rt.running && rt.mode === 'focus') {
+             void setDesktopDnd(true)
+             void enableFocusDnd()
+          } else {
+             void setDesktopDnd(false)
+             void disableFocusDnd()
+          }
+       } else if (msg.kind === 'clear') {
+          void setDesktopDnd(false)
+          void disableFocusDnd()
+       }
+    }
+    window.addEventListener('nucleus-pomo-sync', handler)
+    
+    return () => {
+      cleanup()
+      window.removeEventListener('nucleus-pomo-sync', handler)
+    }
+  }, [userId])
 
   // Локальные уведомления и авто-бэкап (А-6): при запуске планируем уведомления
   // на устройстве, запускаем авто-бэкап (не чаще раза в N дней) и обрабатываем

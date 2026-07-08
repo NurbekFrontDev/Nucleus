@@ -373,7 +373,8 @@ export default function PlannerFocus() {
   // Подписка на удалённые события (телефон ⇄ десктоп ⇄ браузер).
   useEffect(() => {
     if (!user) return
-    const cleanup = initPomoSync(user.id, (msg) => {
+    const handler = (e: Event) => {
+      const msg = (e as CustomEvent).detail
       if (msg.kind === 'clear') {
         suppressBroadcastRef.current = true
         window.setTimeout(() => {
@@ -387,8 +388,9 @@ export default function PlannerFocus() {
       } else {
         applyRemoteRuntime(msg.runtime)
       }
-    })
-    return cleanup
+    }
+    window.addEventListener('nucleus-pomo-sync', handler)
+    return () => window.removeEventListener('nucleus-pomo-sync', handler)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 
