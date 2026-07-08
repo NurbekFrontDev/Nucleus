@@ -56,6 +56,14 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             None,
         ))
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // При попытке запуска второго окна, передаем аргументы первому и фокусим его
+            let _ = app.get_webview_window("main").map(|w| {
+                let _ = w.show();
+                let _ = w.unminimize();
+                let _ = w.set_focus();
+            });
+        }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
         .invoke_handler(tauri::generate_handler![set_dnd])
