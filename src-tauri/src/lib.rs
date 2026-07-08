@@ -22,88 +22,30 @@ fn show_main(app: &tauri::AppHandle) {
 fn set_dnd(enabled: bool) {
     #[cfg(target_os = "windows")]
     {
+        use std::io::Write;
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let value = if enabled { "0" } else { "1" };
-        let fa_value = if enabled { "2" } else { "0" };
 
-        // 1. Windows 10/11 PushNotifications
-        let _ = std::process::Command::new("reg")
-            .args([
-                "add",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\PushNotifications",
-                "/v",
-                "ToastEnabled",
-                "/t",
-                "REG_DWORD",
-                "/d",
-                value,
-                "/f",
-            ])
+        // Встраиваем наш C# helper прямо в бинарник
+        let helper_exe = include_bytes!("../bin/win_helper.exe");
+        let temp_dir = std::env::temp_dir();
+        let exe_path = temp_dir.join("nucleus_win_helper.exe");
+
+        // Записываем во временную папку (если его там нет или он старый)
+        let _ = std::fs::write(&exe_path, helper_exe);
+
+        // 1. Вызываем toggle-dnd для клика по колокольчику (нажимает Win+N -> Клик -> Esc)
+        let _ = std::process::Command::new(&exe_path)
+            .arg("toggle-dnd")
             .creation_flags(CREATE_NO_WINDOW)
             .status();
 
-        // 2. Windows 11 Do Not Disturb (Global Toast Setting)
-        let _ = std::process::Command::new("reg")
-            .args([
-                "add",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings",
-                "/v",
-                "NOC_GLOBAL_SETTING_TOASTS_ENABLED",
-                "/t",
-                "REG_DWORD",
-                "/d",
-                value,
-                "/f",
-            ])
+        // 2. Глушим звуки у мессенджеров (или возвращаем звук)
+        let action = if enabled { "mute" } else { "unmute" };
+        let _ = std::process::Command::new(&exe_path)
+            .args([action, "Telegram,Discord,Slack,Skype,Viber,WhatsApp,Teams"])
             .creation_flags(CREATE_NO_WINDOW)
             .status();
-
-        // 2.5 Windows 11 Do Not Disturb (New DND key)
-        let dnd_value = if enabled { "1" } else { "0" };
-        let _ = std::process::Command::new("reg")
-            .args([
-                "add",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings",
-                "/v",
-                "NOC_GLOBAL_SETTING_DND",
-                "/t",
-                "REG_DWORD",
-                "/d",
-                dnd_value,
-                "/f",
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
-
-        // 3. Windows Focus Assist Mode (Quiet Hours)
-        let _ = std::process::Command::new("reg")
-            .args([
-                "add",
-                r"HKCU\Software\Microsoft\Windows\CurrentVersion\FocusAssist",
-                "/v",
-                "FocusAssistMode",
-                "/t",
-                "REG_DWORD",
-                "/d",
-                fa_value,
-                "/f",
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
-            
-        // 4. Перезапускаем службу уведомлений, чтобы мгновенно применить изменения.
-        // Перезапуск WpnUserService обычно происходит без моргания экрана.
-        let _ = std::process::Command::new("powershell")
-            .args([
-                "-NoProfile",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                "Restart-Service -Name 'WpnUserService_*' -Force -ErrorAction SilentlyContinue",
-            ])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn();
     }
     #[cfg(not(target_os = "windows"))]
     {
