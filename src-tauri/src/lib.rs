@@ -74,6 +74,17 @@ fn set_dnd(enabled: bool) {
             ])
             .creation_flags(CREATE_NO_WINDOW)
             .status();
+            
+        // 4. Instantly notify Windows Shell of the DND status change via WNF 
+        // (Windows Notification Facility). The state name below corresponds to 
+        // WNF_SHEL_QUIETHOURS_ACTIVE_PROFILE_CHANGED.
+        if let Ok(state_name) = std::panic::catch_unwind(|| {
+            wnf::StateName::from_opaque_value(0xd83063ea3bf1c75)
+        }) {
+            let state = wnf::BorrowedState::<u32>::from_state_name(state_name);
+            let profile_id: u32 = if enabled { 2 } else { 0 }; // 2 = Alarms Only (DND), 0 = Off
+            let _ = state.set(&profile_id);
+        }
     }
     #[cfg(not(target_os = "windows"))]
     {

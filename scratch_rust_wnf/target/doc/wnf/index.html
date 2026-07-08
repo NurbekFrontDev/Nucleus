@@ -1,0 +1,303 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="generator" content="rustdoc"><meta name="description" content="GitHub crates.io docs.rs license rustc 1.82+"><title>wnf - Rust</title><script>if(window.location.protocol!=="file:")document.head.insertAdjacentHTML("beforeend","SourceSerif4-Regular-6b053e98.ttf.woff2,FiraSans-Italic-81dc35de.woff2,FiraSans-Regular-0fe48ade.woff2,FiraSans-MediumItalic-ccf7e434.woff2,FiraSans-Medium-e1aa3f0a.woff2,SourceCodePro-Regular-8badfe75.ttf.woff2,SourceCodePro-Semibold-aa29a496.ttf.woff2".split(",").map(f=>`<link rel="preload" as="font" type="font/woff2"href="../static.files/${f}">`).join(""))</script><link rel="stylesheet" href="../static.files/normalize-9960930a.css"><link rel="stylesheet" href="../static.files/rustdoc-17e0aaed.css"><meta name="rustdoc-vars" data-root-path="../" data-static-root-path="../static.files/" data-current-crate="wnf" data-themes="" data-resource-suffix="" data-rustdoc-version="1.96.1 (31fca3adb 2026-06-26)" data-channel="1.96.1" data-search-js="search-b5634cc7.js" data-stringdex-js="stringdex-2da4960a.js" data-settings-js="settings-170eb4bf.js" ><script src="../static.files/storage-41dd4d93.js"></script><script defer src="../crates.js"></script><script defer src="../static.files/main-5013f961.js"></script><noscript><link rel="stylesheet" href="../static.files/noscript-f7c3ffd8.css"></noscript><link rel="alternate icon" type="image/png" href="../static.files/favicon-32x32-eab170b8.png"><link rel="icon" type="image/svg+xml" href="../static.files/favicon-044be391.svg"></head><body class="rustdoc mod crate"><a class="skip-main-content" href="#main-content">Skip to main content</a><!--[if lte IE 11]><div class="warning">This old browser is unsupported and will most likely display funky things.</div><![endif]--><rustdoc-topbar><h2><a href="#">Crate wnf</a></h2></rustdoc-topbar><nav class="sidebar"><div class="sidebar-crate"><h2><a href="../wnf/index.html">wnf</a><span class="version">0.9.0</span></h2></div><div class="sidebar-elems"><ul class="block"><li><a id="all-types" href="all.html">All Items</a></li></ul><section id="rustdoc-toc"><h3><a href="#">Sections</a></h3><ul class="block top-toc"><li><a href="#how-wnf-works" title="How WNF works">How WNF works</a></li><li><a href="#what-this-crate-offers" title="What this crate offers">What this crate offers</a></li><li><a href="#representing-states" title="Representing states">Representing states</a></li><li><a href="#representing-state-data" title="Representing state data">Representing state data</a></li><li><a href="#examples" title="Examples">Examples</a><ul><li><a href="#creating-a-state-and-queryingupdating-its-data" title="Creating a state and querying/updating its data">Creating a state and querying/updating its data</a></li><li><a href="#reading-a-wide-string-from-a-well-known-state" title="Reading a wide string from a well-known state">Reading a wide string from a well-known state</a></li><li><a href="#subscribing-to-a-well-known-state" title="Subscribing to a well-known state">Subscribing to a well-known state</a></li></ul></li><li><a href="#tracing" title="Tracing">Tracing</a></li><li><a href="#cargo-features" title="Cargo features">Cargo features</a></li><li><a href="#stability" title="Stability">Stability</a></li><li><a href="#minimum-supported-rust-version-msrv-policy" title="Minimum Supported Rust Version (MSRV) Policy">Minimum Supported Rust Version (MSRV) Policy</a></li></ul><h3><a href="#structs">Crate Items</a></h3><ul class="block"><li><a href="#structs" title="Structs">Structs</a></li><li><a href="#enums" title="Enums">Enums</a></li><li><a href="#constants" title="Constants">Constants</a></li><li><a href="#traits" title="Traits">Traits</a></li><li><a href="#functions" title="Functions">Functions</a></li></ul></section><div id="rustdoc-modnav"></div></div></nav><div class="sidebar-resizer" title="Drag to resize sidebar"></div><main><div class="width-limiter"><section id="main-content" class="content" tabindex="-1"><div class="main-heading"><h1>Crate <span>wnf</span>&nbsp;<button id="copy-path" title="Copy item path to clipboard">Copy item path</button></h1><rustdoc-toolbar></rustdoc-toolbar><span class="sub-heading"><a class="src" href="../src/wnf/lib.rs.html#1-426">Source</a> </span></div><details class="toggle top-doc" open><summary class="hideme"><span>Expand description</span></summary><div class="docblock"><p><a href="https://github.com/matthias-stemmler/wnf"><img src="https://img.shields.io/badge/GitHub-informational?logo=GitHub&amp;labelColor=555555" alt="GitHub" /></a>
+<a href="https://crates.io/crates/wnf"><img src="https://img.shields.io/crates/v/wnf.svg" alt="crates.io" /></a>
+<a href="https://docs.rs/wnf/latest/wnf/"><img src="https://img.shields.io/docsrs/wnf" alt="docs.rs" /></a>
+<a href="https://github.com/matthias-stemmler/wnf/blob/main/LICENSE-APACHE"><img src="https://img.shields.io/crates/l/wnf.svg" alt="license" /></a>
+<a href="https://blog.rust-lang.org/releases/1.82.0"><img src="https://img.shields.io/badge/rustc-1.82+-lightgrey.svg" alt="rustc 1.82+" /></a></p>
+<p>Safe bindings for the Windows Notification Facility</p>
+<p>The <em>Windows Notification Facility (WNF)</em> is a registrationless publisher/subscriber mechanism that was introduced
+in Windows 8 and forms an undocumented part of the Windows API.</p>
+<p>This crate provides safe Rust abstractions over (a part of) this API. If you are looking for raw bindings to the
+API, take a look at the <a href="https://docs.rs/ntapi/latest/ntapi/"><code>ntapi</code></a> crate.</p>
+<p>Note that while great care was taken in making these abstractions memory-safe, there cannot be a guarantee due to
+the undocumented nature of the API.</p>
+<p>This is a Windows-only crate and will fail to compile on other platforms. If you target multiple platforms, it is
+recommended that you declare it as a
+<a href="https://doc.rust-lang.org/cargo/reference/specifying-dependencies.html#platform-specific-dependencies">platform specific dependency</a>.</p>
+<h2 id="how-wnf-works"><a class="doc-anchor" href="#how-wnf-works">§</a>How WNF works</h2>
+<p>WNF is built upon the core concept of a <em>state name</em>. Processes can publish to and subscribe to a state name,
+represented by a 64-bit identifier. In this crate, in order to distinguish between such an identifier and the actual
+operating system object it represents, we call the identifier a <em>state name</em>, while the underlying object will be
+referred to as a <em>state</em>.</p>
+<p>A state can have different <em>lifetimes</em>:</p>
+<ul>
+<li>A <em>well-known</em> state is provisioned with the system and cannot be created or deleted.</li>
+<li>A <em>permanent</em> state can be created and stays alive even across system reboots until it is explicitly deleted.</li>
+<li>A <em>persistent</em> or <em>volatile</em> state can be created and stays alive until the next system reboot or until it is
+explicitly deleted.</li>
+<li>A <em>temporary</em> state can be created and stays alive until the process it was created from exits or until it is
+explicitly deleted.</li>
+</ul>
+<p>For details, see <a href="enum.StateLifetime.html" title="enum wnf::StateLifetime"><code>StateLifetime</code></a>.</p>
+<p>A state has an associated payload, called the <em>state data</em> or <em>state value</em>, of up to 4 KB in size. Processes can
+query and update these data and subscribe to changes of the data. Furthermore, a state has an associated <em>change
+stamp</em>, which starts at zero when the state is created and increases by one on every update of the data.</p>
+<p>A state that lives across system reboots (i.e. with <em>well-known</em> or <em>permanent</em> lifetime) can be configured to
+persist its data across reboots. Otherwise, the state itself stays alive but its data is reset on reboots.</p>
+<p>A state can have different <em>data scopes</em> that control whether it maintains multiple independent instances of its
+data that are scoped in different ways. See <a href="enum.DataScope.html" title="enum wnf::DataScope"><code>DataScope</code></a> for the available options.</p>
+<p>A state can have an associated <em>type id</em>, which is a GUID that identifies the type of the data. While WNF does not
+maintain a registry of types itself, it can ensure that state data are only updated if the correct type id is
+provided. This can be useful if you maintain your own type registry or just want to avoid accidental updates with
+invalid data.</p>
+<p>Access to a state is secured by a standard
+<a href="https://learn.microsoft.com/en-us/windows/win32/secauthz/security-descriptors">Windows Security Descriptor</a>. In
+addition, creating a <em>permanent</em> or <em>persistent</em> state or a state with <em>process</em> scope requires the
+<code>SeCreatePermanentPrivilege</code> privilege.</p>
+<p>The WNF mechanism, though officially undocumented, has been described by various sources. Its API is part of the
+Windows Native API exposed through <code>ntdll.dll</code> and has been (partly) reverse engineered and described. For details,
+refer to these sources:</p>
+<ul>
+<li><a href="https://www.microsoftpressstore.com/store/windows-internals-part-2-9780135462331">A. Allievi et al.: Windows Internals, Part 2, 7th Edition</a>,
+p. 224ff.</li>
+<li><a href="https://blog.quarkslab.com/playing-with-the-windows-notification-facility-wnf.html">Quarkslab’s Blog: Playing with the Windows Notification Facility (WNF)</a></li>
+<li><a href="https://www.youtube.com/watch?v=MybmgE95weo">A. Ionescu, G. Viala: The Windows Notification Facility: Peeling the Onion of the Most Undocumented Kernel Attack
+Surface Yet</a>, Talk at black hat USA 2018</li>
+<li><a href="https://github.com/ionescu007/wnfun">A. Ionescu, G. Viala: WNF Utilities 4 Newbies (WNFUN)</a>, including a list of
+the names of well-known states</li>
+</ul>
+<h2 id="what-this-crate-offers"><a class="doc-anchor" href="#what-this-crate-offers">§</a>What this crate offers</h2>
+<p>This crate provides memory-safe abstractions over most of the WNF API to accomplish these tasks:</p>
+<ul>
+<li>Create and delete a state</li>
+<li>Query information on a state</li>
+<li>Query and update state data</li>
+<li>Subscribe to state data</li>
+</ul>
+<p>Subscribing uses higher-level functions from <code>ntdll.dll</code> whose names start with <code>Rtl</code>, standing for <em>runtime
+library</em>:</p>
+<ul>
+<li><code>RtlSubscribeWnfStateChangeNotification</code></li>
+<li><code>RtlUnsubscribeWnfStateChangeNotification</code></li>
+</ul>
+<p>The other features use more low-level functions from <code>ntdll.dll</code> whose names start with <code>Nt*</code>:</p>
+<ul>
+<li><code>NtCreateWnfStateName</code></li>
+<li><code>NtDeleteWnfStateName</code></li>
+<li><code>NtQueryWnfStateNameInformation</code></li>
+<li><code>NtQueryWnfStateData</code></li>
+<li><code>NtUpdateWnfStateData</code></li>
+</ul>
+<p>In addition, this crate provides some higher-level abstractions:</p>
+<ul>
+<li>Apply a transformation to state data</li>
+<li>Replace state data</li>
+<li>Wait for updates of state data (in both blocking and async variants)</li>
+<li>Wait until state data satisfy a certain condition (in both blocking and async variants)</li>
+</ul>
+<p>The following WNF features are currently not supported:</p>
+<ul>
+<li>Subscriptions in meta-notification mode, i.e. subscribing to consumers becoming active or inactive or publishers
+terminating</li>
+<li>Event aggregation through the <em>Common Event Aggregator</em> to subscribe to updates of one out of multiple states</li>
+<li>Kernel mode</li>
+</ul>
+<h2 id="representing-states"><a class="doc-anchor" href="#representing-states">§</a>Representing states</h2>
+<p>There are two types in this crate that represent states: <a href="struct.OwnedState.html" title="struct wnf::OwnedState"><code>OwnedState&lt;T&gt;</code></a> and <a href="struct.BorrowedState.html" title="struct wnf::BorrowedState"><code>BorrowedState&lt;'_, T&gt;</code></a>. They work in a similar way as the <a href="https://doc.rust-lang.org/1.96.1/std/os/windows/io/handle/struct.OwnedHandle.html" title="struct std::os::windows::io::handle::OwnedHandle"><code>OwnedHandle</code></a> and
+<a href="https://doc.rust-lang.org/1.96.1/std/os/windows/io/handle/struct.BorrowedHandle.html" title="struct std::os::windows::io::handle::BorrowedHandle"><code>BorrowedHandle&lt;'_&gt;</code></a> types from the standard library:</p>
+<ul>
+<li>An <a href="struct.OwnedState.html" title="struct wnf::OwnedState"><code>OwnedState&lt;T&gt;</code></a> has no lifetime, does not implement <a href="https://doc.rust-lang.org/1.96.1/core/marker/trait.Copy.html" title="trait core::marker::Copy"><code>Copy</code></a> or <a href="https://doc.rust-lang.org/1.96.1/core/clone/trait.Clone.html" title="trait core::clone::Clone"><code>Clone</code></a> and deletes the represented state
+on drop.</li>
+<li>A <a href="struct.BorrowedState.html" title="struct wnf::BorrowedState"><code>BorrowedState&lt;'_, T&gt;</code></a> has a lifetime, implements <a href="https://doc.rust-lang.org/1.96.1/core/marker/trait.Copy.html" title="trait core::marker::Copy"><code>Copy</code></a> and <a href="https://doc.rust-lang.org/1.96.1/core/clone/trait.Clone.html" title="trait core::clone::Clone"><code>Clone</code></a> and does <em>not</em> delete
+the represented state on drop.</li>
+</ul>
+<p>Note that copying/cloning a <a href="struct.BorrowedState.html" title="struct wnf::BorrowedState"><code>BorrowedState&lt;'_, T&gt;</code></a> just copies the borrow, returning another borrow
+of the same underlying state, rather than cloning the state itself.</p>
+<p>You can abstract over ownership (i.e. whether a state is owned or borrowed) through the <a href="trait.AsState.html" title="trait wnf::AsState"><code>AsState</code></a> trait and its
+<a href="trait.AsState.html#tymethod.as_state" title="method wnf::AsState::as_state"><code>as_state</code></a> method. This trait is similar to the <a href="https://doc.rust-lang.org/1.96.1/std/os/windows/io/handle/trait.AsHandle.html" title="trait std::os::windows::io::handle::AsHandle"><code>AsHandle</code></a>
+trait in the standard library and is implemented by both <a href="struct.OwnedState.html" title="struct wnf::OwnedState"><code>OwnedState&lt;T&gt;</code></a> and <a href="struct.BorrowedState.html" title="struct wnf::BorrowedState"><code>BorrowedState&lt;'_, T&gt;</code></a> as well as any type that derefs to one of these types. Calling <a href="trait.AsState.html#tymethod.as_state" title="method wnf::AsState::as_state"><code>as_state</code></a>
+on an <a href="struct.OwnedState.html" title="struct wnf::OwnedState"><code>OwnedState&lt;T&gt;</code></a> borrows it as a <a href="struct.BorrowedState.html" title="struct wnf::BorrowedState"><code>BorrowedState&lt;'_, T&gt;</code></a> while calling it on a
+<a href="struct.BorrowedState.html" title="struct wnf::BorrowedState"><code>BorrowedState&lt;'_, T&gt;</code></a> just copies the borrow.</p>
+<p>You can obtain an instance of <a href="struct.OwnedState.html" title="struct wnf::OwnedState"><code>OwnedState&lt;T&gt;</code></a> or <a href="struct.BorrowedState.html" title="struct wnf::BorrowedState"><code>BorrowedState&lt;'_, T&gt;</code></a> in the following ways:</p>
+<ul>
+<li>Create a new owned state through the <a href="struct.StateCreation.html#method.create_owned" title="method wnf::StateCreation::create_owned"><code>StateCreation::create_owned</code></a> method<br> This is common for temporary
+states, for which there is also the <a href="struct.OwnedState.html#method.create_temporary" title="associated function wnf::OwnedState::create_temporary"><code>OwnedState::create_temporary</code></a> shortcut method.</li>
+<li>Create a new state and statically borrow it through the <a href="struct.StateCreation.html#method.create_static" title="method wnf::StateCreation::create_static"><code>StateCreation::create_static</code></a> method<br> This is common
+for permanent or persistent states.</li>
+<li>Statically borrow an existing state through the <a href="struct.BorrowedState.html#method.from_state_name" title="associated function wnf::BorrowedState::from_state_name"><code>BorrowedState::from_state_name</code></a> method<br> This is common for
+well-known states.</li>
+</ul>
+<p>An owned state can be “leaked” as a statically borrowed state through the <a href="struct.OwnedState.html#method.leak" title="method wnf::OwnedState::leak"><code>OwnedState::leak</code></a> method, while a
+borrowed state can be turned into an owned state through the <a href="struct.BorrowedState.html#method.to_owned_state" title="method wnf::BorrowedState::to_owned_state"><code>BorrowedState::to_owned_state</code></a> method.</p>
+<h2 id="representing-state-data"><a class="doc-anchor" href="#representing-state-data">§</a>Representing state data</h2>
+<p>The types <a href="struct.OwnedState.html" title="struct wnf::OwnedState"><code>OwnedState&lt;T&gt;</code></a> and <a href="struct.BorrowedState.html" title="struct wnf::BorrowedState"><code>BorrowedState&lt;'_, T&gt;</code></a> are generic over a type <code>T</code> that describes
+the shape of the data associated with the state.</p>
+<p>The state types themselves impose no trait bounds on the data type. However, in order for querying or updating state
+data to be memory-safe, the data type needs to satisfy certain conditions:</p>
+<ul>
+<li>Querying state data as a <code>T</code> requires that any byte slice whose length is the size of <code>T</code> represent a valid <code>T</code> or
+that it can at least be checked at runtime whether it represents a valid <code>T</code>.</li>
+<li>Updating state data from a <code>T</code> requires that the type <code>T</code> contain no uninitialized (i.e. padding) bytes.</li>
+</ul>
+<p>These conditions cannot be checked at runtime and hence need to be encoded in the type system.</p>
+<p>Note that querying state data as a <code>T</code> also requires that the size of the state data match the size of <code>T</code> in the
+first place, but this condition can be checked at runtime. In fact, the data type can also be a slice type <code>[T]</code>, in
+which case the size of the state data is required to be a multiple of the size of <code>T</code>.</p>
+<p>Defining how to properly encode the above conditions in the type system is part of the scope of the
+<a href="https://github.com/rust-lang/project-safe-transmute">Project “safe transmute”</a>, which is still in
+<a href="https://github.com/jswrenn/project-safe-transmute/blob/rfc/rfcs/0000-safe-transmute.md#safe-transmute-rfc">RFC</a>
+stage. However, there are various third-party crates that define (unsafe) traits encoding the above conditions,
+among them being the <a href="https://docs.rs/bytemuck/1/bytemuck">bytemuck</a> and
+<a href="https://docs.rs/zerocopy/0/zerocopy">zerocopy</a> crates. Both of them implement the appropriate traits for many
+standard types and also provide macros to derive them for your own types, checking at compile-time whether a type
+satisfies the necessary conditions and enabling you to avoid unsafe code in most cases.</p>
+<p>The <code>wnf</code> crate does not have a hard dependency on any of these crates. Instead, it defines its own
+(unsafe) traits that are modelled after the traits from the <a href="https://docs.rs/bytemuck/1/bytemuck">bytemuck</a> crate
+with the same names:</p>
+<ul>
+<li><a href="trait.AnyBitPattern.html" title="trait wnf::AnyBitPattern"><code>AnyBitPattern</code></a> and <a href="trait.CheckedBitPattern.html" title="trait wnf::CheckedBitPattern"><code>CheckedBitPattern</code></a> encode the requirements for querying state data</li>
+<li><a href="trait.NoUninit.html" title="trait wnf::NoUninit"><code>NoUninit</code></a> encodes the requirements for updating state data</li>
+</ul>
+<p>These traits are already implemented for many standard types. In case your code already makes use of one of the
+<a href="https://docs.rs/bytemuck/1/bytemuck">bytemuck</a> or <a href="https://docs.rs/zerocopy/0/zerocopy">zerocopy</a> crates or you want
+to take advantage of the derive macros provided by either of those crates, you can do the following:</p>
+<ul>
+<li>Enable the <code>bytemuck_v1</code> resp. <code>zerocopy</code> feature of this crate (producing a dependency on <a href="https://docs.rs/bytemuck/1/bytemuck">bytemuck</a>
+v1 resp. <a href="https://docs.rs/zerocopy/0/zerocopy">zerocopy</a>)</li>
+<li>Implement the appropriate trait from one of these crates for your type, e.g. by using a derive macro</li>
+<li>Derive the corresponding trait from the <code>wnf</code> crate using the [<code>derive_from_bytemuck_v1</code>] resp.
+[<code>derive_from_zerocopy</code>] macros. See the documentations of these macros for examples.</li>
+</ul>
+<p>All methods that query state data require the data type to</p>
+<ul>
+<li>either be a type <code>T</code> that implements <a href="trait.CheckedBitPattern.html" title="trait wnf::CheckedBitPattern"><code>CheckedBitPattern</code></a></li>
+<li>or be a slice type <code>[T]</code> where the element type <code>T</code> implements <a href="trait.CheckedBitPattern.html" title="trait wnf::CheckedBitPattern"><code>CheckedBitPattern</code></a></li>
+</ul>
+<p>In addition, they exist in non-boxed and boxed variants, e.g. <a href="struct.OwnedState.html#method.get" title="method wnf::OwnedState::get"><code>OwnedState::get</code></a> and <a href="struct.OwnedState.html#method.get_boxed" title="method wnf::OwnedState::get_boxed"><code>OwnedState::get_boxed</code></a>. The
+non-boxed variants query the data by value (i.e. on the stack), but require the data type <code>T</code> to be <a href="https://doc.rust-lang.org/1.96.1/core/marker/trait.Sized.html" title="trait core::marker::Sized"><code>Sized</code></a>.
+The boxed variants work for both sized and unsized data types <code>T</code> and query the data as a <a href="https://doc.rust-lang.org/1.96.1/alloc/boxed/struct.Box.html" title="struct alloc::boxed::Box"><code>Box&lt;T&gt;</code></a> (i.e. allocated
+on the heap). All of this is encapsulated in the <a href="trait.Read.html" title="trait wnf::Read"><code>Read&lt;T&gt;</code></a> trait where</p>
+<ul>
+<li><code>T: Read&lt;T&gt;</code> means that <code>T</code> can be read by value</li>
+<li><code>T: Read&lt;Box&lt;T&gt;&gt;</code> means that <code>T</code> can be read as a box</li>
+</ul>
+<p>Note that methods that <em>update</em> state data don’t make a distinction between sized and unsized types/slices or boxed
+and non-boxed variants because they take the data by reference.</p>
+<p>If you want to be able to support arbitrary state data without any restriction on the size (apart from the upper
+bound of 4 KB), you can always use a byte slice <code>[u8]</code> as the data type. In the rare case that you want to query a
+state without caring about the content of the data at all, you can use the <a href="struct.OpaqueData.html" title="struct wnf::OpaqueData"><code>OpaqueData</code></a> type. This is useful e.g.
+if you just want to query the size or if you want to check if you have the right permissions to query the state.</p>
+<h2 id="examples"><a class="doc-anchor" href="#examples">§</a>Examples</h2>
+<p>For more detailed examples, see the <code>examples</code> folder in the crate repository. Some common use cases:</p>
+<h3 id="creating-a-state-and-queryingupdating-its-data"><a class="doc-anchor" href="#creating-a-state-and-queryingupdating-its-data">§</a>Creating a state and querying/updating its data</h3>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>wnf::{CreatableStateLifetime, DataScope, OwnedState, StateCreation};
+
+<span class="kw">let </span>state: OwnedState&lt;u32&gt; = StateCreation::new()
+    .lifetime(CreatableStateLifetime::Temporary)
+    .scope(DataScope::Machine)
+    .create_owned()<span class="question-mark">?</span>;
+
+state.set(<span class="kw-2">&amp;</span><span class="number">42</span>)<span class="question-mark">?</span>;
+
+<span class="macro">assert_eq!</span>(state.get()<span class="question-mark">?</span>, <span class="number">42</span>);</code></pre></div><h3 id="reading-a-wide-string-from-a-well-known-state"><a class="doc-anchor" href="#reading-a-wide-string-from-a-well-known-state">§</a>Reading a wide string from a well-known state</h3>
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>std::ffi::{OsStr, OsString};
+<span class="kw">use </span>std::os::windows::ffi::OsStringExt;
+
+<span class="kw">use </span>wnf::BorrowedState;
+
+<span class="kw">const </span>WNF_SHEL_DESKTOP_APPLICATION_STARTED: u64 = <span class="number">0x0D83063EA3BE5075</span>;
+
+<span class="kw">let </span>state = BorrowedState::&lt;[u16]&gt;::from_state_name(WNF_SHEL_DESKTOP_APPLICATION_STARTED);
+
+<span class="kw">let </span>last_application_started_wide = {
+    <span class="kw">let </span>data = state.get_boxed()<span class="question-mark">?</span>;
+    OsString::from_wide(<span class="kw-2">&amp;</span>data)
+};
+
+<span class="macro">println!</span>(<span class="string">"{}"</span>, last_application_started_wide.to_string_lossy());</code></pre></div><h3 id="subscribing-to-a-well-known-state"><a class="doc-anchor" href="#subscribing-to-a-well-known-state">§</a>Subscribing to a well-known state</h3>
+<p>This requires the <code>subscribe</code> feature flag to be enabled.</p>
+
+<div class="example-wrap"><pre class="rust rust-example-rendered"><code><span class="kw">use </span>std::io::{stdin, Read};
+
+<span class="kw">use </span>wnf::{BorrowedState, DataAccessor, OwnedState, SeenChangeStamp};
+
+<span class="kw">const </span>WNF_PO_DISCHARGE_ESTIMATE: u64 = <span class="number">0x41C6013DA3BC5075</span>;
+
+<span class="kw">let </span>state = BorrowedState::&lt;u64&gt;::from_state_name(WNF_PO_DISCHARGE_ESTIMATE);
+
+<span class="kw">let </span>subscription = state.subscribe(
+    |accessor: DataAccessor&lt;<span class="lifetime">'_</span>, <span class="kw">_</span>&gt;| {
+        <span class="macro">println!</span>(<span class="string">"Estimated battery duration in seconds: {}"</span>, accessor.get().unwrap());
+    },
+    SeenChangeStamp::Current,
+)<span class="question-mark">?</span>;
+
+stdin().read_exact(<span class="kw-2">&amp;mut </span>[<span class="number">0u8</span>])<span class="question-mark">?</span>; <span class="comment">// wait for keypress
+
+</span>subscription.unsubscribe()<span class="question-mark">?</span>;</code></pre></div><h2 id="tracing"><a class="doc-anchor" href="#tracing">§</a>Tracing</h2>
+<p>This crate emits diagnostic information using the <a href="https://docs.rs/tracing/latest/tracing"><code>tracing</code></a> crate whenever there is an interaction with the WNF
+API. For guidance on how to subscribe to this information, consult the <a href="https://docs.rs/tracing/latest/tracing"><code>tracing</code></a> documentation. The general
+structure is like this:</p>
+<ul>
+<li>For every invocation of a WNF API function by the <code>wnf</code> crate, an <a href="https://docs.rs/tracing/latest/tracing/struct.Event.html"><code>Event</code></a>
+with the following payload is emitted:
+<ul>
+<li>The <a href="https://docs.rs/tracing/latest/tracing/struct.Metadata.html#method.target"><code>target</code></a> is always
+<code>wnf::ntapi</code>.</li>
+<li>The <a href="https://docs.rs/tracing/latest/tracing/struct.Metadata.html#method.level"><code>level</code></a> is <a href="https://docs.rs/tracing/latest/tracing/struct.Level.html#associatedconstant.DEBUG"><code>DEBUG</code></a>.</li>
+<li>The message is the name of the WNF API routine.</li>
+<li>The <a href="https://docs.rs/tracing/latest/tracing/struct.Metadata.html#method.fields"><code>fields</code></a> consist of three
+groups:
+<ul>
+<li><code>result</code>: The result (return code) of the invocation</li>
+<li><code>input.*</code>: Inputs of the invocation, depending on the routine</li>
+<li><code>output.*</code>: Outputs of the invocation, depending on the routine</li>
+</ul>
+</li>
+</ul>
+</li>
+<li>For every invocation of a callback function in the <code>wnf</code> crate, a <a href="https://docs.rs/tracing/latest/tracing/struct.Span.html"><code>Span</code></a>
+with the following payload is emitted:
+<ul>
+<li>The <a href="https://docs.rs/tracing/latest/tracing/struct.Metadata.html#method.target"><code>target</code></a> is always
+<code>wnf::ntapi</code>.</li>
+<li>The <a href="https://docs.rs/tracing/latest/tracing/struct.Metadata.html#method.level"><code>level</code></a> is <a href="https://docs.rs/tracing/latest/tracing/struct.Level.html#associatedconstant.TRACE"><code>TRACE</code></a>.</li>
+<li>The <a href="https://docs.rs/tracing/latest/tracing/struct.Metadata.html#method.name"><code>name</code></a> is <code>WnfUserCallback</code>.</li>
+<li>The <a href="https://docs.rs/tracing/latest/tracing/struct.Metadata.html#method.fields"><code>fields</code></a> are all named
+<code>input.*</code> and contain the inputs of the invocation.</li>
+</ul>
+</li>
+</ul>
+<p>See the <code>examples</code> folder in the crate repository for examples on how to subscribe to these events and spans.</p>
+<h2 id="cargo-features"><a class="doc-anchor" href="#cargo-features">§</a>Cargo features</h2>
+<p>This crate has various <a href="https://doc.rust-lang.org/cargo/reference/features.html">feature flags</a>, none of which are
+enabled by default. They fall into two groups:</p>
+<ul>
+<li>
+<p>Features enabling compatibility with other crates:</p>
+<ul>
+<li><code>bytemuck_v1</code>: Enables the optional <a href="https://docs.rs/bytemuck/1/bytemuck">bytemuck</a> dependency and provides the
+[<code>derive_from_bytemuck_v1</code>] macro</li>
+<li><code>uuid</code>: Enables the optional <a href="https://docs.rs/uuid/1/uuid">uuid</a> dependency and provides conversions between the
+<a href="https://docs.rs/uuid/1/uuid/struct.Uuid.html"><code>uuid::Uuid</code></a> and <a href="struct.GUID.html" title="struct wnf::GUID"><code>wnf::GUID</code></a> types</li>
+<li><code>winapi</code>: Enables the optional <a href="https://docs.rs/winapi/latest/winapi">winapi</a> dependency and provides conversions
+between the <a href="https://docs.rs/winapi/latest/winapi/shared/guiddef/struct.GUID.html"><code>winapi::shared::guiddef::GUID</code></a>
+and <a href="struct.GUID.html" title="struct wnf::GUID"><code>wnf::GUID</code></a> types</li>
+<li><code>windows</code>: Provides conversions between the <a href="https://docs.rs/windows/latest/windows/core/struct.GUID.html"><code>windows::core::GUID</code></a>
+and <a href="struct.GUID.html" title="struct wnf::GUID"><code>wnf::GUID</code></a> types (the <code>windows</code> dependency is not optional because it is also used by <code>wnf</code>
+internally)</li>
+<li><code>windows_permissions</code>: Enables the optional <a href="https://docs.rs/windows-permissions/latest/windows_permissions">windows-permissions</a>
+dependency and enables the use of <a href="https://docs.rs/windows-permissions/latest/windows_permissions/struct.SecurityDescriptor.html"><code>windows_permissions::SecurityDescriptor</code></a>
+when creating a state</li>
+<li><code>zerocopy</code>: Enables the optional <a href="https://docs.rs/zerocopy/0/zerocopy">zerocopy</a> dependency and provides the
+[<code>derive_from_zerocopy</code>] macro</li>
+</ul>
+</li>
+<li>
+<p>Features enabling functionality that uses the higher-level <code>Rtl*</code> functions from <code>ntdll.dll</code> (see above):</p>
+<ul>
+<li><code>subscribe</code>: Enables subscribing to state updates</li>
+<li><code>wait_blocking</code>: Enables blocking waits for state updates, implies the <code>subscribe</code> feature</li>
+<li><code>wait_async</code>: Enables async waits for state updates, implies the <code>subscribe</code> feature</li>
+</ul>
+</li>
+</ul>
+<h2 id="stability"><a class="doc-anchor" href="#stability">§</a>Stability</h2>
+<p>Since this crate depends on the WNF API, which is undocumented and hence must be considered unstable, it will
+probably stay on an unstable <code>0.x</code> version forever.</p>
+<h2 id="minimum-supported-rust-version-msrv-policy"><a class="doc-anchor" href="#minimum-supported-rust-version-msrv-policy">§</a>Minimum Supported Rust Version (MSRV) Policy</h2>
+<p>The current MSRV of this crate is <code>1.82</code>.</p>
+<p>Increasing the MSRV of this crate is <em>not</em> considered a breaking change. However, in such cases there will be at
+least a minor version bump.</p>
+<p>Each version of this crate will support at least the four latest stable Rust versions at the time it is
+published.</p>
+</div></details><h2 id="structs" class="section-header">Structs<a href="#structs" class="anchor">§</a></h2><dl class="item-table"><dt><a class="struct" href="struct.BorrowedState.html" title="struct wnf::BorrowedState">Borrowed<wbr>State</a></dt><dd>A borrowed state</dd><dt><a class="struct" href="struct.BoxedSecurityDescriptor.html" title="struct wnf::BoxedSecurityDescriptor">Boxed<wbr>Security<wbr>Descriptor</a></dt><dd>An owned security descriptor allocated on the local heap</dd><dt><a class="struct" href="struct.ChangeStamp.html" title="struct wnf::ChangeStamp">Change<wbr>Stamp</a></dt><dd>The change stamp of a state</dd><dt><a class="struct" href="struct.GUID.html" title="struct wnf::GUID">GUID</a></dt><dd>A Globally Unique Identifier (GUID)</dd><dt><a class="struct" href="struct.OpaqueData.html" title="struct wnf::OpaqueData">Opaque<wbr>Data</a></dt><dd>A placeholder for state data whose content is irrelevant</dd><dt><a class="struct" href="struct.OwnedState.html" title="struct wnf::OwnedState">Owned<wbr>State</a></dt><dd>An owned state</dd><dt><a class="struct" href="struct.SecurityDescriptor.html" title="struct wnf::SecurityDescriptor">Security<wbr>Descriptor</a></dt><dd>A Windows security descriptor</dd><dt><a class="struct" href="struct.StampedData.html" title="struct wnf::StampedData">Stamped<wbr>Data</a></dt><dd>State data together with a change stamp</dd><dt><a class="struct" href="struct.StateCreation.html" title="struct wnf::StateCreation">State<wbr>Creation</a></dt><dd>A builder type for creating states</dd><dt><a class="struct" href="struct.StateName.html" title="struct wnf::StateName">State<wbr>Name</a></dt><dd>A state name</dd><dt><a class="struct" href="struct.StateNameDescriptor.html" title="struct wnf::StateNameDescriptor">State<wbr>Name<wbr>Descriptor</a></dt><dd>The descriptor of a state name</dd><dt><a class="struct" href="struct.UnspecifiedLifetime.html" title="struct wnf::UnspecifiedLifetime">Unspecified<wbr>Lifetime</a></dt><dd>A marker type for an unspecified lifetime when creating a state</dd><dt><a class="struct" href="struct.UnspecifiedScope.html" title="struct wnf::UnspecifiedScope">Unspecified<wbr>Scope</a></dt><dd>A marker type for an unspecified scope when creating a state</dd><dt><a class="struct" href="struct.UnspecifiedSecurityDescriptor.html" title="struct wnf::UnspecifiedSecurityDescriptor">Unspecified<wbr>Security<wbr>Descriptor</a></dt><dd>A marker type for an unspecified security descriptor when creating a state</dd></dl><h2 id="enums" class="section-header">Enums<a href="#enums" class="anchor">§</a></h2><dl class="item-table"><dt><a class="enum" href="enum.CreatableStateLifetime.html" title="enum wnf::CreatableStateLifetime">Creatable<wbr>State<wbr>Lifetime</a></dt><dd>The lifetime of a state when specified upon creation</dd><dt><a class="enum" href="enum.DataScope.html" title="enum wnf::DataScope">Data<wbr>Scope</a></dt><dd>The data scope of a state</dd><dt><a class="enum" href="enum.ReadError.html" title="enum wnf::ReadError">Read<wbr>Error</a></dt><dd>An error reading state data</dd><dt><a class="enum" href="enum.StateLifetime.html" title="enum wnf::StateLifetime">State<wbr>Lifetime</a></dt><dd>The lifetime of a state</dd><dt><a class="enum" href="enum.StateNameDescriptorFromStateNameError.html" title="enum wnf::StateNameDescriptorFromStateNameError">State<wbr>Name<wbr>Descriptor<wbr>From<wbr>State<wbr>Name<wbr>Error</a></dt><dd>An error converting a <a href="struct.StateName.html" title="struct wnf::StateName"><code>StateName</code></a> into a <a href="struct.StateNameDescriptor.html" title="struct wnf::StateNameDescriptor"><code>StateNameDescriptor</code></a></dd><dt><a class="enum" href="enum.StateNameFromDescriptorError.html" title="enum wnf::StateNameFromDescriptorError">State<wbr>Name<wbr>From<wbr>Descriptor<wbr>Error</a></dt><dd>An error converting a <a href="struct.StateNameDescriptor.html" title="struct wnf::StateNameDescriptor"><code>StateNameDescriptor</code></a> into a <a href="struct.StateName.html" title="struct wnf::StateName"><code>StateName</code></a></dd></dl><h2 id="constants" class="section-header">Constants<a href="#constants" class="anchor">§</a></h2><dl class="item-table"><dt><a class="constant" href="constant.MAXIMUM_STATE_SIZE.html" title="constant wnf::MAXIMUM_STATE_SIZE">MAXIMUM_<wbr>STATE_<wbr>SIZE</a></dt><dd>The maximum size of a state in bytes</dd></dl><h2 id="traits" class="section-header">Traits<a href="#traits" class="anchor">§</a></h2><dl class="item-table"><dt><a class="trait" href="trait.AnyBitPattern.html" title="trait wnf::AnyBitPattern">AnyBit<wbr>Pattern</a></dt><dd>A marker trait for types for which any bit pattern is valid</dd><dt><a class="trait" href="trait.AsState.html" title="trait wnf::AsState">AsState</a></dt><dd>A trait for types that can be borrowed as a state</dd><dt><a class="trait" href="trait.CheckedBitPattern.html" title="trait wnf::CheckedBitPattern">Checked<wbr>BitPattern</a></dt><dd>A trait for types that can be checked for valid bit patterns at runtime</dd><dt><a class="trait" href="trait.NoUninit.html" title="trait wnf::NoUninit">NoUninit</a></dt><dd>A marker trait for types without uninitialized (padding) bytes</dd><dt><a class="trait" href="trait.Read.html" title="trait wnf::Read">Read</a></dt><dd>A trait for types that can be read from state data</dd><dt><a class="trait" href="trait.TryIntoSecurityDescriptor.html" title="trait wnf::TryIntoSecurityDescriptor">TryInto<wbr>Security<wbr>Descriptor</a></dt><dd>A trait for types that can be fallibly converted into a security descriptor</dd></dl><h2 id="functions" class="section-header">Functions<a href="#functions" class="anchor">§</a></h2><dl class="item-table"><dt><a class="fn" href="fn.can_create_permanent_shared_objects.html" title="fn wnf::can_create_permanent_shared_objects">can_<wbr>create_<wbr>permanent_<wbr>shared_<wbr>objects</a></dt><dd>Returns whether the current process has the <code>SeCreatePermanentPrivilege</code> privilege</dd></dl></section></div></main></body></html>
