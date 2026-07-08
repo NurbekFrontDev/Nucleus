@@ -25,6 +25,9 @@ fn set_dnd(enabled: bool) {
         use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         let value = if enabled { "0" } else { "1" };
+        let fa_value = if enabled { "2" } else { "0" };
+
+        // 1. Windows 10/11 PushNotifications
         let _ = std::process::Command::new("reg")
             .args([
                 "add",
@@ -35,6 +38,38 @@ fn set_dnd(enabled: bool) {
                 "REG_DWORD",
                 "/d",
                 value,
+                "/f",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+
+        // 2. Windows 11 Do Not Disturb (Global Toast Setting)
+        let _ = std::process::Command::new("reg")
+            .args([
+                "add",
+                r"HKCU\Software\Microsoft\Windows\CurrentVersion\Notifications\Settings",
+                "/v",
+                "NOC_GLOBAL_SETTING_TOASTS_ENABLED",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                value,
+                "/f",
+            ])
+            .creation_flags(CREATE_NO_WINDOW)
+            .status();
+
+        // 3. Windows Focus Assist Mode (Quiet Hours)
+        let _ = std::process::Command::new("reg")
+            .args([
+                "add",
+                r"HKCU\Software\Microsoft\Windows\CurrentVersion\FocusAssist",
+                "/v",
+                "FocusAssistMode",
+                "/t",
+                "REG_DWORD",
+                "/d",
+                fa_value,
                 "/f",
             ])
             .creation_flags(CREATE_NO_WINDOW)
