@@ -19,6 +19,7 @@ import android.os.Looper;
 import android.os.VibrationEffect;
 import android.os.Vibrator;
 import android.os.VibratorManager;
+import android.os.PowerManager;
 import android.provider.Settings;
 
 import androidx.core.app.NotificationCompat;
@@ -53,6 +54,7 @@ public class FocusTimerService extends Service {
     private String curDoneBody = "";
     private long curEndTime = 0L;
     private boolean curRunning = false;
+    private PowerManager.WakeLock wakeLock = null;
 
     @Override
     public IBinder onBind(Intent intent) {
@@ -97,6 +99,18 @@ public class FocusTimerService extends Service {
     // Каждую секунду перерисовываем уведомление; когда время вышло — fireDone().
     private void startTicking() {
         stopTicking();
+
+        // Получаем WakeLock, чтобы CPU не уснул в фоне, пока идёт таймер.
+        // Это необходимо для поддержания WebSocket (Supabase Realtime) в Capacitor WebView.
+        try {
+            PowerManager pm = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (pm != null) {
+                wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "Nucleus:FocusTimerWakeLock");
+                wakeLock.acquire(4 * 60 * 60 * 1000L /* максимум 4 часа */);
+            }
+        } catch (Exception ignored) {
+        }
+
         ticker = new Runnable() {
             @Override
             public void run() {
@@ -122,6 +136,13 @@ public class FocusTimerService extends Service {
         if (ticker != null) {
             handler.removeCallbacks(ticker);
             ticker = null;
+        }
+        if (wakeLock != null && wakeLock.isHeld()) {
+            try {
+                wakeLock.release();
+            } catch (Exception ignored) {
+            }
+            wakeLock = null;
         }
     }
 

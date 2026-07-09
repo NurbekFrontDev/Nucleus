@@ -22,24 +22,7 @@ fn show_main(app: &tauri::AppHandle) {
 fn set_dnd(enabled: bool) {
     #[cfg(target_os = "windows")]
     {
-        use std::io::Write;
-        use std::os::windows::process::CommandExt;
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-
-        // Встраиваем наш C# helper прямо в бинарник
-        let helper_exe = include_bytes!("../bin/win_helper.exe");
-        let temp_dir = std::env::temp_dir();
-        let exe_path = temp_dir.join("nucleus_win_helper.exe");
-
-        // Записываем во временную папку (если его там нет или он старый)
-        let _ = std::fs::write(&exe_path, helper_exe);
-
-        // Глушим звуки у мессенджеров (или возвращаем звук)
-        let action = if enabled { "mute" } else { "unmute" };
-        let _ = std::process::Command::new(&exe_path)
-            .args([action, "AyuGram,Discord"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .status();
+        let _ = enabled;
     }
     #[cfg(not(target_os = "windows"))]
     {
