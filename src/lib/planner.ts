@@ -1520,15 +1520,17 @@ export async function applyDayTemplate(
   const tItems = (data ?? []) as DayTemplateItem[]
   if (tItems.length === 0) return 0
 
-  // Удаляем все разовые задачи на этот день (они были добавлены
+  // Архивируем все разовые задачи на этот день (они были добавлены
   // из предыдущего шаблона или вручную как разовые).
-  await supabase
+  // Используем .update({ archived: true }), так как на удаление (DELETE) RLS политики могут быть ограничены.
+  const { error: delErr } = await supabase
     .from('planner_items')
-    .delete()
+    .update({ archived: true })
     .eq('user_id', userId)
     .eq('start_date', dateStr)
     .eq('repeat_rule', 'none')
     .eq('archived', false)
+  if (delErr) throw delErr
 
   const rows = tItems.map((it) => ({
     user_id: userId,

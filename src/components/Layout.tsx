@@ -117,22 +117,24 @@ export default function Layout() {
       </main>
 
       {/* Bottom navigation (mobile) */}
-      <nav className="no-scrollbar fixed inset-x-0 bottom-0 z-30 flex overflow-x-auto border-t border-neutral-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:hidden">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.to}
-            to={item.to}
-            end={item.end}
-            className={({ isActive }) =>
-              `flex shrink-0 flex-col items-center gap-0.5 px-3 py-2 text-[10px] transition ${
-                isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-500 dark:text-neutral-400'
-              }`
-            }
-          >
-            <span className="flex h-5 items-center justify-center text-base leading-none">{item.icon}</span>
-            <span className="whitespace-nowrap">{t(item.key)}</span>
-          </NavLink>
-        ))}
+      <nav className="no-scrollbar fixed inset-x-0 bottom-0 z-30 overflow-x-auto border-t border-neutral-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:hidden touch-pan-x" style={{ WebkitOverflowScrolling: 'touch' }}>
+        <div className="flex w-max min-w-full items-center justify-around px-2">
+          {navItems.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              end={item.end}
+              className={({ isActive }) =>
+                `flex shrink-0 flex-col items-center gap-0.5 px-3 py-2 text-[10px] transition ${
+                  isActive ? 'text-emerald-600 dark:text-emerald-400' : 'text-neutral-500 dark:text-neutral-400'
+                }`
+              }
+            >
+              <span className="flex h-5 items-center justify-center text-base leading-none">{item.icon}</span>
+              <span className="whitespace-nowrap">{t(item.key)}</span>
+            </NavLink>
+          ))}
+        </div>
       </nav>
 
       {/* Floating assistant (bubble button + window). */}
