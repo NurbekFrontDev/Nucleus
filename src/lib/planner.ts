@@ -1501,9 +1501,8 @@ export async function saveDayTemplate(
   }
 }
 
-// Применяет шаблон к дате: создаёт разовые дела на этот день из дел
-// шаблона. Возвращает, сколько дел добавлено. Дела добавляются к дню
-// (не заменяют существующие) — лишнее можно удалить как обычно.
+// Применяет шаблон к дате: ЗАМЕНЯЕТ все разовые дела этого дня на дела
+// из шаблона. Повторяющиеся привычки не трогаются.
 export async function applyDayTemplate(
   userId: string,
   templateId: string,
@@ -1520,6 +1519,17 @@ export async function applyDayTemplate(
   if (error) throw error
   const tItems = (data ?? []) as DayTemplateItem[]
   if (tItems.length === 0) return 0
+
+  // Удаляем все разовые задачи на этот день (они были добавлены
+  // из предыдущего шаблона или вручную как разовые).
+  await supabase
+    .from('planner_items')
+    .delete()
+    .eq('user_id', userId)
+    .eq('start_date', dateStr)
+    .eq('repeat_rule', 'none')
+    .eq('archived', false)
+
   const rows = tItems.map((it) => ({
     user_id: userId,
     title: it.title,
@@ -1544,13 +1554,39 @@ export async function applyDayTemplate(
   return rows.length
 }
 
-// Удаляет шаблон (его дела-снимки удаляются каскадом). Уже созданные
-// в днях разовые дела остаются нетронутыми.
+// Удаляет шаблон и архивирует связанные разовые задачи из «Мои дела».
+// Совпадение определяется по title + at_time_start + at_time_end среди
+// разовых задач (repeat_rule='none'). Вручную созданные повторяющиеся
+// задачи не затрагиваются.
 export async function deleteDayTemplate(userId: string, templateId: string): Promise<void> {
+  // 1. Загружаем задачи шаблона ДО удаления (каскад удалит их).
+  const { data: tplItems } = await supabase
+    .from('planner_day_template_items')
+    .select('title, at_time_start, at_time_end')
+    .eq('user_id', userId)
+    .eq('template_id', templateId)
+
+  // 2. Удаляем сам шаблон (каскад удалит planner_day_template_items).
   const { error } = await supabase
     .from('planner_day_templates')
     .delete()
     .eq('user_id', userId)
     .eq('id', templateId)
   if (error) throw error
+
+  // 3. Архивируем совпадающие разовые задачи из planner_items.
+  if (tplItems && tplItems.length > 0) {
+    for (const ti of tplItems as { title: string; at_time_start: string | null; at_time_end: string | null }[]) {
+      let q = supabase
+        .from('planner_items')
+        .update({ archived: true })
+        .eq('user_id', userId)
+        .eq('title', ti.title)
+        .eq('repeat_rule', 'none')
+        .eq('archived', false)
+      if (ti.at_time_start) q = q.eq('at_time_start', ti.at_time_start)
+      if (ti.at_time_end) q = q.eq('at_time_end', ti.at_time_end)
+      await q
+    }
+  }
 }

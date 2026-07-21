@@ -57,7 +57,7 @@ pub fn run() {
             let quit = MenuItem::with_id(app, "quit", "Выйти", true, None::<&str>)?;
             let menu = Menu::with_items(app, &[&show, &quit])?;
 
-            TrayIconBuilder::new()
+            TrayIconBuilder::with_id("main-tray")
                 .icon(app.default_window_icon().expect("no default icon").clone())
                 .tooltip("Nucleus")
                 .menu(&menu)

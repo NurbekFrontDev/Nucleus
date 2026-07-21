@@ -18,6 +18,7 @@ import {
   toDateStr,
   PRIORITY_DOT,
   calcDayEnergy,
+  archiveItem,
   type PlannerItem,
   type PlannerLog,
   type TimeOfDay,
@@ -28,6 +29,7 @@ import {
 import EnergyCharacter from '../components/EnergyCharacter'
 import { hapticTap } from '../lib/native'
 import { rescheduleAll } from '../lib/notifications'
+import ConfirmDialog from '../components/ConfirmDialog'
 
 // Экран «Сегодня» (П-3 + П-6): один экран с переключателем вида в правом
 // верхнем углу — Сегодня / Неделя / Месяц / Год (как в TickTick).
@@ -103,6 +105,7 @@ export default function PlannerToday() {
   // Режим «Изменить день»: правка дела только на эту дату (не трогая шаблон).
   const [editDay, setEditDay] = useState(false)
   const [editItem, setEditItem] = useState<PlannerItem | null>(null)
+  const [delItem, setDelItem] = useState<PlannerItem | null>(null)
   // Окно «Шаблоны дня»: сохранить текущий день / применить шаблон.
   const [templatesOpen, setTemplatesOpen] = useState(false)
   const [overrides, setOverrides] = useState<Record<string, PlannerDayOverride>>(cachedDay?.overrides ?? {})
@@ -260,6 +263,17 @@ export default function PlannerToday() {
       setItems(day.items)
       setLogs(day.logs)
       setOverrides(day.overrides)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
+  const confirmDelete = async () => {
+    if (!user || !delItem) return
+    try {
+      await archiveItem(user.id, delItem.id)
+      setDelItem(null)
+      await reload()
     } catch (e) {
       setError((e as Error).message)
     }
@@ -480,7 +494,6 @@ export default function PlannerToday() {
     const dot = PRIORITY_DOT[item.priority]
     const time = timeLabel(item)
     const isHabit = item.type === 'habit'
-    // Тап по всей строке отмечает/снимает выполнение; 📊 открывает окно привычки.
     return (
       <div
         key={item.id}
@@ -488,64 +501,79 @@ export default function PlannerToday() {
         tabIndex={0}
         onClick={() => (editDay ? setEditItem(item) : onToggle(item))}
         aria-label={item.title}
-        className={`flex cursor-pointer items-start gap-2.5 ${cardCls}${done && !editDay ? ' opacity-60' : ''} transition active:scale-[.99]`}
+        className={`flex cursor-pointer items-start justify-between gap-2.5 ${cardCls}${done && !editDay ? ' opacity-60' : ''} transition active:scale-[.99]`}
       >
-        {editDay ? (
-          <span
-            aria-hidden
-            className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-emerald-500/50 text-[11px]"
-          >
-            ✏️
-          </span>
-        ) : (
-          <span
-            aria-hidden
-            className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[10px] font-bold transition ${
-              done
-                ? 'border-emerald-500 bg-emerald-500 text-neutral-950'
-                : 'border-neutral-300 dark:border-neutral-600'
-            }`}
-          >
-            {done ? '\u2713' : ''}
-          </span>
-        )}
-        {dot && <span className="mt-1 shrink-0 text-xs leading-none">{dot}</span>}
-        {item.important && <span className="mt-1 shrink-0 text-xs leading-none">⭐</span>}
-        {item.icon && <span className="mt-0.5 shrink-0">{item.icon}</span>}
-        <div className="min-w-0 flex-1">
-          <p
-            className={`break-words text-base font-medium ${
-              done ? 'text-neutral-500 line-through dark:text-neutral-400' : ''
-            }`}
-          >
-            <span className="break-words">{item.title}</span>
-            {overrides[item.id] && !overrides[item.id].frozen && (
-              <span
-                title={t('today.edited')}
-                className="ml-1 align-middle text-xs text-emerald-600 dark:text-emerald-400"
-              >
-                ✎
-              </span>
-            )}
-            {isHabit && (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setSheetItem(item)
-                }}
-                title={t('habits.openHint')}
-                className="ml-1 align-middle text-xs text-neutral-400 transition hover:text-emerald-600 dark:hover:text-emerald-400"
-              >
-                🔁
-              </button>
-            )}
-          </p>
-          {time && (
-            <p className="mt-0.5 text-[13px] font-medium text-neutral-500 dark:text-neutral-400">{time}</p>
+        <div className="flex items-start gap-2.5 min-w-0 flex-1">
+          {editDay ? (
+            <span
+              aria-hidden
+              className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-emerald-500/50 text-[11px]"
+            >
+              ✏️
+            </span>
+          ) : (
+            <span
+              aria-hidden
+              className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[10px] font-bold transition ${
+                done
+                  ? 'border-emerald-500 bg-emerald-500 text-neutral-950'
+                  : 'border-neutral-300 dark:border-neutral-600'
+              }`}
+            >
+              {done ? '\u2713' : ''}
+            </span>
           )}
-          {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
+          {dot && <span className="mt-1 shrink-0 text-xs leading-none">{dot}</span>}
+          {item.important && <span className="mt-1 shrink-0 text-xs leading-none">⭐</span>}
+          {item.icon && <span className="mt-0.5 shrink-0">{item.icon}</span>}
+          <div className="min-w-0 flex-1">
+            <p
+              className={`break-words text-base font-medium ${
+                done ? 'text-neutral-500 line-through dark:text-neutral-400' : ''
+              }`}
+            >
+              <span className="break-words">{item.title}</span>
+              {overrides[item.id] && !overrides[item.id].frozen && (
+                <span
+                  title={t('today.edited')}
+                  className="ml-1 align-middle text-xs text-emerald-600 dark:text-emerald-400"
+                >
+                  ✎
+                </span>
+              )}
+              {isHabit && (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    setSheetItem(item)
+                  }}
+                  title={t('habits.openHint')}
+                  className="ml-1 align-middle text-xs text-neutral-400 transition hover:text-emerald-600 dark:hover:text-emerald-400"
+                >
+                  🔁
+                </button>
+              )}
+            </p>
+            {time && (
+              <p className="mt-0.5 text-[13px] font-medium text-neutral-500 dark:text-neutral-400">{time}</p>
+            )}
+            {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
+          </div>
         </div>
+        {editDay && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              setDelItem(item)
+            }}
+            title={t('common.delete')}
+            className="shrink-0 rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
+          >
+            🗑
+          </button>
+        )}
       </div>
     )
   }
@@ -1150,6 +1178,23 @@ export default function PlannerToday() {
           onApplied={reload}
         />
       )}
+
+      <ConfirmDialog
+        open={!!delItem}
+        title={lang === 'ru' ? 'Удалить дело?' : 'Delete task?'}
+        message={
+          delItem
+            ? lang === 'ru'
+              ? `«${delItem.title}» будет удалено из ваших дел.`
+              : `"${delItem.title}" will be deleted from your tasks.`
+            : ''
+        }
+        confirmLabel={t('common.delete')}
+        cancelLabel={t('common.cancel')}
+        danger
+        onConfirm={confirmDelete}
+        onCancel={() => setDelItem(null)}
+      />
     </div>
   )
 }
