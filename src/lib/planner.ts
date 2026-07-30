@@ -272,6 +272,9 @@ export type PlannerDayOverride = {
   priority: Priority | null
   note: string | null
   frozen: boolean
+  // Дело убрано ТОЛЬКО из этого дня. Шаблон в «Мои дела» и остальные дни
+  // остаются нетронутыми.
+  hidden: boolean
 }
 
 // Правка дела на КОНКРЕТНЫЙ ДЕНЬ НЕДЕЛИ (повторяется каждую неделю).
@@ -364,7 +367,7 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
       .eq('date', dateStr),
     supabase
       .from('planner_day_overrides')
-      .select('item_id, title, icon, time_of_day, at_time_start, at_time_end, priority, note, frozen')
+      .select('item_id, title, icon, time_of_day, at_time_start, at_time_end, priority, note, frozen, hidden')
       .eq('user_id', userId)
       .eq('date', dateStr),
     // Правки на этот ДЕНЬ НЕДЕЛИ (напр. «каждое воскресенье начинать позже»).
@@ -396,7 +399,10 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
   //     Это закрывает обратный случай: вернул день недели на место (Вт -> Пн) —
   //     дело не должно воскреснуть в прошедшем понедельнике этой же недели.
   const keepInDay = (it: PlannerItem): boolean => {
-    if (ovMap.has(it.id) || loggedIds.has(it.id)) return true
+    const ov = ovMap.get(it.id)
+    // Убрано вручную только из этого дня — выше всех остальных правил.
+    if (ov?.hidden) return false
+    if (ov || loggedIds.has(it.id)) return true
     if (it.schedule_changed_at && dateStr < it.schedule_changed_at) return false
     return isItemOnDate(it, dateStr)
   }
@@ -543,11 +549,53 @@ export async function saveDayOverride(
       note: patch.note,
       // Ручная правка дня (не заморозка) -> показываем значок ✎ и кнопку сброса.
       frozen: false,
+      // Любая ручная правка возвращает дело в день, если его прятали.
+      hidden: false,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'user_id,item_id,date' },
   )
   if (error) throw error
+}
+
+// Убрать дело ТОЛЬКО из этого дня.
+// НЕ удаляет само дело и не трогает «Мои дела»: пишется только пометка
+// hidden в planner_day_overrides за эту дату. Отметка выполнения за этот день
+// тоже убирается, иначе статистика считала бы день, которого больше нет.
+export async function hideItemForDay(
+  userId: string,
+  itemId: string,
+  dateStr: string,
+): Promise<void> {
+  const { error } = await supabase.from('planner_day_overrides').upsert(
+    {
+      user_id: userId,
+      item_id: itemId,
+      date: dateStr,
+      hidden: true,
+      frozen: false,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id,item_id,date' },
+  )
+  if (error) throw error
+
+  const { error: logErr } = await supabase
+    .from('planner_logs')
+    .delete()
+    .eq('user_id', userId)
+    .eq('item_id', itemId)
+    .eq('date', dateStr)
+  if (logErr) throw logErr
+}
+
+// Вернуть дело в день после hideItemForDay.
+export async function restoreItemForDay(
+  userId: string,
+  itemId: string,
+  dateStr: string,
+): Promise<void> {
+  await clearDayOverride(userId, itemId, dateStr)
 }
 
 // Убирает персональную правку дня -> дело снова берёт значения из шаблона.

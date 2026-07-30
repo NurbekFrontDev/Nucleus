@@ -1,0 +1,11 @@
+{
+  "pub_date": "2026-07-30T16:22:56Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVUYmJaYlVRZXhrbjR3dXJvL1VoOWpYa2FlTE85N0FIZUdyQkd4TWlhOUNqdnd2QU54Uzhqdlhna1FiWm1uN2pWOU43WmVuZ0owOER4ZlJldVl1K3EyMlpYaHYzRklYdUFNPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzg1NDI4MzQxCWZpbGU6TnVjbGV1c18wLjEuMTRfeDY0LXNldHVwLmV4ZQpRNTZpeWsvL1k5NDlGQ2c3bEU1RnA1dTJyYUw5VE5HQWhIUFZ4cjdIYnEzVUVEaXBZdkVuWTQyWFdwM3BsMUlmZEVHdHd6d3kvU2RTbTZkczUzcldBUT09Cg==",
+      "url": "https://ewgrcmswwvbtoxdxkvuv.supabase.co/storage/v1/object/public/releases/Nucleus_0.1.14_x64-setup.exe"
+    }
+  },
+  "version": "0.1.14",
+  "notes": "Исправлены история расписания и удаление дела только из одного дня."
+}

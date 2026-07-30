@@ -19,6 +19,7 @@ import {
   PRIORITY_DOT,
   calcDayEnergy,
   archiveItem,
+  hideItemForDay,
   type PlannerItem,
   type PlannerLog,
   type TimeOfDay,
@@ -271,9 +272,15 @@ export default function PlannerToday() {
   const confirmDelete = async () => {
     if (!user || !delItem) return
     try {
-      await archiveItem(user.id, delItem.id)
+      // В режиме «Изменить день» удаление касается ТОЛЬКО этой даты:
+      // само дело остаётся в «Мои дела» и во всех остальных днях.
+      // Вне этого режима удаление по-прежнему убирает дело целиком.
+      if (editDay) await hideItemForDay(user.id, delItem.id, date)
+      else await archiveItem(user.id, delItem.id)
       setDelItem(null)
       await reload()
+      // Состав дня поменялся -> пересобираем напоминания.
+      if (date === today) void rescheduleAll(user.id)
     } catch (e) {
       setError((e as Error).message)
     }
