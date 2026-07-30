@@ -47,6 +47,9 @@ export type PlannerItem = {
   important: boolean
   archived: boolean
   sort_order: number
+  // Дата последней смены РАСПИСАНИЯ (правило повтора / дни недели / старт).
+  // Дни РАНЬШЕ этой даты считаются историей и не пересчитываются по новому правилу.
+  schedule_changed_at: string | null
   // поля привычек (по «Атомным привычкам»), значимы только для type='habit'
   cue: string | null
   identity: string | null
@@ -64,7 +67,7 @@ export type PlannerLog = {
 
 // Набор колонок для запросов (держим в одном месте, чтобы не расходились).
 export const ITEM_COLS =
-  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min'
+  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at'
 export const LOG_COLS = 'id, item_id, date, status, value, note'
 
 // Эмодзи-кружок важности для UI. Для none -- пусто.
@@ -271,16 +274,79 @@ export type PlannerDayOverride = {
   frozen: boolean
 }
 
+// Правка дела на КОНКРЕТНЫЙ ДЕНЬ НЕДЕЛИ (повторяется каждую неделю).
+// Например: дело идёт в 9\:00-10\:00 все дни, а по воскресеньям — в 11\:00-12\:00.
+// Приоритет при сборке дня: шаблон -> правка дня недели -> правка конкретной даты.
+export type PlannerWeekdayOverride = {
+  item_id: string
+  weekday: number // ISO 1=Пн .. 7=Вс
+  time_of_day: TimeOfDay
+  at_time_start: string | null
+  at_time_end: string | null
+}
+
 export type DayData = {
   items: PlannerItem[] // дела этого дня в нужном порядке
   logs: Record<string, PlannerLog> // itemId -> отметка за этот день
   overrides: Record<string, PlannerDayOverride> // itemId -> персональная правка этого дня
 }
 
+// Загружает правки для указанного дня недели. Если таблицы ещё нет
+// (миграция не запущена) — молча возвращаем пусто, чтобы день всё равно открылся.
+export async function loadWeekdayOverrides(
+  userId: string,
+  weekday: number,
+): Promise<PlannerWeekdayOverride[]> {
+  const { data, error } = await supabase
+    .from('planner_weekday_overrides')
+    .select('item_id, weekday, time_of_day, at_time_start, at_time_end')
+    .eq('user_id', userId)
+    .eq('weekday', weekday)
+  if (error) return []
+  return (data ?? []) as PlannerWeekdayOverride[]
+}
+
+// Сохраняет правку времени/секции для дела на каждый такой день недели.
+export async function saveWeekdayOverride(
+  userId: string,
+  itemId: string,
+  weekday: number,
+  patch: { time_of_day: TimeOfDay; at_time_start: string | null; at_time_end: string | null },
+): Promise<void> {
+  const { error } = await supabase.from('planner_weekday_overrides').upsert(
+    {
+      user_id: userId,
+      item_id: itemId,
+      weekday,
+      time_of_day: patch.time_of_day,
+      at_time_start: patch.at_time_start,
+      at_time_end: patch.at_time_end,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: 'user_id,item_id,weekday' },
+  )
+  if (error) throw error
+}
+
+// Убирает правку дня недели -> дело снова берёт время из шаблона.
+export async function clearWeekdayOverride(
+  userId: string,
+  itemId: string,
+  weekday: number,
+): Promise<void> {
+  const { error } = await supabase
+    .from('planner_weekday_overrides')
+    .delete()
+    .eq('user_id', userId)
+    .eq('item_id', itemId)
+    .eq('weekday', weekday)
+  if (error) throw error
+}
+
 // Загружает все дела пользователя, отбирает попадающие в этот день, подтягивает
 // отметки и ручной порядок именно для этого дня, и сортирует список.
 export async function loadDay(userId: string, dateStr: string): Promise<DayData> {
-  const [itemsRes, logsRes, orderRes, ovRes] = await Promise.all([
+  const [itemsRes, logsRes, orderRes, ovRes, wdOvs] = await Promise.all([
     supabase
       .from('planner_items')
       .select(ITEM_COLS)
@@ -301,6 +367,8 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
       .select('item_id, title, icon, time_of_day, at_time_start, at_time_end, priority, note, frozen')
       .eq('user_id', userId)
       .eq('date', dateStr),
+    // Правки на этот ДЕНЬ НЕДЕЛИ (напр. «каждое воскресенье начинать позже»).
+    loadWeekdayOverrides(userId, isoWeekday(dateStr)),
   ])
   if (itemsRes.error) throw itemsRes.error
   if (logsRes.error) throw logsRes.error
@@ -313,20 +381,54 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
   const ovMap = new Map<string, PlannerDayOverride>()
   for (const o of (ovRes.data ?? []) as PlannerDayOverride[]) ovMap.set(o.item_id, o)
 
-  // Отбираем дела дня и накладываем правки поверх шаблона (правка выигрывает).
+  // Отметки за этот день — нужны и для фильтра ниже (см. keepInDay).
+  const loggedIds = new Set(((logsRes.data ?? []) as PlannerLog[]).map((l) => l.item_id))
+
+  // Дело попадает в день, если:
+  //  1) правило повтора указывает на этот день (обычный случай), ЛИБО
+  //  2) на этот день есть персональная правка/снимок (planner_day_overrides), ЛИБО
+  //  3) за этот день есть отметка (выполнено/пропущено).
+  // Пункты 2 и 3 закрывают важный случай: пользователь убрал день из «дней
+  // недели» в «Мои дела» — прошлые дни, где дело уже показывалось и было
+  // выполнено, ДОЛЖНЫ остаться на месте, а не исчезнуть задним числом.
+  //  4) НО: если дата раньше дня, когда меняли расписание, то это ИСТОРИЯ:
+  //     там работают ТОЛЬКО факты (снимок или отметка), а новое правило не применяется.
+  //     Это закрывает обратный случай: вернул день недели на место (Вт -> Пн) —
+  //     дело не должно воскреснуть в прошедшем понедельнике этой же недели.
+  const keepInDay = (it: PlannerItem): boolean => {
+    if (ovMap.has(it.id) || loggedIds.has(it.id)) return true
+    if (it.schedule_changed_at && dateStr < it.schedule_changed_at) return false
+    return isItemOnDate(it, dateStr)
+  }
+
+  // Правки на день недели: действуют каждую неделю в этот же день.
+  const wdMap = new Map<string, PlannerWeekdayOverride>()
+  for (const w of wdOvs) wdMap.set(w.item_id, w)
+
+  // Отбираем дела дня и накладываем правки поверх шаблона.
+  // Порядок приоритета: шаблон -> правка дня недели -> правка конкретной даты.
   const occurring = all
-    .filter((it) => isItemOnDate(it, dateStr))
+    .filter(keepInDay)
     .map((it) => {
+      const wd = wdMap.get(it.id)
+      const base = wd
+        ? {
+            ...it,
+            time_of_day: wd.time_of_day,
+            at_time_start: wd.at_time_start,
+            at_time_end: wd.at_time_end,
+          }
+        : it
       const ov = ovMap.get(it.id)
-      if (!ov) return it
+      if (!ov) return base
       return {
-        ...it,
-        title: ov.title ?? it.title,
-        icon: ov.icon ?? it.icon,
+        ...base,
+        title: ov.title ?? base.title,
+        icon: ov.icon ?? base.icon,
         time_of_day: ov.time_of_day,
         at_time_start: ov.at_time_start,
         at_time_end: ov.at_time_end,
-        priority: ov.priority ?? it.priority,
+        priority: ov.priority ?? base.priority,
         note: ov.note,
       }
     })
@@ -592,12 +694,26 @@ export async function updateItem(
     .eq('id', id)
     .single()
   if (oldErr) throw oldErr
-  if (oldData) await freezePastDays(userId, oldData as PlannerItem)
+  const old = (oldData ?? null) as PlannerItem | null
+  if (old) await freezePastDays(userId, old)
+
+  // 1б) Поменялось ли РАСПИСАНИЕ (правило повтора, дни недели, дата старта)?
+  // Если да — запоминаем дату смены. С этого момента прошлые дни больше НЕ
+  // пересчитываются по новому правилу: иначе, вернув «Пн» вместо «Вт», дело
+  // задним числом появлялось в прошлом понедельнике, где его не было.
+  const row = itemRow(input)
+  const sameDays = (a: number[] | null, b: number[] | null) =>
+    JSON.stringify([...(a ?? [])].sort()) === JSON.stringify([...(b ?? [])].sort())
+  const scheduleChanged =
+    !!old &&
+    (old.repeat_rule !== row.repeat_rule ||
+      !sameDays(old.weekdays, row.weekdays) ||
+      (old.start_date ?? null) !== (row.start_date ?? null))
 
   // 2) Обновляем шаблон — это затронет только сегодня и будущие дни.
   const { data, error } = await supabase
     .from('planner_items')
-    .update(itemRow(input))
+    .update(scheduleChanged ? { ...row, schedule_changed_at: todayStr() } : row)
     .eq('user_id', userId)
     .eq('id', id)
     .select(ITEM_COLS)

@@ -241,7 +241,9 @@ export default function WaterTracker() {
     [day],
   )
   const remainingToGoal = Math.max(0, goal - drunk)
-  const emptyCount = remainingToGoal > 0 ? Math.ceil(remainingToGoal / Math.max(1, selMl)) : 1
+  // Когда дневная цель достигнута, пустых стаканов (и кнопки +) быть не должно:
+  // добавлять больше нечего, остаются только реально выпитые стаканы.
+  const emptyCount = remainingToGoal > 0 ? Math.ceil(remainingToGoal / Math.max(1, selMl)) : 0
   const cups: Array<{ amount: number; filled: boolean; id?: string }> = [
     ...logsAsc.map((l) => ({ amount: l.amount, filled: true, id: l.id })),
     ...Array.from({ length: emptyCount }, () => ({ amount: selMl, filled: false })),

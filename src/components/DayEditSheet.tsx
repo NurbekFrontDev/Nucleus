@@ -6,6 +6,10 @@ import TimePicker from './TimePicker'
 import {
   saveDayOverride,
   clearDayOverride,
+  loadWeekdayOverrides,
+  saveWeekdayOverride,
+  clearWeekdayOverride,
+  isoWeekday,
   todayStr,
   type PlannerItem,
   type PlannerDayOverride,
@@ -46,6 +50,28 @@ const PRIORITIES: { value: Priority; key: string }[] = [
   { value: 'high', key: 'items.prioHigh' },
 ]
 
+// Полные названия дней недели по ISO (1=Пн..7=Вс) для подписи «Повторять каждый ...».
+const WEEKDAY_LONG: Record<'ru' | 'en', Record<number, string>> = {
+  ru: {
+    1: 'понедельник',
+    2: 'вторник',
+    3: 'среду',
+    4: 'четверг',
+    5: 'пятницу',
+    6: 'субботу',
+    7: 'воскресенье',
+  },
+  en: {
+    1: 'Monday',
+    2: 'Tuesday',
+    3: 'Wednesday',
+    4: 'Thursday',
+    5: 'Friday',
+    6: 'Saturday',
+    7: 'Sunday',
+  },
+}
+
 const chipCls = (sel: boolean) =>
   `rounded-lg border px-3 py-1.5 text-sm transition ${
     sel
@@ -54,16 +80,40 @@ const chipCls = (sel: boolean) =>
   }`
 
 export default function DayEditSheet({ userId, date, item, hasOverride, existing, onClose, onSaved }: Props) {
-  const { t } = useLang()
+  const { t, lang } = useLang()
   const [open, setOpen] = useState(true)
   const visible = useAnimatedMount(open, 220)
 
+  // Название и иконка тоже редактируются на конкретный день (шаблон не трогаем).
+  const [title, setTitle] = useState<string>(item.title)
+  const [icon, setIcon] = useState<string>(item.icon ?? '')
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>(item.time_of_day ?? null)
   const [start, setStart] = useState<string>(item.at_time_start ?? '')
   const [end, setEnd] = useState<string>(item.at_time_end ?? '')
   const [priority, setPriority] = useState<Priority>(item.priority)
   const [note, setNote] = useState<string>(item.note ?? '')
   const [busy, setBusy] = useState(false)
+
+  // Применять это время/секцию не только сегодня, а КАЖДЫЙ такой день недели
+  // (например каждое воскресенье). Хранится в planner_weekday_overrides.
+  const weekday = isoWeekday(date)
+  const [applyWeekly, setApplyWeekly] = useState(false)
+  const [hadWeekly, setHadWeekly] = useState(false)
+
+  useEffect(() => {
+    let alive = true
+    loadWeekdayOverrides(userId, weekday).then((rows) => {
+      if (!alive) return
+      const mine = rows.find((r) => r.item_id === item.id)
+      if (mine) {
+        setApplyWeekly(true)
+        setHadWeekly(true)
+      }
+    })
+    return () => {
+      alive = false
+    }
+  }, [userId, weekday, item.id])
 
   const close = () => setOpen(false)
   // Когда анимация закрытия проиграла — сообщаем родителю (как в DayPanel).
@@ -87,17 +137,29 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
     if (busy) return
     setBusy(true)
     try {
+      const cleanTitle = title.trim()
+      const cleanIcon = icon.trim()
       await saveDayOverride(userId, item.id, date, {
-        // Название/иконку в этом окне не меняем: сохраняем прежний снимок, если он
-        // был (напр. заморозка прошлого дня), иначе null -> берётся из шаблона.
-        title: existing?.title ?? null,
-        icon: existing?.icon ?? null,
+        // Если название/иконка не менялись, оставляем прежний снимок (напр.
+        // от заморозки прошлого дня), иначе пишем новое значение только на этот день.
+        title: cleanTitle && cleanTitle !== item.title ? cleanTitle : (existing?.title ?? null),
+        icon: cleanIcon !== (item.icon ?? '') ? cleanIcon || null : (existing?.icon ?? null),
         time_of_day: timeOfDay,
         at_time_start: start || null,
         at_time_end: end || null,
         priority,
         note: note.trim() ? note.trim() : null,
       })
+      // Повторяющаяся правка на этот день недели.
+      if (applyWeekly) {
+        await saveWeekdayOverride(userId, item.id, weekday, {
+          time_of_day: timeOfDay,
+          at_time_start: start || null,
+          at_time_end: end || null,
+        })
+      } else if (hadWeekly) {
+        await clearWeekdayOverride(userId, item.id, weekday)
+      }
       onSaved()
       close()
     } catch {
@@ -143,6 +205,27 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
           >
             ✕
           </button>
+        </div>
+
+        {/* Название и иконка — только на этот день */}
+        <div className="mt-4 flex gap-3">
+          <div className="w-20 shrink-0">
+            <p className="mb-1.5 text-sm font-medium">{lang === 'en' ? 'Icon' : 'Иконка'}</p>
+            <input
+              value={icon}
+              onChange={(e) => setIcon(e.target.value)}
+              maxLength={4}
+              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-center text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
+            />
+          </div>
+          <div className="min-w-0 flex-1">
+            <p className="mb-1.5 text-sm font-medium">{lang === 'en' ? 'Title' : 'Название'}</p>
+            <input
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
+            />
+          </div>
         </div>
 
         {/* Секция дня */}
@@ -201,6 +284,28 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
             className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
           />
         </div>
+
+        {/* Повторять это время каждый такой день недели */}
+        <label className="mt-4 flex cursor-pointer items-start gap-3 rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
+          <input
+            type="checkbox"
+            checked={applyWeekly}
+            onChange={(e) => setApplyWeekly(e.target.checked)}
+            className="mt-0.5 h-4 w-4 accent-emerald-500"
+          />
+          <span className="min-w-0 text-sm">
+            <span className="font-medium">
+              {lang === 'en'
+                ? `Repeat every ${WEEKDAY_LONG.en[weekday]}`
+                : `Повторять каждый ${WEEKDAY_LONG.ru[weekday]}`}
+            </span>
+            <span className="mt-0.5 block text-xs text-neutral-500">
+              {lang === 'en'
+                ? 'Time and day section will apply on this weekday every week.'
+                : 'Время и секция дня будут применяться в этот день недели каждую неделю.'}
+            </span>
+          </span>
+        </label>
 
         {/* Кнопки */}
         <div className="mt-5 flex flex-col gap-2">
