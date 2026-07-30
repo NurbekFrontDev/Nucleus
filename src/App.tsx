@@ -13,7 +13,8 @@ import { App as CapacitorApp } from '@capacitor/app'
 import Layout from './components/Layout'
 import Login from './pages/Login'
 import { initOta } from './lib/ota'
-import { checkDesktopUpdate } from './lib/desktopUpdate'
+import { initDesktopUpdates } from './lib/desktopUpdate'
+import UpdateDialog from './components/UpdateDialog'
 import { initPomoSync, type PomoSyncMessage } from './lib/pomoSync'
 import { enableFocusDnd, disableFocusDnd } from './lib/dnd'
 
@@ -210,10 +211,14 @@ function App() {
     void initOta()
   }, [])
 
-  // Автообновление десктопа (Tauri, Windows): при запуске проверяем новую
-  // версию на GitHub Releases и ставим её. В вебе/на телефоне — no-op.
+  // Автообновление десктопа (Tauri, Windows): при запуске проверяем новую версию
+  // в Supabase Storage. Молча НЕ ставим: если версия новее, показываем окно
+  // UpdateDialog с текущей и новой версией. Пользователь сам решает — обновить
+  // сейчас или позже (тогда напомним при следующем запуске). В вебе/на телефоне
+  // — no-op.
   useEffect(() => {
-    void checkDesktopUpdate()
+    const cleanup = initDesktopUpdates()
+    return cleanup
   }, [])
 
   // Глобальная синхронизация Помодоро (для включения режима «Не беспокоить»
@@ -351,8 +356,11 @@ function App() {
   }
 
   return (
-    <Routes>
-      <Route element={<Layout />}>
+    <>
+      {/* Окно «Доступно обновление» живёт над всеми экранами (только десктоп). */}
+      <UpdateDialog />
+      <Routes>
+        <Route element={<Layout />}>
         <Route path="/" element={<Dashboard />} />
         <Route path="/incomes" element={<Incomes />} />
         <Route path="/expenses" element={<Expenses />} />
@@ -372,9 +380,10 @@ function App() {
         <Route path="/planner/stats" element={<PlannerStats />} />
         <Route path="/planner/settings" element={<PlannerSettings />} />
         <Route path="/planner/water" element={<WaterTracker />} />
-        <Route path="*" element={<NotFoundRedirect fallback={lastPath} />} />
-      </Route>
-    </Routes>
+          <Route path="*" element={<NotFoundRedirect fallback={lastPath} />} />
+        </Route>
+      </Routes>
+    </>
   )
 }
 

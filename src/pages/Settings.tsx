@@ -15,6 +15,7 @@ import {
 } from '../lib/backup'
 import { showToast } from '../lib/toast'
 import { isDesktop, isAutostartEnabled, setAutostart } from '../lib/native'
+import { APP_VERSION } from '../lib/version'
 
 export default function Settings() {
   const { user, signOut } = useAuth()
@@ -310,6 +311,14 @@ export default function Settings() {
       >
         {t('set.signOut')}
       </button>
+
+      {/* Версия приложения. Мелкий серый текст внизу, чтобы не отвлекать, но всегда
+          можно было посмотреть, какой версией пользуешься. Номер берётся из package.json
+          на этапе сборки, так что всегда совпадает с версией установщика и APK. */}
+      <p className="pt-2 text-xs text-neutral-400 dark:text-neutral-600">
+        Nucleus v{APP_VERSION}
+        {isDesktop() ? ' · Windows' : ''}
+      </p>
     </div>
   )
 }
