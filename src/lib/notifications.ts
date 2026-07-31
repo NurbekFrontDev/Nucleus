@@ -80,6 +80,20 @@ export async function saveNotifSettings(userId: string, s: NotifSettings): Promi
 const TASK_ID_BASE = 100000
 const WATER_ID_BASE = 200000
 
+// Стабильный id уведомления по id дела.
+// Раньше id выдавались по порядковому номеру в списке (TASK_ID_BASE + i):
+// один и тот же номер после пересборки мог достаться ДРУГОМУ делу, и точечно
+// снять напоминание по конкретному делу было невозможно. Теперь id считается
+// из id дела, поэтому напоминание можно отменить сразу при отметке
+// «выполнено», не дожидаясь полной пересборки расписания.
+function taskNotifId(itemId: string): number {
+  let h = 0
+  for (let i = 0; i < itemId.length; i++) {
+    h = (h * 31 + itemId.charCodeAt(i)) % 90000
+  }
+  return TASK_ID_BASE + h
+}
+
 // Канал напоминаний с нашим звуком (без вибрации — вибрация только у Помодоро).
 // Звук — файл res/raw/notify_sound.wav (генерируется scripts/gen-notify-sound.mjs).
 const REMINDER_CHANNEL_ID = 'reminders'
@@ -134,6 +148,52 @@ export async function initNotifications(userId: string): Promise<void> {
   if (!Capacitor.isNativePlatform()) return
   const ok = await ensurePermission()
   if (!ok) return
+  hookVisibility(userId)
+  await rescheduleAll(userId)
+}
+
+// Пересборка расписания при возврате в приложение. Нужна на случай, когда
+// отметка была сделана в другом месте (или приложение долго висело в фоне):
+// вернулись в приложение -> расписание снова соответствует фактам дня.
+let visibilityHooked = false
+function hookVisibility(userId: string): void {
+  if (visibilityHooked) return
+  visibilityHooked = true
+  try {
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') void rescheduleAll(userId)
+    })
+  } catch {
+    // среда без document — не критично
+  }
+}
+
+// Точечно снимает напоминание по конкретному делу.
+// Работает мгновенно и без обращения к базе, поэтому уведомление гарантированно
+// не успеет прилететь, пока пересобирается полное расписание.
+export async function cancelItemNotification(itemId: string): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return
+  try {
+    const { LocalNotifications } = await import('@capacitor/local-notifications')
+    await LocalNotifications.cancel({ notifications: [{ id: taskNotifId(itemId) }] })
+  } catch {
+    // уведомления не критичны
+  }
+}
+
+// Единая точка «статус дела изменился».
+// Вызывается из planner.ts при ЛЮБОЙ отметке (экран «Сегодня», окно дня,
+// окно привычки, дашборд), поэтому напоминание по выполненному делу больше
+// не приходит независимо от того, откуда поставлена галочка.
+//   done=true  -> сначала мгновенно снимаем напоминание, затем пересобираем всё
+//   done=false -> просто пересобираем (напоминание вернётся, если время не прошло)
+export async function onItemStatusChanged(
+  userId: string,
+  itemId: string,
+  done: boolean,
+): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return
+  if (done) await cancelItemNotification(itemId)
   await rescheduleAll(userId)
 }
 
@@ -175,7 +235,7 @@ export async function rescheduleAll(userId: string): Promise<void> {
           const at = new Date(base.getTime() - settings.tasksOffsetMin * 60000)
           if (at.getTime() <= now) continue
           notifications.push({
-            id: TASK_ID_BASE + i,
+            id: taskNotifId(it.id),
             title: it.icon ? `${it.icon} ${it.title}` : it.title,
             body:
               settings.tasksOffsetMin > 0

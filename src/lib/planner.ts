@@ -468,6 +468,31 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
 //   isDone=true  -> сейчас выполнено, значит снимаем отметку (удаляем лог за день)
 //   isDone=false -> ставим отметку "выполнено" (upsert по уникальному ключу дня)
 // Возвращает новый лог или null (если сняли отметку).
+// Сообщает модулю уведомлений, что статус дела за СЕГОДНЯ изменился.
+// Почему здесь, а не в экранах: раньше пересборка расписания вызывалась только
+// из экрана «Сегодня». Если дело отмечалось в окне дня, окне привычки или на
+// дашборде, расписание не обновлялось и напоминание всё равно прилетало (а при
+// заходе во вкладку «Сегодня» уже показанное уведомление просто исчезало из
+// шторки — так работает cancel). Теперь точка одна и общая для всего приложения.
+// Импорт динамический: notifications.ts сам импортирует planner.ts, и так мы
+// избегаем кругового импорта на уровне модулей.
+function notifyStatusChanged(
+  userId: string,
+  itemId: string,
+  dateStr: string,
+  done: boolean,
+): void {
+  if (dateStr !== todayStr()) return
+  void (async () => {
+    try {
+      const n = await import('./notifications')
+      await n.onItemStatusChanged(userId, itemId, done)
+    } catch {
+      // уведомления не критичны для работы приложения
+    }
+  })()
+}
+
 export async function toggleDone(
   userId: string,
   itemId: string,
@@ -482,6 +507,8 @@ export async function toggleDone(
       .eq('item_id', itemId)
       .eq('date', dateStr)
     if (error) throw error
+    // Галочка снята -> напоминание должно вернуться (если время ещё не прошло).
+    notifyStatusChanged(userId, itemId, dateStr, false)
     return null
   }
   const { data, error } = await supabase
@@ -493,6 +520,8 @@ export async function toggleDone(
     .select(LOG_COLS)
     .single()
   if (error) throw error
+  // Дело выполнено -> мгновенно снимаем его напоминание.
+  notifyStatusChanged(userId, itemId, dateStr, true)
   return data as PlannerLog
 }
 
@@ -1034,6 +1063,7 @@ export async function setHabitStatus(
       .eq('item_id', itemId)
       .eq('date', dateStr)
     if (error) throw error
+    notifyStatusChanged(userId, itemId, dateStr, false)
     return
   }
   const { error } = await supabase
@@ -1043,6 +1073,8 @@ export async function setHabitStatus(
       { onConflict: 'user_id,item_id,date' },
     )
   if (error) throw error
+  // И done, и skip означают, что напоминать больше не нужно.
+  notifyStatusChanged(userId, itemId, dateStr, true)
 }
 
 // ====================================================================

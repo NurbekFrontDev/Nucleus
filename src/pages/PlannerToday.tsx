@@ -661,6 +661,30 @@ export default function PlannerToday() {
     { key: 'none', label: t('today.noTime') },
   ]
 
+  // Ручной порядок ГЛАВНЕЕ секций.
+  // Раньше секции всегда шли жёстко: Утро -> День -> Весь день -> Вечер ->
+  // Без времени, и порядок, выставленный руками в «Мои дела» (или
+  // перетаскиванием внутри дня), на экране «Сегодня» разваливался.
+  // Теперь секции остаются, но их порядок задаёт позиция ПЕРВОГО дела
+  // секции в ручном списке, а внутри секции дела идут ровно в том порядке,
+  // в котором их расставил пользователь (items уже отсортирован loadDay).
+  const orderedSections = useMemo(() => {
+    const buckets = new Map<string, PlannerItem[]>()
+    for (const it of items) {
+      const key = it.time_of_day ?? 'none'
+      const list = buckets.get(key)
+      if (list) list.push(it)
+      else buckets.set(key, [it])
+    }
+    // Map сохраняет порядок вставки -> секции идут в порядке первого дела.
+    return Array.from(buckets.entries()).map(([key, list]) => ({
+      key,
+      label: sectionDefs.find((s) => s.key === key)?.label ?? t('today.noTime'),
+      list,
+    }))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, lang])
+
   // ===== Календарь: период, навигация, сетки =====
   const shift = (dir: number) => {
     if (view === 'year') {
@@ -1077,20 +1101,14 @@ export default function PlannerToday() {
               </div>
 
               {sections && !reorder && !editDay ? (
-                sectionDefs.map((s) => {
-                  const list = items.filter((i) =>
-                    s.key === 'none' ? !i.time_of_day : i.time_of_day === s.key,
-                  )
-                  if (list.length === 0) return null
-                  return (
-                    <section key={s.key} className="flex flex-col gap-2">
-                      <h2 className="text-sm font-semibold text-neutral-500 dark:text-neutral-400">
-                        {s.label}
-                      </h2>
-                      {list.map(renderTask)}
-                    </section>
-                  )
-                })
+                orderedSections.map((s) => (
+                  <section key={s.key} className="flex flex-col gap-2">
+                    <h2 className="text-sm font-semibold text-neutral-500 dark:text-neutral-400">
+                      {s.label}
+                    </h2>
+                    {s.list.map(renderTask)}
+                  </section>
+                ))
               ) : reorder ? (
                 <section className="flex flex-col gap-2">{items.map(renderReorderTask)}</section>
               ) : (

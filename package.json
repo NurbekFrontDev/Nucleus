@@ -1,7 +1,7 @@
 {
   "name": "nucleus",
   "private": true,
-  "version": "0.1.15",
+  "version": "0.1.16",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,7 +10,11 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "tauri:dev": "tauri dev",
-    "tauri:build": "tauri build"
+    "tauri:build": "tauri build",
+    "release:local": "node scripts/release.mjs --local --bump=none",
+    "release": "node scripts/release.mjs --upload --bump=none",
+    "release:both": "node scripts/release.mjs --upload --local --bump=none",
+    "release:patch": "node scripts/release.mjs --upload --local --bump=patch"
   },
   "dependencies": {
     "@capacitor/android": "^8.4.1",
