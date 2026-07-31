@@ -340,18 +340,27 @@ function App() {
 
   if (loading || booting) {
     return (
-      <div className="flex min-h-screen items-center justify-center text-neutral-400">
-        Загрузка…
-      </div>
+      <>
+        <UpdateDialog />
+        <div className="flex min-h-screen items-center justify-center text-neutral-400">
+          Загрузка…
+        </div>
+      </>
     )
   }
 
   if (!session) {
     return (
-      <Routes>
-        <Route path="/login" element={<Login />} />
-        <Route path="*" element={<Navigate to="/login" replace />} />
-      </Routes>
+      <>
+        {/* Окно обновления показываем и до входа: проверка версии идёт сразу
+            при запуске, а сессия может ещё не восстановиться. Раньше в этот момент
+            компонента просто не было в дереве, и событие об обновлении терялось. */}
+        <UpdateDialog />
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route path="*" element={<Navigate to="/login" replace />} />
+        </Routes>
+      </>
     )
   }
 
