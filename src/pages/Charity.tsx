@@ -18,12 +18,19 @@ import {
   loadCharityPots,
   loadCharitySplit,
   saveCharitySplit,
-  loadCharityGoal,
-  saveCharityGoal,
   DEFAULT_CHARITY_SPLIT,
   type CharityPotsStats,
 } from '../lib/db'
 import { readCache, writeCache } from '../lib/offlineCache'
+import {
+  loadCharityGoals,
+  createCharityGoal,
+  updateCharityGoal,
+  setPrimaryCharityGoal,
+  deleteCharityGoal,
+  collectedByGoal,
+  type CharityGoal,
+} from '../lib/charityGoals'
 
 type Category = { id: string; name: string; percent?: number; archived?: boolean }
 type CharityExpense = {
@@ -33,14 +40,14 @@ type CharityExpense = {
   description: string | null
   subcategory: string | null
   paid_from_pot: string | null
+  charity_goal_id: string | null
 }
 type CharityCache = {
   categories: Category[]
   received: number
   pots: CharityPotsStats
   split: number
-  goalName: string
-  goalTarget: number
+  goals: CharityGoal[]
   items: CharityExpense[]
 }
 
@@ -69,15 +76,18 @@ export default function Charity() {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
-  const [goalName, setGoalName] = useState('')
-  const [goalTarget, setGoalTarget] = useState(0)
+  // Список крупных целей: главная (⭐) идёт первой, дальше второстепенные.
+  const [goals, setGoals] = useState<CharityGoal[]>([])
 
-  const [editGoal, setEditGoal] = useState(false)
+  // Форма цели: null -- закрыта, 'new' -- создание, иначе id редактируемой цели.
+  const [goalForm, setGoalForm] = useState<string | null>(null)
   const [formName, setFormName] = useState('')
   const [formTarget, setFormTarget] = useState('')
+  // Подтверждение удаления цели прямо в карточке.
+  const [confirmDelId, setConfirmDelId] = useState<string | null>(null)
 
-  // Пополнение крупной цели.
-  const [bigOpen, setBigOpen] = useState(false)
+  // Пополнение крупной цели: id цели, для которой открыта форма.
+  const [bigOpen, setBigOpen] = useState<string | null>(null)
   const [bigAmount, setBigAmount] = useState('')
   const [bigDate, setBigDate] = useState(todayISO())
 
@@ -103,8 +113,7 @@ export default function Charity() {
       setReceived(cached.received)
       setPots(cached.pots)
       setSplit(cached.split)
-      setGoalName(cached.goalName)
-      setGoalTarget(cached.goalTarget)
+      setGoals(cached.goals)
       setItems(cached.items)
       setLoading(false)
     } else {
@@ -123,7 +132,7 @@ export default function Charity() {
           supabase.from('incomes').select('amount').eq('month_id', m.id),
           loadCharityPots(user.id),
           loadCharitySplit(user.id),
-          loadCharityGoal(user.id),
+          loadCharityGoals(user.id),
         ])
         if (!active) return
         if (catRes.error) throw catRes.error
@@ -137,8 +146,7 @@ export default function Charity() {
         setReceived(receivedSum)
         setPots(potsVal)
         setSplit(splitVal)
-        setGoalName(goalVal.name)
-        setGoalTarget(goalVal.target)
+        setGoals(goalVal)
 
         // Записи копилки благотворительности (пополнения и пожертвования).
         const charityIds = cats.filter((c) => isCharityCategory(c.name)).map((c) => c.id)
@@ -146,7 +154,7 @@ export default function Charity() {
         if (charityIds.length > 0) {
           const { data: exps } = await supabase
             .from('expenses')
-            .select('id, amount, date, description, subcategory, paid_from_pot')
+            .select('id, amount, date, description, subcategory, paid_from_pot, charity_goal_id')
             .eq('user_id', user.id)
             .in('category_id', charityIds)
             .order('date', { ascending: false })
@@ -159,8 +167,7 @@ export default function Charity() {
             received: receivedSum,
             pots: potsVal,
             split: splitVal,
-            goalName: goalVal.name,
-            goalTarget: goalVal.target,
+            goals: goalVal,
             items: charityItems,
           })
         }
@@ -186,30 +193,72 @@ export default function Charity() {
   const bigBudget = (charityBudget * split) / 100
   const smallBudget = (charityBudget * (100 - split)) / 100
 
-  const pct = goalTarget > 0 ? Math.min(100, (pots.big / goalTarget) * 100) : 0
-  const remaining = Math.max(0, goalTarget - pots.big)
-
-  // Списки: пополнения крупной цели и маленькие пожертвования (только пополнения копилки).
+  // Списки: пополнения крупных целей и маленькие пожертвования (только пополнения копилки).
   const bigTopUps = items.filter((i) => !i.paid_from_pot && isCharityBigSubcategory(i.subcategory))
   const smallDonations = items.filter((i) => !i.paid_from_pot && !isCharityBigSubcategory(i.subcategory))
 
-  const openGoalForm = () => {
-    setFormName(goalName)
-    setFormTarget(goalTarget > 0 ? formatAmountInput(String(goalTarget)) : '')
-    setEditGoal(true)
+  // Сколько собрано по каждой цели. Старые записи без привязки идут главной цели.
+  const collected = collectedByGoal(bigTopUps, goals)
+
+  /** Пополнения конкретной цели (у главной — ещё и все записи без привязки). */
+  const topUpsOf = (g: CharityGoal) =>
+    bigTopUps.filter((i) =>
+      i.charity_goal_id ? i.charity_goal_id === g.id : g.is_primary,
+    )
+
+  const openGoalForm = (g: CharityGoal | null) => {
+    setGoalForm(g ? g.id : 'new')
+    setFormName(g ? g.name : '')
+    setFormTarget(g && g.target > 0 ? formatAmountInput(String(g.target)) : '')
     setError(null)
   }
 
   const submitGoal = async (e: FormEvent) => {
     e.preventDefault()
-    if (!user) return
+    if (!user || !goalForm) return
     const target = parseAmount(formTarget)
-    const goal = { name: formName.trim(), target, date: null }
+    const name = formName.trim()
     try {
-      await saveCharityGoal(user.id, goal)
-      setGoalName(goal.name)
-      setGoalTarget(goal.target)
-      setEditGoal(false)
+      if (goalForm === 'new') {
+        const created = await createCharityGoal(user.id, name, target, false)
+        // Перечитываем список: первая цель могла стать главной автоматически.
+        setGoals((prev) =>
+          created.is_primary ? [created, ...prev.map((g) => ({ ...g, is_primary: false }))] : [...prev, created],
+        )
+      } else {
+        await updateCharityGoal(goalForm, { name, target })
+        setGoals((prev) => prev.map((g) => (g.id === goalForm ? { ...g, name, target } : g)))
+      }
+      setGoalForm(null)
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
+  /** Сделать цель главной (⭐). Прежняя становится второстепенной. */
+  const makePrimary = async (goalId: string) => {
+    if (!user) return
+    try {
+      await setPrimaryCharityGoal(user.id, goalId)
+      setGoals((prev) => {
+        const next = prev.map((g) => ({ ...g, is_primary: g.id === goalId }))
+        return [...next].sort((a, b) => Number(b.is_primary) - Number(a.is_primary) || a.sort_order - b.sort_order)
+      })
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
+  const removeGoal = async (goalId: string) => {
+    if (!user) return
+    setConfirmDelId(null)
+    try {
+      await deleteCharityGoal(user.id, goalId)
+      setGoals(await loadCharityGoals(user.id))
+      // Деньги остаются в копилке: у записей просто слетает привязка к цели.
+      setItems((prev) =>
+        prev.map((i) => (i.charity_goal_id === goalId ? { ...i, charity_goal_id: null } : i)),
+      )
     } catch (err) {
       setError((err as Error).message)
     }
@@ -222,6 +271,7 @@ export default function Charity() {
     amount: number,
     date: string,
     to: string | null,
+    goalId: string | null,
   ): Promise<CharityExpense> => {
     if (!user || !charityCat) throw new Error(t('charity.noCat'))
     const d = new Date(date + 'T00:00:00')
@@ -237,8 +287,9 @@ export default function Charity() {
         date,
         description: to,
         paid_from_pot: null,
+        charity_goal_id: goalId,
       })
-      .select('id, amount, date, description, subcategory, paid_from_pot')
+      .select('id, amount, date, description, subcategory, paid_from_pot, charity_goal_id')
       .single()
     if (error || !data) throw error ?? new Error(t('common.saveFailed'))
     return data as CharityExpense
@@ -246,7 +297,8 @@ export default function Charity() {
 
   const submitBig = async (e: FormEvent) => {
     e.preventDefault()
-    if (!user) return
+    const goalId = bigOpen
+    if (!user || !goalId) return
     const amount = parseAmount(bigAmount)
     if (!amount || amount <= 0) {
       setError(t('common.enterPositive'))
@@ -255,12 +307,12 @@ export default function Charity() {
     setBusy(true)
     setError(null)
     try {
-      const row = await addContribution(CHARITY_BIG_SUBCATEGORY, amount, bigDate, null)
+      const row = await addContribution(CHARITY_BIG_SUBCATEGORY, amount, bigDate, null, goalId)
       setItems((prev) => [row, ...prev])
       setPots((p) => ({ ...p, big: p.big + amount, total: p.total + amount }))
       setBigAmount('')
       setBigDate(todayISO())
-      setBigOpen(false)
+      setBigOpen(null)
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -284,6 +336,7 @@ export default function Charity() {
         amount,
         smallDate,
         smallTo.trim() || null,
+        null,
       )
       setItems((prev) => [row, ...prev])
       setPots((p) => ({ ...p, small: p.small + amount, total: p.total + amount }))
@@ -364,10 +417,8 @@ export default function Charity() {
     }
   }
 
-  const hasGoal = goalTarget > 0 || goalName.trim().length > 0
-
-  const openBigForm = () => {
-    setBigOpen(true)
+  const openBigForm = (goalId: string) => {
+    setBigOpen(goalId)
     setBigAmount('')
     setBigDate(todayISO())
     setError(null)
@@ -453,9 +504,211 @@ export default function Charity() {
           <section className="flex flex-col gap-3">
             <hr className="border-neutral-200 dark:border-neutral-800" />
             <h2 className={sectionTitle}>{t('charity.bigTitle')}</h2>
-            <div className="flex flex-col gap-3 rounded-2xl border border-rose-500/40 bg-rose-500/5 p-4 dark:bg-rose-500/10">
-              {editGoal ? (
-                <form onSubmit={submitGoal} className="flex flex-col gap-2">
+            <div className="flex flex-col gap-3">
+              {/* Список целей: главная сверху со звёздочкой, остальные ниже */}
+              {goals.map((g) => {
+                const got = collected[g.id] ?? 0
+                const gpct = g.target > 0 ? Math.min(100, (got / g.target) * 100) : 0
+                const left = Math.max(0, g.target - got)
+                const tops = topUpsOf(g)
+                return (
+                  <div
+                    key={g.id}
+                    className={
+                      'flex flex-col gap-3 rounded-2xl border p-4 ' +
+                      (g.is_primary
+                        ? 'border-rose-500/40 bg-rose-500/5 dark:bg-rose-500/10'
+                        : 'border-neutral-200 bg-white dark:border-neutral-800 dark:bg-neutral-900/50')
+                    }
+                  >
+                    {goalForm === g.id ? (
+                      <form onSubmit={submitGoal} className="flex flex-col gap-2">
+                        <input
+                          value={formName}
+                          onChange={(e) => setFormName(e.target.value)}
+                          placeholder={t('charity.goalName')}
+                          className={inputCls}
+                        />
+                        <input
+                          inputMode="decimal"
+                          value={formTarget}
+                          onChange={(e) => setFormTarget(formatAmountInput(e.target.value))}
+                          placeholder={t('charity.goalAmount')}
+                          className={inputCls}
+                        />
+                        <div className="flex gap-2">
+                          <button type="submit" className={btnPrimary}>
+                            {t('charity.saveGoal')}
+                          </button>
+                          <button type="button" onClick={() => setGoalForm(null)} className={btnGhost}>
+                            {t('common.cancel')}
+                          </button>
+                        </div>
+                      </form>
+                    ) : (
+                      <>
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => makePrimary(g.id)}
+                              disabled={g.is_primary}
+                              className="shrink-0 text-lg leading-none transition hover:scale-110 disabled:cursor-default disabled:hover:scale-100"
+                            >
+                              {g.is_primary ? '⭐' : '☆'}
+                            </button>
+                            {g.name && <p className="truncate font-medium">{g.name}</p>}
+                          </div>
+                          <span className="shrink-0 text-sm font-semibold text-rose-600 dark:text-rose-400">
+                            {Math.round(gpct)}%
+                          </span>
+                        </div>
+                        <div className="h-2.5 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
+                          <div className="h-full rounded-full bg-rose-500" style={{ width: `${gpct}%` }} />
+                        </div>
+                        <div className="grid grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <p className="text-neutral-500">{t('charity.collected')}</p>
+                            <p className="font-medium text-rose-600 dark:text-rose-400">{formatSum(got)}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-neutral-500">{t('charity.left')}</p>
+                            <p className="font-medium">{formatSum(left)}</p>
+                          </div>
+                        </div>
+                        <p className="text-xs text-neutral-500">{t('charity.target', { v: formatSum(g.target) })}</p>
+                        {g.is_primary && bigBudget > 0 && (
+                          <p className="text-xs font-medium text-rose-600 dark:text-rose-400">
+                            {t('charity.monthToBig', { v: formatSum(bigBudget) })}
+                          </p>
+                        )}
+
+                        {bigOpen === g.id ? (
+                          <form onSubmit={submitBig} className="flex flex-col gap-2">
+                            <input
+                              inputMode="decimal"
+                              value={bigAmount}
+                              onChange={(e) => setBigAmount(formatAmountInput(e.target.value))}
+                              placeholder={t('charity.topUpAmount')}
+                              className={inputCls}
+                            />
+                            <DatePicker value={bigDate} onChange={setBigDate} />
+                            <div className="flex gap-2">
+                              <button type="submit" disabled={busy} className={btnPrimary}>
+                                {busy ? t('common.saving') : t('charity.topUp')}
+                              </button>
+                              <button type="button" onClick={() => setBigOpen(null)} className={btnGhost}>
+                                {t('common.cancel')}
+                              </button>
+                            </div>
+                          </form>
+                        ) : (
+                          <div className="flex flex-wrap items-center gap-2">
+                            {charityCat && (
+                              <button type="button" onClick={() => openBigForm(g.id)} className={btnPrimary}>
+                                {t('charity.topUp')}
+                              </button>
+                            )}
+                            <IconButton icon="edit" title={t('charity.editGoal')} onClick={() => openGoalForm(g)} />
+                            {confirmDelId === g.id ? (
+                              <>
+                                <button
+                                  type="button"
+                                  onClick={() => removeGoal(g.id)}
+                                  className="rounded-lg bg-red-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-red-400"
+                                >
+                                  {t('common.delete')}
+                                </button>
+                                <button type="button" onClick={() => setConfirmDelId(null)} className={btnGhost}>
+                                  {t('common.cancel')}
+                                </button>
+                              </>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => setConfirmDelId(g.id)}
+                                className="text-sm text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                              >
+                                {t('common.delete')}
+                              </button>
+                            )}
+                          </div>
+                        )}
+
+                        {tops.length > 0 && (
+                          <details className="text-sm text-neutral-500">
+                            <summary className="cursor-pointer">{t('charity.topUps', { n: tops.length })}</summary>
+                            <div className="mt-3 flex flex-col gap-2">
+                              {tops.map((c) => (
+                                <div
+                                  key={c.id}
+                                  className="rounded-lg bg-neutral-100 px-3 py-2.5 text-sm dark:bg-neutral-800/50"
+                                >
+                                  {editId === c.id ? (
+                                    <form onSubmit={submitEdit} className="flex flex-col gap-2">
+                                      <input
+                                        inputMode="decimal"
+                                        value={editAmount}
+                                        onChange={(e) => setEditAmount(formatAmountInput(e.target.value))}
+                                        placeholder={t('charity.topUpAmount')}
+                                        className={inputCls}
+                                      />
+                                      <DatePicker value={editDate} onChange={setEditDate} />
+                                      <div className="flex gap-2">
+                                        <button type="submit" disabled={busy} className={btnPrimary}>
+                                          {busy ? t('common.saving') : t('common.save')}
+                                        </button>
+                                        <button type="button" onClick={cancelEdit} className={btnGhost}>
+                                          {t('common.cancel')}
+                                        </button>
+                                      </div>
+                                    </form>
+                                  ) : (
+                                    <div className="flex items-center justify-between gap-3">
+                                      <span className="text-neutral-700 dark:text-neutral-300">
+                                        {formatDateHuman(c.date)} · {formatSum(Number(c.amount))}
+                                      </span>
+                                      <div className="flex shrink-0 gap-3">
+                                        <button
+                                          onClick={() => startEdit(c)}
+                                          className="text-neutral-500 transition hover:text-emerald-600 dark:hover:text-emerald-400"
+                                        >
+                                          {t('common.edit')}
+                                        </button>
+                                        <button
+                                          onClick={() => removeItem(c.id)}
+                                          className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                                        >
+                                          {t('common.delete')}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </details>
+                        )}
+                      </>
+                    )}
+                  </div>
+                )
+              })}
+
+              {/* Целей пока нет */}
+              {goals.length === 0 && goalForm === null && (
+                <div className="flex flex-col gap-2 rounded-2xl border border-rose-500/40 bg-rose-500/5 p-4 dark:bg-rose-500/10">
+                  <p className="text-sm text-neutral-500">{t('charity.noGoal')}</p>
+                  <p className="text-xs text-neutral-500">{t('charity.inPot', { v: formatSum(pots.big) })}</p>
+                </div>
+              )}
+
+              {/* Добавление новой цели */}
+              {goalForm === 'new' ? (
+                <form
+                  onSubmit={submitGoal}
+                  className="flex flex-col gap-2 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50"
+                >
                   <input
                     value={formName}
                     onChange={(e) => setFormName(e.target.value)}
@@ -473,141 +726,15 @@ export default function Charity() {
                     <button type="submit" className={btnPrimary}>
                       {t('charity.saveGoal')}
                     </button>
-                    <button type="button" onClick={() => setEditGoal(false)} className={btnGhost}>
+                    <button type="button" onClick={() => setGoalForm(null)} className={btnGhost}>
                       {t('common.cancel')}
                     </button>
                   </div>
                 </form>
               ) : (
-                <>
-                  {hasGoal ? (
-                    <>
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          {goalName && <p className="font-medium">{goalName}</p>}
-                        </div>
-                        <span className="shrink-0 text-sm font-semibold text-rose-600 dark:text-rose-400">
-                          {Math.round(pct)}%
-                        </span>
-                      </div>
-                      <div className="h-2.5 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
-                        <div className="h-full rounded-full bg-rose-500" style={{ width: `${pct}%` }} />
-                      </div>
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div>
-                          <p className="text-neutral-500">{t('charity.collected')}</p>
-                          <p className="font-medium text-rose-600 dark:text-rose-400">{formatSum(pots.big)}</p>
-                        </div>
-                        <div className="text-right">
-                          <p className="text-neutral-500">{t('charity.left')}</p>
-                          <p className="font-medium">{formatSum(remaining)}</p>
-                        </div>
-                      </div>
-                      <p className="text-xs text-neutral-500">{t('charity.target', { v: formatSum(goalTarget) })}</p>
-                      {bigBudget > 0 && (
-                        <p className="text-xs font-medium text-rose-600 dark:text-rose-400">
-                          {t('charity.monthToBig', { v: formatSum(bigBudget) })}
-                        </p>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <p className="text-sm text-neutral-500">{t('charity.noGoal')}</p>
-                      <p className="text-xs text-neutral-500">{t('charity.inPot', { v: formatSum(pots.big) })}</p>
-                    </>
-                  )}
-
-                  {bigOpen ? (
-                    <form onSubmit={submitBig} className="flex flex-col gap-2">
-                      <input
-                        inputMode="decimal"
-                        value={bigAmount}
-                        onChange={(e) => setBigAmount(formatAmountInput(e.target.value))}
-                        placeholder={t('charity.topUpAmount')}
-                        className={inputCls}
-                      />
-                      <DatePicker value={bigDate} onChange={setBigDate} />
-                      <div className="flex gap-2">
-                        <button type="submit" disabled={busy} className={btnPrimary}>
-                          {busy ? t('common.saving') : t('charity.topUp')}
-                        </button>
-                        <button type="button" onClick={() => setBigOpen(false)} className={btnGhost}>
-                          {t('common.cancel')}
-                        </button>
-                      </div>
-                    </form>
-                  ) : (
-                    <div className="flex flex-wrap items-center gap-2">
-                      {charityCat && (
-                        <button type="button" onClick={openBigForm} className={btnPrimary}>
-                          {t('charity.topUp')}
-                        </button>
-                      )}
-                      {hasGoal ? (
-                        <IconButton icon="edit" title={t('charity.editGoal')} onClick={openGoalForm} />
-                      ) : (
-                        <button type="button" onClick={openGoalForm} className={btnGhost}>
-                          {t('charity.setGoal')}
-                        </button>
-                      )}
-                    </div>
-                  )}
-
-                  {bigTopUps.length > 0 && (
-                    <details className="text-sm text-neutral-500">
-                      <summary className="cursor-pointer">{t('charity.topUps', { n: bigTopUps.length })}</summary>
-                      <div className="mt-3 flex flex-col gap-2">
-                        {bigTopUps.map((c) => (
-                          <div
-                            key={c.id}
-                            className="rounded-lg bg-neutral-100 px-3 py-2.5 text-sm dark:bg-neutral-800/50"
-                          >
-                            {editId === c.id ? (
-                              <form onSubmit={submitEdit} className="flex flex-col gap-2">
-                                <input
-                                  inputMode="decimal"
-                                  value={editAmount}
-                                  onChange={(e) => setEditAmount(formatAmountInput(e.target.value))}
-                                  placeholder={t('charity.topUpAmount')}
-                                  className={inputCls}
-                                />
-                                <DatePicker value={editDate} onChange={setEditDate} />
-                                <div className="flex gap-2">
-                                  <button type="submit" disabled={busy} className={btnPrimary}>
-                                    {busy ? t('common.saving') : t('common.save')}
-                                  </button>
-                                  <button type="button" onClick={cancelEdit} className={btnGhost}>
-                                    {t('common.cancel')}
-                                  </button>
-                                </div>
-                              </form>
-                            ) : (
-                              <div className="flex items-center justify-between gap-3">
-                                <span className="text-neutral-700 dark:text-neutral-300">
-                                  {formatDateHuman(c.date)} · {formatSum(Number(c.amount))}
-                                </span>
-                                <div className="flex shrink-0 gap-3">
-                                  <button
-                                    onClick={() => startEdit(c)}
-                                    className="text-neutral-500 transition hover:text-emerald-600 dark:hover:text-emerald-400"
-                                  >
-                                    {t('common.edit')}
-                                  </button>
-                                  <button
-                                    onClick={() => removeItem(c.id)}
-                                    className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
-                                  >
-                                    {t('common.delete')}
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-                          </div>
-                        ))}
-                      </div>
-                    </details>
-                  )}
-                </>
+                <button type="button" onClick={() => openGoalForm(null)} className={btnGhost + ' self-start'}>
+                  {t('charity.setGoal')}
+                </button>
               )}
             </div>
           </section>

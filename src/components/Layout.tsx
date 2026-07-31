@@ -4,15 +4,19 @@ import BackupReminder from './BackupReminder'
 import AssistantWidget from './AssistantWidget'
 import Toaster from './Toaster'
 import { useLang } from '../lib/i18n'
+import { useAuth } from '../lib/AuthContext'
 import { MODULES, moduleForPath } from '../lib/modules'
 import { saveModulePath, loadModulePath } from '../lib/moduleNav'
 
 export default function Layout() {
   const { t } = useLang()
+  const { user } = useAuth()
   const location = useLocation()
   const navigate = useNavigate()
   const activeModule = moduleForPath(location.pathname)
   const navItems = activeModule.nav
+  const accountInitial = (user?.email?.trim()[0] || 'N').toUpperCase()
+  const accountLabel = user?.email || 'Настройки'
   // Контент скроллится внутри <main>, а не в окне — это позволяет закреплять
   // (sticky) шапки внутри каждой страницы, не перекрывая мобильную верхнюю панель.
   const mainRef = useRef<HTMLElement>(null)
@@ -91,6 +95,23 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
+
+        {/* Аккаунт всегда закреплён в левом нижнем углу сайдбара. */}
+        <button
+          type="button"
+          onClick={() => navigate('/settings')}
+          title={accountLabel}
+          aria-label={accountLabel}
+          className="mt-auto flex items-center gap-3 rounded-xl p-2 text-left transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+        >
+          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500 font-semibold text-neutral-950">
+            {accountInitial}
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-medium">{user?.email || 'Nucleus'}</span>
+            <span className="block text-xs text-neutral-500 dark:text-neutral-400">⚙️ {t('set.title')}</span>
+          </span>
+        </button>
       </aside>
 
       {/* Top bar (mobile): brand + module switcher. Не скроллится — main скроллится сам. */}
@@ -102,6 +123,15 @@ export default function Layout() {
           Nucleus
         </span>
         <div className="ml-auto min-w-0 flex-1">{moduleSwitcher}</div>
+        <button
+          type="button"
+          onClick={() => navigate('/settings')}
+          title={accountLabel}
+          aria-label={accountLabel}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-sm font-semibold text-neutral-950"
+        >
+          {accountInitial}
+        </button>
       </header>
 
       {/* Content (scroll container) */}

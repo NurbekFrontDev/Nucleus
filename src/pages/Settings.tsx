@@ -317,7 +317,14 @@ export default function Settings() {
           на этапе сборки, так что всегда совпадает с версией установщика и APK. */}
       <p className="pt-2 text-xs text-neutral-400 dark:text-neutral-600">
         Nucleus v{APP_VERSION}
-        {isDesktop() ? ' · Windows' : ''}
+        {' · '}
+        {isDesktop()
+          ? 'Windows'
+          : /android/i.test(navigator.userAgent)
+            ? 'Android'
+            : lang === 'en'
+              ? 'Web'
+              : 'Браузер'}
       </p>
     </div>
   )

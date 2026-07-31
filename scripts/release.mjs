@@ -33,6 +33,7 @@
 import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
+import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
@@ -81,6 +82,34 @@ function loadEnvFile(file) {
 loadEnvFile('.env.local')
 loadEnvFile('.env')
 
+// ---------- ключ подписи ----------
+// Tauri ждёт сам ключ в переменной TAURI_SIGNING_PRIVATE_KEY, а не путь к файлу.
+// Если переменная не задана, сами находим файл ключа и читаем его.
+function ensureSigningKey() {
+  const current = process.env.TAURI_SIGNING_PRIVATE_KEY
+  // Если в переменной лежит путь к файлу — подменяем его содержимым.
+  if (current && current.trim()) {
+    const asPath = current.trim()
+    if (!asPath.includes('\n') && existsSync(asPath)) {
+      process.env.TAURI_SIGNING_PRIVATE_KEY = readFileSync(asPath, 'utf8').trim()
+    }
+    return
+  }
+  const candidates = [
+    process.env.TAURI_SIGNING_PRIVATE_KEY_PATH,
+    join(homedir(), '.tauri', 'nucleus.key'),
+    join(root, 'src-tauri', 'nucleus.key'),
+  ].filter(Boolean)
+  for (const file of candidates) {
+    if (existsSync(file)) {
+      process.env.TAURI_SIGNING_PRIVATE_KEY = readFileSync(file, 'utf8').trim()
+      console.log(`Ключ подписи взят из ${file}`)
+      return
+    }
+  }
+}
+ensureSigningKey()
+
 // ---------- версия ----------
 const pkgPath = join(root, 'package.json')
 const confPath = join(root, 'src-tauri', 'tauri.conf.json')
@@ -115,17 +144,41 @@ const exePath = join(bundleDir, exeName)
 const sigPath = `${exePath}.sig`
 
 if (!skipBuild) {
-  if (!process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
-    console.warn(
-      'Внимание: TAURI_SIGNING_PRIVATE_KEY_PASSWORD не задан. Подпись обновления может не создаться.',
+  const hasSigningKey = Boolean(process.env.TAURI_SIGNING_PRIVATE_KEY)
+
+  // Локальная установка не передаёт обновление другим устройствам и не нуждается
+  // в .sig. Собираем её без updater-артефактов, если ключа на ПК нет. Исходный
+  // tauri.conf.json сразу восстанавливается, поэтому облачные релизы не меняются.
+  if (doUpload && !hasSigningKey) {
+    console.error(
+      'Для публикации обновления нужен приватный ключ подписи: %USERPROFILE%\\.tauri\\nucleus.key\n' +
+        'или TAURI_SIGNING_PRIVATE_KEY в .env.local.',
     )
+    process.exit(1)
   }
+
+  const localWithoutSigning = doLocal && !doUpload && !hasSigningKey
+  const savedConfig = JSON.stringify(conf, null, 2)
+  if (localWithoutSigning) {
+    conf.bundle = { ...conf.bundle, createUpdaterArtifacts: false }
+    writeFileSync(confPath, `${JSON.stringify(conf, null, 2)}\n`, 'utf8')
+    console.log('Ключ подписи не найден: локальная сборка будет без .sig (это нормально).')
+  } else if (!process.env.TAURI_SIGNING_PRIVATE_KEY_PASSWORD) {
+    console.warn('Внимание: TAURI_SIGNING_PRIVATE_KEY_PASSWORD не задан. Подпись обновления может не создаться.')
+  }
+
   console.log('Сборка установщика…')
-  execFileSync('npm', ['run', 'tauri', 'build'], {
-    cwd: root,
-    stdio: 'inherit',
-    shell: true,
-  })
+  try {
+    execFileSync('npm', ['run', 'tauri', 'build'], {
+      cwd: root,
+      stdio: 'inherit',
+      shell: true,
+    })
+  } finally {
+    if (localWithoutSigning) {
+      writeFileSync(confPath, `${savedConfig}\n`, 'utf8')
+    }
+  }
 }
 
 if (!existsSync(exePath)) {

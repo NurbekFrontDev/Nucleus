@@ -28,7 +28,9 @@
   "bundle": {
     "active": true,
     "createUpdaterArtifacts": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -46,7 +48,9 @@
     },
     "deep-link": {
       "desktop": {
-        "schemes": ["com.nucleus.app"]
+        "schemes": [
+          "com.nucleus.app"
+        ]
       }
     }
   }
