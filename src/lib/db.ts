@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { isOnline } from './offlineSync'
 
 export type MonthRow = {
   id: string
@@ -21,7 +22,10 @@ export async function getOrCreateMonth(
     .eq('year', year)
     .eq('month', month)
     .maybeSingle()
-  if (error) throw error
+  // При офлайн-старте точного GET-кэша для нового месяца может ещё не быть.
+  // В этом случае создаём временный месяц через очередь: его временный id будет
+  // подставлен в следующие офлайн-записи и заменён на реальный при синхронизации.
+  if (error && isOnline()) throw error
   if (existing) return existing as MonthRow
 
   const { data: created, error: insErr } = await supabase

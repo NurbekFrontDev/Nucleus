@@ -47,7 +47,9 @@ type CharityCache = {
   received: number
   pots: CharityPotsStats
   split: number
-  goals: CharityGoal[]
+  // Необязательное поле для совместимости с кэшем старой версии,
+  // где была одна цель (goalName / goalTarget), а массива goals ещё не было.
+  goals?: CharityGoal[]
   items: CharityExpense[]
 }
 
@@ -109,12 +111,22 @@ export default function Charity() {
     const ck = `charity:${user.id}`
     const cached = readCache<CharityCache>(ck)
     if (cached) {
-      setCategories(cached.categories)
-      setReceived(cached.received)
-      setPots(cached.pots)
-      setSplit(cached.split)
-      setGoals(cached.goals)
-      setItems(cached.items)
+      // Кэш не является контрактом: старые версии могли не содержать часть полей.
+      // Нормализуем все коллекции и числа до передачи в React, чтобы повреждённый
+      // или устаревший payload никогда не превращался в чёрный экран.
+      setCategories(Array.isArray(cached.categories) ? cached.categories : [])
+      setReceived(Number(cached.received) || 0)
+      setPots({
+        big: Number(cached.pots?.big) || 0,
+        small: Number(cached.pots?.small) || 0,
+        total: Number(cached.pots?.total) || 0,
+      })
+      const cachedSplit = Number(cached.split)
+      setSplit(Number.isFinite(cachedSplit) ? Math.max(0, Math.min(100, cachedSplit)) : DEFAULT_CHARITY_SPLIT)
+      // Старый локальный кэш до перехода на список целей не содержит goals.
+      // Не даём ему положить undefined в состояние и сломать рендер страницы.
+      setGoals(Array.isArray(cached.goals) ? cached.goals : [])
+      setItems(Array.isArray(cached.items) ? cached.items : [])
       setLoading(false)
     } else {
       setLoading(true)

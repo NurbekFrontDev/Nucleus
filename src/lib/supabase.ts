@@ -1,6 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { Capacitor } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
+import { flushOfflineQueue, offlineFetch } from './offlineSync'
 
 // Ключи берутся из файла .env (он не попадает в GitHub)
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
@@ -32,6 +33,8 @@ const nativeStorage = {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  // Не даём сетевому запросу держать экран загрузки бесконечно при плохой сети.
+  db: { timeout: 15_000 },
   auth: {
     persistSession: true,
     autoRefreshToken: true,
@@ -41,4 +44,18 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     flowType: 'pkce',
     ...(isNative ? { storage: nativeStorage } : {}),
   },
+  // Все REST-запросы получают IndexedDB-кэш и очередь изменений без сети.
+  global: { fetch: offlineFetch },
 })
+
+// Отправляет накопленные изменения после возврата сети. Токен никогда не лежит
+// в IndexedDB: перед каждой синхронизацией берётся свежая сессия Supabase.
+export async function syncOfflineChanges(): Promise<number> {
+  const { data } = await supabase.auth.getSession()
+  const session = data.session
+  if (!session) return 0
+  return flushOfflineQueue(session.user.id, async () => ({
+    apikey: supabaseAnonKey,
+    authorization: `Bearer ${session.access_token}`,
+  }))
+}

@@ -93,12 +93,15 @@ export async function deleteCharityGoal(userId: string, goalId: string): Promise
  */
 export function collectedByGoal(
   items: Array<{ amount: number; charity_goal_id: string | null; paid_from_pot: string | null }>,
-  goals: CharityGoal[],
+  goals: CharityGoal[] | null | undefined,
 ): Record<string, number> {
-  const primaryId = goals.find((g) => g.is_primary)?.id ?? null
-  const known = new Set(goals.map((g) => g.id))
+  // Защита от старого или повреждённого кэша: страница не должна падать,
+  // даже если массив целей ещё не успел загрузиться.
+  const goalList = Array.isArray(goals) ? goals : []
+  const primaryId = goalList.find((g) => g.is_primary)?.id ?? null
+  const known = new Set(goalList.map((g) => g.id))
   const acc: Record<string, number> = {}
-  for (const g of goals) acc[g.id] = 0
+  for (const g of goalList) acc[g.id] = 0
   for (const it of items) {
     if (it.paid_from_pot) continue
     const id =

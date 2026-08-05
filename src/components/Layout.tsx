@@ -3,6 +3,7 @@ import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import BackupReminder from './BackupReminder'
 import AssistantWidget from './AssistantWidget'
 import Toaster from './Toaster'
+import OfflineBanner from './OfflineBanner'
 import { useLang } from '../lib/i18n'
 import { useAuth } from '../lib/AuthContext'
 import { MODULES, moduleForPath } from '../lib/modules'
@@ -173,6 +174,9 @@ export default function Layout() {
       <AssistantWidget />
 
       <BackupReminder />
+
+      {/* Статус автономной работы и фоновой синхронизации. */}
+      <OfflineBanner />
 
       {/* Всплывающие тосты (напр. «автобэкап сделан»). */}
       <Toaster />
