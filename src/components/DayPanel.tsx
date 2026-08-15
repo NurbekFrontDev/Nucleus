@@ -8,11 +8,13 @@ import {
   loadDay,
   toggleDone,
   todayStr,
+  formatDuration,
   PRIORITY_DOT,
   type PlannerItem,
   type PlannerLog,
   type PlannerDayOverride,
 } from '../lib/planner'
+import { rescheduleAll } from '../lib/notifications'
 
 // Окно одного дня (П-6). Открывается по нажатию на день в календаре.
 // Снизу на телефоне, по центру на компьютере. Показывает прогресс дня и
@@ -30,7 +32,7 @@ const rowCls =
   'flex items-start gap-2.5 rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50'
 
 export default function DayPanel({ userId, date, onClose, onChanged }: Props) {
-  const { t } = useLang()
+  const { t, lang } = useLang()
   const [open, setOpen] = useState(true)
   const visible = useAnimatedMount(open, 220)
 
@@ -108,6 +110,7 @@ export default function DayPanel({ userId, date, onClose, onChanged }: Props) {
         return next
       })
       onChanged()
+      if (date === today) void rescheduleAll(userId)
     } catch {
       await reload()
     }
@@ -133,6 +136,7 @@ export default function DayPanel({ userId, date, onClose, onChanged }: Props) {
     const done = isDone(item.id)
     const dot = PRIORITY_DOT[item.priority]
     const time = timeLabel(item)
+    const duration = formatDuration(item.duration_min, lang)
     const isHabit = item.type === 'habit'
     return (
       <div key={item.id} className={`${rowCls}${done && !editDay ? ' opacity-60' : ''}`}>
@@ -168,6 +172,7 @@ export default function DayPanel({ userId, date, onClose, onChanged }: Props) {
             }`}
           >
             <span className="break-words">{item.title}</span>
+            {duration && <span className="font-normal text-neutral-400"> · {duration}</span>}
             {overrides[item.id] && !overrides[item.id].frozen && (
               <span
                 title={t('today.edited')}
@@ -302,6 +307,7 @@ export default function DayPanel({ userId, date, onClose, onChanged }: Props) {
           onSaved={() => {
             void reload()
             onChanged()
+            if (date === today) void rescheduleAll(userId)
           }}
         />
       )}

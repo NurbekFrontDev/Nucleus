@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { readCache, writeCache } from './offlineCache'
 
 // ====================================================================
 // Модуль логики Планировщика (общий для всех экранов планировщика).
@@ -40,6 +41,9 @@ export type PlannerItem = {
   time_of_day: TimeOfDay
   at_time_start: string | null
   at_time_end: string | null
+  // Планируемая длительность в минутах. Если задана вместе с началом,
+  // интерфейс сам рассчитывает конец; иначе конец вводится вручную.
+  duration_min: number | null
   priority: Priority
   start_date: string | null
   icon: string | null
@@ -67,7 +71,7 @@ export type PlannerLog = {
 
 // Набор колонок для запросов (держим в одном месте, чтобы не расходились).
 export const ITEM_COLS =
-  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at'
+  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at'
 export const LOG_COLS = 'id, item_id, date, status, value, note'
 
 // Эмодзи-кружок важности для UI. Для none -- пусто.
@@ -238,6 +242,36 @@ export function isoWeekday(dateStr: string): number {
   return js === 0 ? 7 : js
 }
 
+// Рассчитывает время конца из начала и длительности. Перенос через полночь
+// поддержан: 23:30 + 90 мин -> 01:00 следующего дня.
+export function endTimeFromDuration(start: string, durationMin: number | null | undefined): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(start)
+  const duration = Number(durationMin)
+  if (!m || !Number.isFinite(duration) || duration <= 0) return ''
+  const hours = Number(m[1])
+  const minutes = Number(m[2])
+  if (hours > 23 || minutes > 59) return ''
+  const total = (hours * 60 + minutes + Math.round(duration)) % (24 * 60)
+  return `${pad2(Math.floor(total / 60))}:${pad2(total % 60)}`
+}
+
+// Компактная подпись рядом с названием дела. Не зависит от i18n-словаря,
+// чтобы одинаково использоваться во всех карточках Planner.
+export function formatDuration(durationMin: number | null | undefined, lang: 'ru' | 'en' = 'ru'): string {
+  const total = Math.round(Number(durationMin))
+  if (!Number.isFinite(total) || total <= 0) return ''
+  const hours = Math.floor(total / 60)
+  const minutes = total % 60
+  if (lang === 'en') {
+    if (hours && minutes) return `${hours} h ${minutes} min`
+    if (hours) return `${hours} h`
+    return `${minutes} min`
+  }
+  if (hours && minutes) return `${hours} ч ${minutes} мин`
+  if (hours) return `${hours} ч`
+  return `${minutes} мин`
+}
+
 // Попадает ли дело в указанный день (с учётом правила повторения и старта).
 export function isItemOnDate(item: PlannerItem, dateStr: string): boolean {
   if (item.archived) return false
@@ -269,6 +303,7 @@ export type PlannerDayOverride = {
   time_of_day: TimeOfDay
   at_time_start: string | null
   at_time_end: string | null
+  duration_min: number | null
   priority: Priority | null
   note: string | null
   frozen: boolean
@@ -286,12 +321,42 @@ export type PlannerWeekdayOverride = {
   time_of_day: TimeOfDay
   at_time_start: string | null
   at_time_end: string | null
+  duration_min: number | null
+}
+
+export type PlannerWeeklyDaySnapshotItem = {
+  item_id: string
+  title: string
+  note: string | null
+  icon: string | null
+  time_of_day: TimeOfDay
+  at_time_start: string | null
+  at_time_end: string | null
+  duration_min: number | null
+  priority: Priority
+  important: boolean
+  sort_order: number
+}
+
+// Полный снимок конкретного дня для повторения по тому же дню недели.
+// Он хранит состав, порядок и локальные настройки уже собранного дня, поэтому
+// «сделать среду еженедельной» не меняет другие дни и не ломает историю.
+export type PlannerWeeklyDaySnapshot = {
+  id: string
+  weekday: number
+  effective_from: string
+  enabled: boolean
+  // Нужна для local-first: при офлайн-очереди не даём старому GET-кэшу
+  // затереть более свежий локально созданный снимок.
+  created_at: string
+  items: PlannerWeeklyDaySnapshotItem[]
 }
 
 export type DayData = {
   items: PlannerItem[] // дела этого дня в нужном порядке
   logs: Record<string, PlannerLog> // itemId -> отметка за этот день
   overrides: Record<string, PlannerDayOverride> // itemId -> персональная правка этого дня
+  weeklySnapshot: PlannerWeeklyDaySnapshot | null
 }
 
 // Загружает правки для указанного дня недели. Если таблицы ещё нет
@@ -302,7 +367,7 @@ export async function loadWeekdayOverrides(
 ): Promise<PlannerWeekdayOverride[]> {
   const { data, error } = await supabase
     .from('planner_weekday_overrides')
-    .select('item_id, weekday, time_of_day, at_time_start, at_time_end')
+    .select('item_id, weekday, time_of_day, at_time_start, at_time_end, duration_min')
     .eq('user_id', userId)
     .eq('weekday', weekday)
   if (error) return []
@@ -314,7 +379,12 @@ export async function saveWeekdayOverride(
   userId: string,
   itemId: string,
   weekday: number,
-  patch: { time_of_day: TimeOfDay; at_time_start: string | null; at_time_end: string | null },
+  patch: {
+    time_of_day: TimeOfDay
+    at_time_start: string | null
+    at_time_end: string | null
+    duration_min: number | null
+  },
 ): Promise<void> {
   const { error } = await supabase.from('planner_weekday_overrides').upsert(
     {
@@ -324,6 +394,7 @@ export async function saveWeekdayOverride(
       time_of_day: patch.time_of_day,
       at_time_start: patch.at_time_start,
       at_time_end: patch.at_time_end,
+      duration_min: patch.duration_min,
       updated_at: new Date().toISOString(),
     },
     { onConflict: 'user_id,item_id,weekday' },
@@ -346,10 +417,160 @@ export async function clearWeekdayOverride(
   if (error) throw error
 }
 
+const weeklySnapshotCacheKey = (userId: string, weekday: number) =>
+  `plannerWeeklySnapshot:${userId}:${weekday}`
+
+/**
+ * Берёт последний снимок для дня недели, действующий на указанную дату.
+ * localStorage служит первым уровнем: после сохранения без сети снимок сразу
+ * доступен при перезапуске, а облако обновляет его в фоне при наличии сети.
+ */
+export async function loadWeeklyDaySnapshot(
+  userId: string,
+  dateStr: string,
+): Promise<PlannerWeeklyDaySnapshot | null> {
+  const weekday = isoWeekday(dateStr)
+  const key = weeklySnapshotCacheKey(userId, weekday)
+  const cached = readCache<PlannerWeeklyDaySnapshot | null>(key)
+  try {
+    const { data: headerData, error: headerError } = await supabase
+      .from('planner_weekly_day_snapshots')
+      .select('id, weekday, effective_from, enabled, created_at')
+      .eq('user_id', userId)
+      .eq('weekday', weekday)
+      .lte('effective_from', dateStr)
+      .order('effective_from', { ascending: false })
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+    if (headerError) throw headerError
+    if (!headerData) {
+      // GET может ещё не знать о временном офлайн-id родителя.
+      if (cached?.id.startsWith('offline:') && cached.effective_from <= dateStr) return cached
+      writeCache(key, null)
+      return null
+    }
+    const header = headerData as {
+      id: string
+      weekday: number
+      effective_from: string
+      enabled: boolean
+      created_at: string
+    }
+    // Если серверный GET вернул более старый кэш, локальная оптимистичная
+    // запись остаётся источником истины до завершения очереди синхронизации.
+    const cachedIsNewer =
+      !!cached &&
+      cached.id.startsWith('offline:') &&
+      cached.effective_from >= header.effective_from &&
+      Date.parse(cached.created_at ?? '') >= Date.parse(header.created_at ?? '')
+    if (cachedIsNewer) return cached
+    if (!header.enabled) {
+      const disabled: PlannerWeeklyDaySnapshot = { ...header, enabled: false, items: [] }
+      writeCache(key, disabled)
+      return disabled
+    }
+    const { data: itemData, error: itemError } = await supabase
+      .from('planner_weekly_day_snapshot_items')
+      .select(
+        'item_id, title, note, icon, time_of_day, at_time_start, at_time_end, duration_min, priority, important, sort_order',
+      )
+      .eq('user_id', userId)
+      .eq('snapshot_id', header.id)
+      .order('sort_order', { ascending: true })
+    if (itemError) throw itemError
+    const snapshot: PlannerWeeklyDaySnapshot = {
+      ...header,
+      enabled: true,
+      items: (itemData ?? []) as PlannerWeeklyDaySnapshotItem[],
+    }
+    writeCache(key, snapshot)
+    return snapshot
+  } catch {
+    // Без сети либо при первой версии БД используем только уже сохранённый
+    // локальный снимок. Это не мешает открыть Планировщик офлайн.
+    return cached && cached.effective_from <= dateStr ? cached : null
+  }
+}
+
+/**
+ * Фиксирует текущий собранный день как новый недельный снимок. Мы создаём
+ * новую версию, а не переписываем старую: история до effective_from остаётся
+ * честной, а offline queue может безопасно связать временные id родителя/детей.
+ */
+export async function saveWeeklyDaySnapshot(
+  userId: string,
+  dateStr: string,
+  items: PlannerItem[],
+): Promise<PlannerWeeklyDaySnapshot> {
+  const weekday = isoWeekday(dateStr)
+  const { data: headerData, error: headerError } = await supabase
+    .from('planner_weekly_day_snapshots')
+    .insert({ user_id: userId, weekday, effective_from: dateStr, enabled: true })
+    .select('id, weekday, effective_from, enabled, created_at')
+    .single()
+  if (headerError || !headerData) throw headerError ?? new Error('weekly snapshot insert failed')
+
+  const header = {
+    ...(headerData as {
+      id: string
+      weekday: number
+      effective_from: string
+      enabled: boolean
+      created_at?: string
+    }),
+    created_at: (headerData as { created_at?: string }).created_at ?? new Date().toISOString(),
+  }
+  const rows: PlannerWeeklyDaySnapshotItem[] = items.map((item, index) => ({
+    item_id: item.id,
+    title: item.title,
+    note: item.note,
+    icon: item.icon,
+    time_of_day: item.time_of_day,
+    at_time_start: item.at_time_start,
+    at_time_end: item.at_time_end,
+    duration_min: item.duration_min,
+    priority: item.priority,
+    important: item.important,
+    sort_order: index + 1,
+  }))
+  if (rows.length > 0) {
+    const { error: itemError } = await supabase.from('planner_weekly_day_snapshot_items').insert(
+      rows.map((row) => ({
+        ...row,
+        user_id: userId,
+        snapshot_id: header.id,
+      })),
+    )
+    if (itemError) throw itemError
+  }
+
+  const snapshot: PlannerWeeklyDaySnapshot = { ...header, enabled: true, items: rows }
+  writeCache(weeklySnapshotCacheKey(userId, weekday), snapshot)
+  return snapshot
+}
+
+/** Отключает недельный снимок с выбранной даты и возвращает обычное расписание. */
+export async function clearWeeklyDaySnapshot(userId: string, dateStr: string): Promise<void> {
+  const weekday = isoWeekday(dateStr)
+  const { data, error } = await supabase
+    .from('planner_weekly_day_snapshots')
+    .insert({ user_id: userId, weekday, effective_from: dateStr, enabled: false })
+    .select('id, weekday, effective_from, enabled, created_at')
+    .single()
+  if (error || !data) throw error ?? new Error('weekly snapshot reset failed')
+  const snapshot: PlannerWeeklyDaySnapshot = {
+    ...(data as Omit<PlannerWeeklyDaySnapshot, 'items'>),
+    created_at: (data as { created_at?: string }).created_at ?? new Date().toISOString(),
+    items: [],
+  }
+  writeCache(weeklySnapshotCacheKey(userId, weekday), snapshot)
+}
+
 // Загружает все дела пользователя, отбирает попадающие в этот день, подтягивает
 // отметки и ручной порядок именно для этого дня, и сортирует список.
 export async function loadDay(userId: string, dateStr: string): Promise<DayData> {
-  const [itemsRes, logsRes, orderRes, ovRes, wdOvs] = await Promise.all([
+  const [itemsRes, logsRes, orderRes, ovRes, wdOvs, weeklySnapshot] = await Promise.all([
     supabase
       .from('planner_items')
       .select(ITEM_COLS)
@@ -367,11 +588,14 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
       .eq('date', dateStr),
     supabase
       .from('planner_day_overrides')
-      .select('item_id, title, icon, time_of_day, at_time_start, at_time_end, priority, note, frozen, hidden')
+      .select('item_id, title, icon, time_of_day, at_time_start, at_time_end, duration_min, priority, note, frozen, hidden')
       .eq('user_id', userId)
       .eq('date', dateStr),
     // Правки на этот ДЕНЬ НЕДЕЛИ (напр. «каждое воскресенье начинать позже»).
     loadWeekdayOverrides(userId, isoWeekday(dateStr)),
+    // Целый снимок дня недели. Ошибка схемы/сети внутри функции даёт cache/null,
+    // поэтому старый Planner не получает чёрный экран во время обновления БД.
+    loadWeeklyDaySnapshot(userId, dateStr),
   ])
   if (itemsRes.error) throw itemsRes.error
   if (logsRes.error) throw logsRes.error
@@ -411,9 +635,29 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
   const wdMap = new Map<string, PlannerWeekdayOverride>()
   for (const w of wdOvs) wdMap.set(w.item_id, w)
 
+  // Накладывает персональную правку конкретной даты. Она всегда выше шаблона,
+  // weekly-override и нового weekly snapshot.
+  const applyDateOverride = (base: PlannerItem): PlannerItem => {
+    const ov = ovMap.get(base.id)
+    if (!ov) return base
+    return {
+      ...base,
+      title: ov.title ?? base.title,
+      icon: ov.icon ?? base.icon,
+      time_of_day: ov.time_of_day,
+      at_time_start: ov.at_time_start,
+      at_time_end: ov.at_time_end,
+      // null здесь осознанно очищает длительность именно на эту дату,
+      // чтобы можно было вернуться к ручному вводу времени конца.
+      duration_min: ov.duration_min,
+      priority: ov.priority ?? base.priority,
+      note: ov.note,
+    }
+  }
+
   // Отбираем дела дня и накладываем правки поверх шаблона.
   // Порядок приоритета: шаблон -> правка дня недели -> правка конкретной даты.
-  const occurring = all
+  let occurring = all
     .filter(keepInDay)
     .map((it) => {
       const wd = wdMap.get(it.id)
@@ -423,21 +667,48 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
             time_of_day: wd.time_of_day,
             at_time_start: wd.at_time_start,
             at_time_end: wd.at_time_end,
+            // Недельная правка сохраняет выбранный режим времени целиком:
+            // null означает ручное время конца, а не наследование новой длительности шаблона.
+            duration_min: wd.duration_min,
           }
         : it
-      const ov = ovMap.get(it.id)
-      if (!ov) return base
-      return {
-        ...base,
-        title: ov.title ?? base.title,
-        icon: ov.icon ?? base.icon,
-        time_of_day: ov.time_of_day,
-        at_time_start: ov.at_time_start,
-        at_time_end: ov.at_time_end,
-        priority: ov.priority ?? base.priority,
-        note: ov.note,
-      }
+      return applyDateOverride(base)
     })
+
+  // Недельный снимок заменяет нормальное расписание лишь с effective_from
+  // и только для выбранного дня недели. Он содержит точный список и порядок,
+  // а прямые правки конкретной даты всё ещё получают высший приоритет.
+  if (weeklySnapshot?.enabled) {
+    const allById = new Map(all.map((item) => [item.id, item]))
+    const snapshotItemIds = new Set(weeklySnapshot.items.map((item) => item.item_id))
+    const snapshotItems = weeklySnapshot.items
+      .map((snapshotItem) => {
+        const original = allById.get(snapshotItem.item_id)
+        const directOverride = ovMap.get(snapshotItem.item_id)
+        if (!original || original.archived || directOverride?.hidden) return null
+        return applyDateOverride({
+          ...original,
+          title: snapshotItem.title,
+          note: snapshotItem.note,
+          icon: snapshotItem.icon,
+          time_of_day: snapshotItem.time_of_day,
+          at_time_start: snapshotItem.at_time_start,
+          at_time_end: snapshotItem.at_time_end,
+          duration_min: snapshotItem.duration_min,
+          priority: snapshotItem.priority,
+          important: snapshotItem.important,
+          sort_order: snapshotItem.sort_order,
+        })
+      })
+      .filter((item): item is PlannerItem => item !== null)
+
+    // Явно отредактированное только на эту дату дело не должно исчезнуть,
+    // даже если оно не вошло в недельный снимок.
+    const directExtras = all
+      .filter((item) => !snapshotItemIds.has(item.id) && !!ovMap.get(item.id) && !ovMap.get(item.id)?.hidden)
+      .map(applyDateOverride)
+    occurring = [...snapshotItems, ...directExtras]
+  }
 
   // Ручной порядок дня (если задавали перетаскиванием) имеет приоритет.
   const orderMap = new Map<string, number>()
@@ -461,7 +732,7 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
   const overrides: Record<string, PlannerDayOverride> = {}
   for (const [id, ov] of ovMap) overrides[id] = ov
 
-  return { items: occurring, logs, overrides }
+  return { items: occurring, logs, overrides, weeklySnapshot }
 }
 
 // Отметить/снять выполнение дела за день.
@@ -554,6 +825,7 @@ export type DayOverridePatch = {
   time_of_day: TimeOfDay
   at_time_start: string | null
   at_time_end: string | null
+  duration_min: number | null
   priority: Priority
   note: string | null
 }
@@ -574,6 +846,7 @@ export async function saveDayOverride(
       time_of_day: patch.time_of_day,
       at_time_start: patch.at_time_start,
       at_time_end: patch.at_time_end,
+      duration_min: patch.duration_min,
       priority: patch.priority,
       note: patch.note,
       // Ручная правка дня (не заморозка) -> показываем значок ✎ и кнопку сброса.
@@ -696,6 +969,7 @@ export type ItemInput = {
   time_of_day: TimeOfDay
   at_time_start: string | null
   at_time_end: string | null
+  duration_min: number | null
   priority: Priority
   start_date: string | null
   icon: string | null
@@ -730,6 +1004,7 @@ function itemRow(input: ItemInput) {
     time_of_day: input.time_of_day,
     at_time_start: input.at_time_start,
     at_time_end: input.at_time_end,
+    duration_min: input.duration_min,
     priority: input.priority,
     start_date: input.start_date || todayStr(),
     icon: input.icon,
@@ -848,6 +1123,7 @@ export async function freezePastDays(userId: string, item: PlannerItem): Promise
         time_of_day: item.time_of_day,
         at_time_start: item.at_time_start,
         at_time_end: item.at_time_end,
+        duration_min: item.duration_min,
         priority: item.priority,
         note: item.note,
         frozen: true,
@@ -1242,6 +1518,134 @@ export type DaySummary = {
   marks: DayMark[]
 }
 
+// Набор полей, нужных календарю и статистике для точной сборки дня.
+// Полная правка хранит больше данных, но для меток нам важны только приоритет и скрытие.
+type SummaryDayOverride = Pick<PlannerDayOverride, 'item_id' | 'priority' | 'hidden'>
+
+// Загружает все версии weekly-снимков до конца требуемого периода одним набором
+// запросов. Это сохраняет календарь/статистику консистентными с экраном «Сегодня»
+// и не превращает годовой вид в сотни отдельных запросов.
+async function loadWeeklySnapshotsForRange(
+  userId: string,
+  endDate: string,
+): Promise<PlannerWeeklyDaySnapshot[]> {
+  try {
+    const { data: headerData, error: headerError } = await supabase
+      .from('planner_weekly_day_snapshots')
+      .select('id, weekday, effective_from, enabled, created_at')
+      .eq('user_id', userId)
+      .lte('effective_from', endDate)
+      .order('weekday', { ascending: true })
+      .order('effective_from', { ascending: true })
+      .order('created_at', { ascending: true })
+    if (headerError) throw headerError
+
+    const headers = (headerData ?? []) as Array<Omit<PlannerWeeklyDaySnapshot, 'items'>>
+    const enabledIds = headers.filter((header) => header.enabled).map((header) => header.id)
+    const itemsBySnapshot = new Map<string, PlannerWeeklyDaySnapshotItem[]>()
+
+    if (enabledIds.length > 0) {
+      const { data: itemData, error: itemError } = await supabase
+        .from('planner_weekly_day_snapshot_items')
+        .select(
+          'snapshot_id, item_id, title, note, icon, time_of_day, at_time_start, at_time_end, duration_min, priority, important, sort_order',
+        )
+        .eq('user_id', userId)
+        .in('snapshot_id', enabledIds)
+      if (itemError) throw itemError
+
+      type SnapshotItemRow = PlannerWeeklyDaySnapshotItem & { snapshot_id: string }
+      for (const row of (itemData ?? []) as SnapshotItemRow[]) {
+        const { snapshot_id, ...item } = row
+        const list = itemsBySnapshot.get(snapshot_id) ?? []
+        list.push(item)
+        itemsBySnapshot.set(snapshot_id, list)
+      }
+      for (const list of itemsBySnapshot.values()) list.sort((a, b) => a.sort_order - b.sort_order)
+    }
+
+    return headers.map((header) => ({ ...header, items: itemsBySnapshot.get(header.id) ?? [] }))
+  } catch {
+    // Офлайн: берём последнюю локально сохранённую версию каждого дня недели.
+    // Исторические версии без сети могут быть недоступны, но актуальная неделя
+    // остаётся быстрой и работоспособной после перезапуска.
+    const local: PlannerWeeklyDaySnapshot[] = []
+    for (let weekday = 1; weekday <= 7; weekday++) {
+      const cached = readCache<PlannerWeeklyDaySnapshot | null>(weeklySnapshotCacheKey(userId, weekday))
+      if (cached && cached.effective_from <= endDate) local.push(cached)
+    }
+    return local
+  }
+}
+
+function weeklySnapshotForDate(
+  snapshots: PlannerWeeklyDaySnapshot[],
+  dateStr: string,
+): PlannerWeeklyDaySnapshot | null {
+  const weekday = isoWeekday(dateStr)
+  let selected: PlannerWeeklyDaySnapshot | null = null
+  for (const snapshot of snapshots) {
+    if (snapshot.weekday !== weekday || snapshot.effective_from > dateStr) continue
+    if (
+      !selected ||
+      snapshot.effective_from > selected.effective_from ||
+      (snapshot.effective_from === selected.effective_from && snapshot.created_at > selected.created_at)
+    ) {
+      selected = snapshot
+    }
+  }
+  return selected?.enabled ? selected : null
+}
+
+// Собирает состав дня для календаря и статистики теми же правилами, что и loadDay:
+// обычное расписание → weekly-снимок → прямая правка даты. Время здесь не нужно,
+// поэтому подменяем только состав и приоритеты, влияющие на метки/подсчёты.
+function resolveSummaryDayItems(
+  all: PlannerItem[],
+  dateStr: string,
+  dayLogs: Record<string, LogStatus>,
+  overrides: Map<string, SummaryDayOverride>,
+  snapshots: PlannerWeeklyDaySnapshot[],
+): PlannerItem[] {
+  const applyDatePriority = (base: PlannerItem): PlannerItem => {
+    const override = overrides.get(base.id)
+    return override ? { ...base, priority: override.priority ?? base.priority } : base
+  }
+
+  const keepInDay = (item: PlannerItem): boolean => {
+    const override = overrides.get(item.id)
+    if (override?.hidden) return false
+    if (override || dayLogs[item.id]) return true
+    if (item.schedule_changed_at && dateStr < item.schedule_changed_at) return false
+    return isItemOnDate(item, dateStr)
+  }
+
+  const snapshot = weeklySnapshotForDate(snapshots, dateStr)
+  if (!snapshot) return all.filter(keepInDay).map(applyDatePriority)
+
+  const allById = new Map(all.map((item) => [item.id, item]))
+  const snapshotItemIds = new Set(snapshot.items.map((item) => item.item_id))
+  const snapshotItems = snapshot.items
+    .map((snapshotItem) => {
+      const original = allById.get(snapshotItem.item_id)
+      const override = overrides.get(snapshotItem.item_id)
+      if (!original || original.archived || override?.hidden) return null
+      return applyDatePriority({
+        ...original,
+        priority: snapshotItem.priority,
+        important: snapshotItem.important,
+        sort_order: snapshotItem.sort_order,
+      })
+    })
+    .filter((item): item is PlannerItem => item !== null)
+
+  // Прямая правка даты намеренно может добавить дело поверх недельного снимка.
+  const directExtras = all
+    .filter((item) => !snapshotItemIds.has(item.id) && !!overrides.get(item.id) && !overrides.get(item.id)?.hidden)
+    .map(applyDatePriority)
+  return [...snapshotItems, ...directExtras]
+}
+
 // Считает сводку по каждому дню в диапазоне [startDate, endDate] включительно.
 // Дела загружаются один раз, попадание в каждый день проверяется локально.
 export async function loadDaySummaries(
@@ -1249,7 +1653,7 @@ export async function loadDaySummaries(
   startDate: string,
   endDate: string,
 ): Promise<Record<string, DaySummary>> {
-  const [itemsRes, logsRes] = await Promise.all([
+  const [itemsRes, logsRes, overrideRes, snapshots] = await Promise.all([
     supabase.from('planner_items').select(ITEM_COLS).eq('user_id', userId).eq('archived', false),
     supabase
       .from('planner_logs')
@@ -1257,9 +1661,17 @@ export async function loadDaySummaries(
       .eq('user_id', userId)
       .gte('date', startDate)
       .lte('date', endDate),
+    supabase
+      .from('planner_day_overrides')
+      .select('date, item_id, priority, hidden')
+      .eq('user_id', userId)
+      .gte('date', startDate)
+      .lte('date', endDate),
+    loadWeeklySnapshotsForRange(userId, endDate),
   ])
   if (itemsRes.error) throw itemsRes.error
   if (logsRes.error) throw logsRes.error
+  if (overrideRes.error) throw overrideRes.error
 
   const items = (itemsRes.data ?? []) as PlannerItem[]
   // дата -> (itemId -> статус)
@@ -1273,20 +1685,28 @@ export async function loadDaySummaries(
     m[l.item_id] = l.status
   }
 
-  // Сортируем по важности, чтобы цветные полоски шли в осмысленном порядке.
-  const sorted = items.slice().sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority])
+  const overridesByDate = new Map<string, Map<string, SummaryDayOverride>>()
+  for (const row of (overrideRes.data ?? []) as Array<SummaryDayOverride & { date: string }>) {
+    const map = overridesByDate.get(row.date) ?? new Map<string, SummaryDayOverride>()
+    map.set(row.item_id, row)
+    overridesByDate.set(row.date, map)
+  }
 
   const out: Record<string, DaySummary> = {}
   let d = startDate
   while (d <= endDate) {
     const dayLogs = logsByDate.get(d) ?? {}
+    const dayOverrides = overridesByDate.get(d) ?? new Map<string, SummaryDayOverride>()
+    // Сортируем по важности, чтобы цветные полоски шли в осмысленном порядке.
+    const dayItems = resolveSummaryDayItems(items, d, dayLogs, dayOverrides, snapshots).sort(
+      (a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority],
+    )
     const marks: DayMark[] = []
     let done = 0
-    for (const it of sorted) {
-      if (!isItemOnDate(it, d)) continue
-      const isDone = dayLogs[it.id] === 'done'
+    for (const item of dayItems) {
+      const isDone = dayLogs[item.id] === 'done'
       if (isDone) done++
-      marks.push({ priority: it.priority, done: isDone, habit: it.type === 'habit' })
+      marks.push({ priority: item.priority, done: isDone, habit: item.type === 'habit' })
     }
     if (marks.length > 0) out[d] = { total: marks.length, done, marks }
     d = addDays(d, 1)
@@ -1525,7 +1945,7 @@ export async function loadPlannerStats(
   const startIso = new Date(start + 'T00:00:00').toISOString()
   const endIso = new Date(end + 'T23:59:59').toISOString()
 
-  const [itemsRes, logsRes, pomoRes] = await Promise.all([
+  const [itemsRes, logsRes, pomoRes, overrideRes, snapshots] = await Promise.all([
     supabase.from('planner_items').select(ITEM_COLS).eq('user_id', userId).eq('archived', false),
     supabase
       .from('planner_logs')
@@ -1541,10 +1961,18 @@ export async function loadPlannerStats(
       .eq('completed', true)
       .gte('started_at', startIso)
       .lte('started_at', endIso),
+    supabase
+      .from('planner_day_overrides')
+      .select('date, item_id, priority, hidden')
+      .eq('user_id', userId)
+      .gte('date', start)
+      .lte('date', end),
+    loadWeeklySnapshotsForRange(userId, end),
   ])
   if (itemsRes.error) throw itemsRes.error
   if (logsRes.error) throw logsRes.error
   if (pomoRes.error) throw pomoRes.error
+  if (overrideRes.error) throw overrideRes.error
 
   const items = (itemsRes.data ?? []) as PlannerItem[]
   const logsByDate = new Map<string, Record<string, LogStatus>>()
@@ -1557,6 +1985,13 @@ export async function loadPlannerStats(
     m[l.item_id] = l.status
   }
 
+  const overridesByDate = new Map<string, Map<string, SummaryDayOverride>>()
+  for (const row of (overrideRes.data ?? []) as Array<SummaryDayOverride & { date: string }>) {
+    const map = overridesByDate.get(row.date) ?? new Map<string, SummaryDayOverride>()
+    map.set(row.item_id, row)
+    overridesByDate.set(row.date, map)
+  }
+
   let taskPlanned = 0
   let taskDone = 0
   let habitPlanned = 0
@@ -1566,23 +2001,24 @@ export async function loadPlannerStats(
   let d = start
   while (d <= end) {
     const dayLogs = logsByDate.get(d) ?? {}
+    const dayOverrides = overridesByDate.get(d) ?? new Map<string, SummaryDayOverride>()
+    const dayItems = resolveSummaryDayItems(items, d, dayLogs, dayOverrides, snapshots)
     let planned = 0
     let done = 0
-    for (const it of items) {
-      if (!isItemOnDate(it, d)) continue
-      const st = dayLogs[it.id]
-      if (it.type === 'habit') {
-        if (st === 'skip') continue // осознанный пропуск не штрафует
+    for (const item of dayItems) {
+      const status = dayLogs[item.id]
+      if (item.type === 'habit') {
+        if (status === 'skip') continue // осознанный пропуск не штрафует
         habitPlanned++
         planned++
-        if (st === 'done') {
+        if (status === 'done') {
           habitDone++
           done++
         }
       } else {
         taskPlanned++
         planned++
-        if (st === 'done') {
+        if (status === 'done') {
           taskDone++
           done++
         }
@@ -1633,6 +2069,7 @@ export type DayTemplateItem = {
   time_of_day: TimeOfDay
   at_time_start: string | null
   at_time_end: string | null
+  duration_min: number | null
   priority: Priority
   important: boolean
   sort_order: number
@@ -1687,6 +2124,7 @@ export async function saveDayTemplate(
     time_of_day: it.time_of_day,
     at_time_start: it.at_time_start,
     at_time_end: it.at_time_end,
+    duration_min: it.duration_min,
     priority: it.priority,
     important: it.important,
     sort_order: i + 1,
@@ -1707,7 +2145,7 @@ export async function applyDayTemplate(
   const { data, error } = await supabase
     .from('planner_day_template_items')
     .select(
-      'title, note, icon, time_of_day, at_time_start, at_time_end, priority, important, sort_order',
+      'title, note, icon, time_of_day, at_time_start, at_time_end, duration_min, priority, important, sort_order',
     )
     .eq('user_id', userId)
     .eq('template_id', templateId)
@@ -1738,6 +2176,7 @@ export async function applyDayTemplate(
     time_of_day: it.time_of_day,
     at_time_start: it.at_time_start,
     at_time_end: it.at_time_end,
+    duration_min: it.duration_min,
     priority: it.priority,
     start_date: dateStr,
     icon: it.icon,

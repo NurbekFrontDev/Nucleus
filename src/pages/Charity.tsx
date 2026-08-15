@@ -29,6 +29,7 @@ import {
   setPrimaryCharityGoal,
   deleteCharityGoal,
   collectedByGoal,
+  donatedByGoal,
   type CharityGoal,
 } from '../lib/charityGoals'
 
@@ -92,6 +93,10 @@ export default function Charity() {
   const [bigOpen, setBigOpen] = useState<string | null>(null)
   const [bigAmount, setBigAmount] = useState('')
   const [bigDate, setBigDate] = useState(todayISO())
+  // Списание накопленной суммы: только после реального перечисления денег.
+  const [payOpen, setPayOpen] = useState<string | null>(null)
+  const [payAmount, setPayAmount] = useState('')
+  const [payDate, setPayDate] = useState(todayISO())
 
   // Маленькое пожертвование (список «Кому / Сколько»).
   const [smallTo, setSmallTo] = useState('')
@@ -194,6 +199,14 @@ export default function Charity() {
     }
   }, [user])
 
+  // Local-first: после любого действия сохраняем текущий экран локально.
+  // Поэтому список, отложенные суммы и совершённые пожертвования не пропадут
+  // при перезапуске без сети, а Supabase синхронизирует их из очереди в фоне.
+  useEffect(() => {
+    if (!user || loading) return
+    writeCache(`charity:${user.id}`, { categories, received, pots, split, goals, items })
+  }, [categories, goals, items, loading, pots, received, split, user])
+
   const saveSplit = async () => {
     if (!user) return
     await saveCharitySplit(user.id, split)
@@ -205,18 +218,28 @@ export default function Charity() {
   const bigBudget = (charityBudget * split) / 100
   const smallBudget = (charityBudget * (100 - split)) / 100
 
-  // Списки: пополнения крупных целей и маленькие пожертвования (только пополнения копилки).
+  // Списки: отложенные суммы, совершённые крупные и маленькие пожертвования.
   const bigTopUps = items.filter((i) => !i.paid_from_pot && isCharityBigSubcategory(i.subcategory))
+  const paidBigDonations = items.filter(
+    (i) => i.paid_from_pot === 'charity' && isCharityBigSubcategory(i.subcategory),
+  )
   const smallDonations = items.filter((i) => !i.paid_from_pot && !isCharityBigSubcategory(i.subcategory))
 
-  // Сколько собрано по каждой цели. Старые записи без привязки идут главной цели.
+  // Собрано — все отложенные деньги; совершено — реально перечисленные из копилки.
   const collected = collectedByGoal(bigTopUps, goals)
+  const donated = donatedByGoal(paidBigDonations, goals)
 
   /** Пополнения конкретной цели (у главной — ещё и все записи без привязки). */
   const topUpsOf = (g: CharityGoal) =>
     bigTopUps.filter((i) =>
       i.charity_goal_id ? i.charity_goal_id === g.id : g.is_primary,
     )
+  const paidOf = (g: CharityGoal) =>
+    paidBigDonations.filter((i) =>
+      i.charity_goal_id ? i.charity_goal_id === g.id : g.is_primary,
+    )
+  const availableFor = (g: CharityGoal) =>
+    Math.max(0, (collected[g.id] ?? 0) - (donated[g.id] ?? 0))
 
   const openGoalForm = (g: CharityGoal | null) => {
     setGoalForm(g ? g.id : 'new')
@@ -232,7 +255,7 @@ export default function Charity() {
     const name = formName.trim()
     try {
       if (goalForm === 'new') {
-        const created = await createCharityGoal(user.id, name, target, false)
+        const created = await createCharityGoal(user.id, name, target, false, goals)
         // Перечитываем список: первая цель могла стать главной автоматически.
         setGoals((prev) =>
           created.is_primary ? [created, ...prev.map((g) => ({ ...g, is_primary: false }))] : [...prev, created],
@@ -265,8 +288,8 @@ export default function Charity() {
     if (!user) return
     setConfirmDelId(null)
     try {
-      await deleteCharityGoal(user.id, goalId)
-      setGoals(await loadCharityGoals(user.id))
+      const nextGoals = await deleteCharityGoal(user.id, goalId, goals)
+      setGoals(nextGoals)
       // Деньги остаются в копилке: у записей просто слетает привязка к цели.
       setItems((prev) =>
         prev.map((i) => (i.charity_goal_id === goalId ? { ...i, charity_goal_id: null } : i)),
@@ -307,6 +330,34 @@ export default function Charity() {
     return data as CharityExpense
   }
 
+  // Реальное перечисление денег: уменьшаем копилку и сохраняем запись в истории.
+  const makeDonation = async (
+    goal: CharityGoal,
+    amount: number,
+    date: string,
+  ): Promise<CharityExpense> => {
+    if (!user || !charityCat) throw new Error(t('charity.noCat'))
+    const d = new Date(date + 'T00:00:00')
+    const m = await getOrCreateMonth(user.id, d.getFullYear(), d.getMonth() + 1)
+    const { data, error } = await supabase
+      .from('expenses')
+      .insert({
+        user_id: user.id,
+        month_id: m.id,
+        category_id: charityCat.id,
+        subcategory: CHARITY_BIG_SUBCATEGORY,
+        amount,
+        date,
+        description: goal.name,
+        paid_from_pot: 'charity',
+        charity_goal_id: goal.id,
+      })
+      .select('id, amount, date, description, subcategory, paid_from_pot, charity_goal_id')
+      .single()
+    if (error || !data) throw error ?? new Error(t('common.saveFailed'))
+    return data as CharityExpense
+  }
+
   const submitBig = async (e: FormEvent) => {
     e.preventDefault()
     const goalId = bigOpen
@@ -325,6 +376,40 @@ export default function Charity() {
       setBigAmount('')
       setBigDate(todayISO())
       setBigOpen(null)
+    } catch (err) {
+      setError((err as Error).message)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const submitPay = async (e: FormEvent) => {
+    e.preventDefault()
+    const goal = goals.find((item) => item.id === payOpen)
+    if (!goal) return
+    const amount = parseAmount(payAmount)
+    const available = availableFor(goal)
+    if (!amount || amount <= 0) {
+      setError(t('common.enterPositive'))
+      return
+    }
+    if (amount > available) {
+      setError(t('charity.errPotAmount', { v: formatSum(available) }))
+      return
+    }
+    setBusy(true)
+    setError(null)
+    try {
+      const row = await makeDonation(goal, amount, payDate)
+      setItems((prev) => [row, ...prev])
+      setPots((pot) => ({
+        ...pot,
+        big: Math.max(0, pot.big - amount),
+        total: Math.max(0, pot.total - amount),
+      }))
+      setPayOpen(null)
+      setPayAmount('')
+      setPayDate(todayISO())
     } catch (err) {
       setError((err as Error).message)
     } finally {
@@ -382,23 +467,56 @@ export default function Charity() {
       setError(t('common.enterPositive'))
       return
     }
+
+    // Редактирование не должно позволять задним числом увести копилку
+    // или конкретную карточку в минус. Для уже совершённого перевода
+    // временно «возвращаем» прежнюю сумму и проверяем новый лимит.
+    const oldAmount = Number(ex.amount) || 0
+    const delta = amount - oldAmount
+    const isBig = isCharityBigSubcategory(ex.subcategory)
+    const primaryGoal = goals.find((goal) => goal.is_primary) ?? null
+    const affectedGoal = ex.charity_goal_id
+      ? goals.find((goal) => goal.id === ex.charity_goal_id) ?? primaryGoal
+      : primaryGoal
+    const potAmount = isBig ? pots.big : pots.small
+
+    if (ex.paid_from_pot === 'charity' && delta > 0) {
+      const restoredPot = potAmount + oldAmount
+      const restoredGoal = affectedGoal ? availableFor(affectedGoal) + oldAmount : restoredPot
+      const max = Math.max(0, Math.min(restoredPot, restoredGoal))
+      if (amount > max) {
+        setError(t('charity.errPotAmount', { v: formatSum(max) }))
+        return
+      }
+    }
+
+    if (!ex.paid_from_pot && delta < 0) {
+      const remainingPot = potAmount + delta
+      const remainingGoal = isBig && affectedGoal ? availableFor(affectedGoal) + delta : remainingPot
+      if (remainingPot < 0 || remainingGoal < 0) {
+        setError(t('charity.errPotAmount', { v: formatSum(Math.max(0, potAmount)) }))
+        return
+      }
+    }
+
     setBusy(true)
     setError(null)
     try {
       const d = new Date(editDate + 'T00:00:00')
       const m = await getOrCreateMonth(user.id, d.getFullYear(), d.getMonth() + 1)
-      const isBig = isCharityBigSubcategory(ex.subcategory)
       const newTo = isBig ? ex.description : editTo.trim() || null
       const { error } = await supabase
         .from('expenses')
         .update({ amount, date: editDate, month_id: m.id, description: newTo })
         .eq('id', editId)
       if (error) throw error
-      const delta = amount - Number(ex.amount)
       setItems((prev) =>
         prev.map((i) => (i.id === editId ? { ...i, amount, date: editDate, description: newTo } : i)),
       )
-      if (!ex.paid_from_pot) {
+      if (ex.paid_from_pot === 'charity') {
+        if (isBig) setPots((p) => ({ ...p, big: p.big - delta, total: p.total - delta }))
+        else setPots((p) => ({ ...p, small: p.small - delta, total: p.total - delta }))
+      } else if (!ex.paid_from_pot) {
         if (isBig) setPots((p) => ({ ...p, big: p.big + delta, total: p.total + delta }))
         else setPots((p) => ({ ...p, small: p.small + delta, total: p.total + delta }))
       }
@@ -413,14 +531,41 @@ export default function Charity() {
   const removeItem = async (id: string) => {
     const ex = items.find((i) => i.id === id)
     if (!ex) return
+    const amount = Number(ex.amount) || 0
+    const isBig = isCharityBigSubcategory(ex.subcategory)
+
+    // Нельзя удалить отложенную сумму, если она уже частично или полностью
+    // использована: иначе баланс глобальной или конкретной копилки ушёл бы в минус.
+    if (!ex.paid_from_pot) {
+      const primaryGoal = goals.find((goal) => goal.is_primary) ?? null
+      const affectedGoal = ex.charity_goal_id
+        ? goals.find((goal) => goal.id === ex.charity_goal_id) ?? primaryGoal
+        : primaryGoal
+      const potAmount = isBig ? pots.big : pots.small
+      const remainingPot = potAmount - amount
+      const remainingGoal = isBig && affectedGoal ? availableFor(affectedGoal) - amount : remainingPot
+      if (remainingPot < 0 || remainingGoal < 0) {
+        const available = isBig && affectedGoal ? availableFor(affectedGoal) : potAmount
+        setError(t('charity.errPotAmount', { v: formatSum(Math.max(0, available)) }))
+        return
+      }
+    }
+
     const { error } = await supabase.from('expenses').delete().eq('id', id)
     if (error) {
       setError(error.message)
       return
     }
     setItems((prev) => prev.filter((i) => i.id !== id))
-    if (!ex.paid_from_pot) {
-      const a = Number(ex.amount) || 0
+    const a = Number(ex.amount) || 0
+    if (ex.paid_from_pot === 'charity') {
+      // Удалили уже совершённое пожертвование — возвращаем сумму в копилку.
+      if (isCharityBigSubcategory(ex.subcategory)) {
+        setPots((p) => ({ ...p, big: p.big + a, total: p.total + a }))
+      } else {
+        setPots((p) => ({ ...p, small: p.small + a, total: p.total + a }))
+      }
+    } else if (!ex.paid_from_pot) {
       if (isCharityBigSubcategory(ex.subcategory)) {
         setPots((p) => ({ ...p, big: p.big - a, total: p.total - a }))
       } else {
@@ -430,9 +575,21 @@ export default function Charity() {
   }
 
   const openBigForm = (goalId: string) => {
+    setPayOpen(null)
     setBigOpen(goalId)
     setBigAmount('')
     setBigDate(todayISO())
+    setError(null)
+  }
+
+  const openPayForm = (goal: CharityGoal) => {
+    const available = availableFor(goal)
+    const targetLeft = goal.target > 0 ? Math.max(0, goal.target - (donated[goal.id] ?? 0)) : available
+    const initial = Math.min(available, targetLeft || available)
+    setBigOpen(null)
+    setPayOpen(goal.id)
+    setPayAmount(initial > 0 ? formatAmountInput(String(initial)) : '')
+    setPayDate(todayISO())
     setError(null)
   }
 
@@ -516,13 +673,18 @@ export default function Charity() {
           <section className="flex flex-col gap-3">
             <hr className="border-neutral-200 dark:border-neutral-800" />
             <h2 className={sectionTitle}>{t('charity.bigTitle')}</h2>
+            <p className="text-sm text-neutral-500">{t('charity.planHint')}</p>
             <div className="flex flex-col gap-3">
               {/* Список целей: главная сверху со звёздочкой, остальные ниже */}
               {goals.map((g) => {
                 const got = collected[g.id] ?? 0
+                const paid = donated[g.id] ?? 0
+                const available = availableFor(g)
                 const gpct = g.target > 0 ? Math.min(100, (got / g.target) * 100) : 0
                 const left = Math.max(0, g.target - got)
+                const completed = g.target > 0 && paid >= g.target
                 const tops = topUpsOf(g)
+                const paidItems = paidOf(g)
                 return (
                   <div
                     key={g.id}
@@ -578,16 +740,21 @@ export default function Charity() {
                         <div className="h-2.5 w-full overflow-hidden rounded-full bg-neutral-200 dark:bg-neutral-800">
                           <div className="h-full rounded-full bg-rose-500" style={{ width: `${gpct}%` }} />
                         </div>
-                        <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="grid grid-cols-3 gap-2 text-xs">
                           <div>
                             <p className="text-neutral-500">{t('charity.collected')}</p>
                             <p className="font-medium text-rose-600 dark:text-rose-400">{formatSum(got)}</p>
                           </div>
+                          <div className="text-center">
+                            <p className="text-neutral-500">{t('charity.available')}</p>
+                            <p className="font-medium">{formatSum(available)}</p>
+                          </div>
                           <div className="text-right">
-                            <p className="text-neutral-500">{t('charity.left')}</p>
-                            <p className="font-medium">{formatSum(left)}</p>
+                            <p className="text-neutral-500">{t('charity.donated')}</p>
+                            <p className="font-medium text-rose-600 dark:text-rose-400">{formatSum(paid)}</p>
                           </div>
                         </div>
+                        {g.target > 0 && <p className="text-xs text-neutral-500">{t('charity.leftToCollect', { v: formatSum(left) })}</p>}
                         <p className="text-xs text-neutral-500">{t('charity.target', { v: formatSum(g.target) })}</p>
                         {g.is_primary && bigBudget > 0 && (
                           <p className="text-xs font-medium text-rose-600 dark:text-rose-400">
@@ -595,7 +762,29 @@ export default function Charity() {
                           </p>
                         )}
 
-                        {bigOpen === g.id ? (
+                        {payOpen === g.id ? (
+                          <form onSubmit={submitPay} className="flex flex-col gap-2 rounded-xl border border-rose-500/30 bg-rose-500/5 p-3">
+                            <p className="text-sm font-medium">{t('charity.donateTitle')}</p>
+                            <p className="text-xs text-neutral-500">{t('charity.donateAvailable', { v: formatSum(available) })}</p>
+                            <input
+                              inputMode="decimal"
+                              value={payAmount}
+                              onChange={(e) => setPayAmount(formatAmountInput(e.target.value))}
+                              placeholder={t('charity.donateAmount')}
+                              className={inputCls}
+                            />
+                            <DatePicker value={payDate} onChange={setPayDate} />
+                            <p className="text-xs text-neutral-500">{t('charity.donateHint')}</p>
+                            <div className="flex gap-2">
+                              <button type="submit" disabled={busy} className={btnPrimary}>
+                                {busy ? t('common.saving') : t('charity.donate')}
+                              </button>
+                              <button type="button" onClick={() => setPayOpen(null)} className={btnGhost}>
+                                {t('common.cancel')}
+                              </button>
+                            </div>
+                          </form>
+                        ) : bigOpen === g.id ? (
                           <form onSubmit={submitBig} className="flex flex-col gap-2">
                             <input
                               inputMode="decimal"
@@ -621,6 +810,12 @@ export default function Charity() {
                                 {t('charity.topUp')}
                               </button>
                             )}
+                            {charityCat && available > 0 && !completed && (
+                              <button type="button" onClick={() => openPayForm(g)} className={btnGhost}>
+                                {t('charity.donate')}
+                              </button>
+                            )}
+                            {completed && <span className="text-sm font-medium text-emerald-600 dark:text-emerald-400">{t('charity.completed')}</span>}
                             <IconButton icon="edit" title={t('charity.editGoal')} onClick={() => openGoalForm(g)} />
                             {confirmDelId === g.id ? (
                               <>
@@ -645,6 +840,70 @@ export default function Charity() {
                               </button>
                             )}
                           </div>
+                        )}
+
+                        {paidItems.length > 0 && (
+                          <details className="rounded-xl border border-emerald-500/20 bg-emerald-500/5 p-3 text-sm">
+                            <summary className="cursor-pointer font-medium text-emerald-700 dark:text-emerald-300">
+                              {t('charity.donated')}: {formatSum(paid)} · {paidItems.length}
+                            </summary>
+                            <div className="mt-3 flex flex-col gap-2">
+                              {paidItems.map((c) => (
+                                <div
+                                  key={c.id}
+                                  className="rounded-lg bg-white/80 px-3 py-2.5 text-sm dark:bg-neutral-900/60"
+                                >
+                                  {editId === c.id ? (
+                                    <form onSubmit={submitEdit} className="flex flex-col gap-2">
+                                      <input
+                                        inputMode="decimal"
+                                        value={editAmount}
+                                        onChange={(e) => setEditAmount(formatAmountInput(e.target.value))}
+                                        placeholder={t('charity.donateAmount')}
+                                        className={inputCls}
+                                      />
+                                      <DatePicker value={editDate} onChange={setEditDate} />
+                                      <div className="flex gap-2">
+                                        <button type="submit" disabled={busy} className={btnPrimary}>
+                                          {busy ? t('common.saving') : t('common.save')}
+                                        </button>
+                                        <button type="button" onClick={cancelEdit} className={btnGhost}>
+                                          {t('common.cancel')}
+                                        </button>
+                                      </div>
+                                    </form>
+                                  ) : (
+                                    <div className="flex items-center justify-between gap-3">
+                                      <div className="min-w-0">
+                                        <p className="font-medium text-emerald-700 dark:text-emerald-300">
+                                          {formatSum(Number(c.amount))}
+                                        </p>
+                                        <p className="truncate text-xs text-neutral-500">
+                                          {g.name} · {formatDateHuman(c.date)}
+                                        </p>
+                                      </div>
+                                      <div className="flex shrink-0 gap-3">
+                                        <button
+                                          type="button"
+                                          onClick={() => startEdit(c)}
+                                          className="text-neutral-500 transition hover:text-emerald-600 dark:hover:text-emerald-400"
+                                        >
+                                          {t('common.edit')}
+                                        </button>
+                                        <button
+                                          type="button"
+                                          onClick={() => removeItem(c.id)}
+                                          className="text-red-500 transition hover:text-red-600 dark:text-red-400 dark:hover:text-red-300"
+                                        >
+                                          {t('common.delete')}
+                                        </button>
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </details>
                         )}
 
                         {tops.length > 0 && (

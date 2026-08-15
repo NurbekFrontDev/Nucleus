@@ -12,6 +12,8 @@ import {
   updateItem,
   archiveItem,
   saveItemsOrder,
+  endTimeFromDuration,
+  formatDuration,
   PRIORITY_DOT,
   type PlannerItem,
   type PlannerType,
@@ -48,6 +50,7 @@ type FormState = {
   time_of_day: TimeOfDay
   at_time_start: string
   at_time_end: string
+  duration_min: string
   icon: string
   cue: string
   identity: string
@@ -66,6 +69,7 @@ const emptyForm: FormState = {
   time_of_day: null,
   at_time_start: '',
   at_time_end: '',
+  duration_min: '',
   icon: '',
   cue: '',
   identity: '',
@@ -280,6 +284,7 @@ export default function PlannerItems() {
       time_of_day: it.time_of_day,
       at_time_start: it.at_time_start ?? '',
       at_time_end: it.at_time_end ?? '',
+      duration_min: it.duration_min ? String(it.duration_min) : '',
       icon: it.icon ?? '',
       cue: it.cue ?? '',
       identity: it.identity ?? '',
@@ -339,6 +344,7 @@ export default function PlannerItems() {
         time_of_day: form.time_of_day,
         at_time_start: form.at_time_start || null,
         at_time_end: form.at_time_end || null,
+        duration_min: durationFromForm(form.duration_min),
         icon: form.icon.trim() || null,
         cue: isHabit ? form.cue.trim() || null : null,
         identity: isHabit ? form.identity.trim() || null : null,
@@ -398,12 +404,42 @@ export default function PlannerItems() {
     return ''
   }
 
+  const durationFromForm = (raw: string): number | null => {
+    const parsed = Number(raw)
+    return Number.isFinite(parsed) && parsed > 0 ? Math.min(1440, Math.round(parsed)) : null
+  }
+
+  const setStartTime = (value: string) => {
+    setForm((f) => {
+      const duration = durationFromForm(f.duration_min)
+      return {
+        ...f,
+        at_time_start: value,
+        at_time_end: duration ? endTimeFromDuration(value, duration) || f.at_time_end : f.at_time_end,
+      }
+    })
+  }
+
+  const setDuration = (value: string) => {
+    setForm((f) => {
+      const duration = durationFromForm(value)
+      return {
+        ...f,
+        duration_min: value,
+        at_time_end: duration && f.at_time_start ? endTimeFromDuration(f.at_time_start, duration) : f.at_time_end,
+      }
+    })
+  }
+
   const isHabitForm = form.type === 'habit'
 
   // Форма добавления/редактирования. При добавлении показывается сверху,
   // при редактировании — встраивается прямо под нужным делом (см. ниже).
-  const renderForm = () => (
-    <div className={`${cardCls} animate-pop flex flex-col gap-3`}>
+  const renderForm = () => {
+    const formDuration = durationFromForm(form.duration_min)
+    const hasDuration = formDuration !== null
+    return (
+      <div className={`${cardCls} animate-pop flex flex-col gap-3`}>
       <h2 className="text-base font-semibold">
         {editId
           ? isHabitForm
@@ -618,18 +654,42 @@ export default function PlannerItems() {
       <div className="grid grid-cols-2 gap-2">
         <div>
           <label className={labelCls}>{t('items.timeStart')}</label>
-          <TimePicker
-            value={form.at_time_start}
-            onChange={(v) => setForm((f) => ({ ...f, at_time_start: v }))}
-          />
+          <TimePicker value={form.at_time_start} onChange={setStartTime} />
         </div>
         <div>
-          <label className={labelCls}>{t('items.timeEnd')}</label>
+          <label className={labelCls}>{t('items.duration')}</label>
+          <input
+            className={inputCls}
+            type="number"
+            inputMode="numeric"
+            min="1"
+            max="1440"
+            value={form.duration_min}
+            onChange={(e) => setDuration(e.target.value)}
+            placeholder={t('items.durationPh')}
+          />
+        </div>
+      </div>
+
+      <div>
+        <label className={labelCls}>{t('items.timeEnd')}</label>
+        {hasDuration ? (
+          <div className="rounded-lg border border-dashed border-emerald-400/70 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+            {form.at_time_start
+              ? lang === 'en'
+                ? fmtTime12(endTimeFromDuration(form.at_time_start, formDuration))
+                : endTimeFromDuration(form.at_time_start, formDuration)
+              : t('items.durationSetStart')}
+          </div>
+        ) : (
           <TimePicker
             value={form.at_time_end}
             onChange={(v) => setForm((f) => ({ ...f, at_time_end: v }))}
           />
-        </div>
+        )}
+        {hasDuration && (
+          <p className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400">{t('items.durationAuto')}</p>
+        )}
       </div>
 
       <div>
@@ -662,7 +722,8 @@ export default function PlannerItems() {
         </button>
       </div>
     </div>
-  )
+    )
+  }
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
@@ -712,6 +773,7 @@ export default function PlannerItems() {
           {items.map((it, index) => {
             const dot = PRIORITY_DOT[it.priority]
             const time = timeLabel(it)
+            const duration = formatDuration(it.duration_min, lang)
             const isHabitItem = it.type === 'habit'
             return (
               <div
@@ -732,7 +794,10 @@ export default function PlannerItems() {
                 {it.icon && <span className="shrink-0">{it.icon}</span>}
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
-                    <p className="break-words text-sm font-medium">{it.title}</p>
+                    <p className="break-words text-sm font-medium">
+                      {it.title}
+                      {duration && <span className="font-normal text-neutral-400"> · {duration}</span>}
+                    </p>
                     {it.important && <span className="shrink-0 text-xs">⭐</span>}
                     {isHabitItem && <span className="shrink-0 text-xs">🔁</span>}
                   </div>
@@ -750,6 +815,7 @@ export default function PlannerItems() {
           {items.map((it) => {
             const dot = PRIORITY_DOT[it.priority]
             const time = timeLabel(it)
+            const duration = formatDuration(it.duration_min, lang)
             const isHabitItem = it.type === 'habit'
             const editing = showForm && editId === it.id
             return (
@@ -763,7 +829,10 @@ export default function PlannerItems() {
                   {it.icon && <span className="shrink-0">{it.icon}</span>}
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1.5">
-                      <p className="break-words text-sm font-medium">{it.title}</p>
+                      <p className="break-words text-sm font-medium">
+                        {it.title}
+                        {duration && <span className="font-normal text-neutral-400"> · {duration}</span>}
+                      </p>
                       {it.important && (
                         <span className="shrink-0 text-xs" title={t('items.important')}>⭐</span>
                       )}

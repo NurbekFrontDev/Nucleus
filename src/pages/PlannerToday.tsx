@@ -20,12 +20,16 @@ import {
   calcDayEnergy,
   archiveItem,
   hideItemForDay,
+  saveWeeklyDaySnapshot,
+  clearWeeklyDaySnapshot,
+  formatDuration,
   type PlannerItem,
   type PlannerLog,
   type TimeOfDay,
   type DaySummary,
   type DayMark,
   type PlannerDayOverride,
+  type PlannerWeeklyDaySnapshot,
 } from '../lib/planner'
 import EnergyCharacter from '../components/EnergyCharacter'
 import { hapticTap } from '../lib/native'
@@ -93,6 +97,7 @@ export default function PlannerToday() {
     logs: Record<string, PlannerLog>
     overrides: Record<string, PlannerDayOverride>
     sections: boolean
+    weeklySnapshot?: PlannerWeeklyDaySnapshot | null
   }
   const cachedDay = user ? readCache<DayCache>(`planday:${user.id}:${today}`) : null
   const [items, setItems] = useState<PlannerItem[]>(cachedDay?.items ?? [])
@@ -109,6 +114,13 @@ export default function PlannerToday() {
   const [delItem, setDelItem] = useState<PlannerItem | null>(null)
   // Окно «Шаблоны дня»: сохранить текущий день / применить шаблон.
   const [templatesOpen, setTemplatesOpen] = useState(false)
+  // Полный снимок этого дня недели. Он local-first и меняет только будущие
+  // совпадающие дни, начиная с текущей даты.
+  const [weeklySnapshot, setWeeklySnapshot] = useState<PlannerWeeklyDaySnapshot | null>(
+    cachedDay?.weeklySnapshot ?? null,
+  )
+  const [weeklyDialog, setWeeklyDialog] = useState<'apply' | 'clear' | null>(null)
+  const [weeklySaving, setWeeklySaving] = useState(false)
   const [overrides, setOverrides] = useState<Record<string, PlannerDayOverride>>(cachedDay?.overrides ?? {})
   const [stripSummaries, setStripSummaries] = useState<Record<string, DaySummary>>({})
 
@@ -164,10 +176,12 @@ export default function PlannerToday() {
       setLogs(cached.logs)
       setOverrides(cached.overrides)
       setSections(cached.sections)
+      setWeeklySnapshot(cached.weeklySnapshot ?? null)
       setLoading(false)
     } else {
       setItems([])
       setLogs({})
+      setWeeklySnapshot(null)
       setLoading(true)
     }
     ;(async () => {
@@ -181,12 +195,14 @@ export default function PlannerToday() {
         setLogs(day.logs)
         setOverrides(day.overrides)
         setSections(sec)
+        setWeeklySnapshot(day.weeklySnapshot)
         setError(null)
         writeCache(ck, {
           items: day.items,
           logs: day.logs,
           overrides: day.overrides,
           sections: sec,
+          weeklySnapshot: day.weeklySnapshot,
         })
       } catch (e) {
         if (active) setError((e as Error).message)
@@ -264,8 +280,56 @@ export default function PlannerToday() {
       setItems(day.items)
       setLogs(day.logs)
       setOverrides(day.overrides)
+      setWeeklySnapshot(day.weeklySnapshot)
+      writeCache(`planday:${user.id}:${date}`, {
+        items: day.items,
+        logs: day.logs,
+        overrides: day.overrides,
+        sections,
+        weeklySnapshot: day.weeklySnapshot,
+      })
     } catch (e) {
       setError((e as Error).message)
+    }
+  }
+
+  const saveAsWeeklyDay = async () => {
+    if (!user || weeklySaving) return
+    setWeeklySaving(true)
+    try {
+      const snapshot = await saveWeeklyDaySnapshot(user.id, date, items)
+      setWeeklySnapshot(snapshot)
+      writeCache(`planday:${user.id}:${date}`, {
+        items,
+        logs,
+        overrides,
+        sections,
+        weeklySnapshot: snapshot,
+      })
+      setWeeklyDialog(null)
+      // Если меняли именно сегодня, напоминания должны немедленно получить
+      // новый состав/время дел, а не ждать следующего входа в приложение.
+      if (date === today) void rescheduleAll(user.id)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setWeeklySaving(false)
+    }
+  }
+
+  const clearWeeklyDay = async () => {
+    if (!user || weeklySaving) return
+    setWeeklySaving(true)
+    try {
+      await clearWeeklyDaySnapshot(user.id, date)
+      setWeeklySnapshot(null)
+      setWeeklyDialog(null)
+      await reload()
+      if (date === today) void rescheduleAll(user.id)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setWeeklySaving(false)
     }
   }
 
@@ -335,6 +399,11 @@ export default function PlannerToday() {
     if (item.at_time_start) return fmtTime12(item.at_time_start)
     return ''
   }
+
+  const weeklyLabel =
+    lang === 'en'
+      ? 'Save this exact day as the weekly schedule'
+      : 'Сохранить точный состав дня как еженедельное расписание'
 
   // Отметить/снять выполнение с оптимистичным обновлением и откатом при ошибке.
   const onToggle = async (item: PlannerItem) => {
@@ -500,6 +569,7 @@ export default function PlannerToday() {
     const done = isDone(item.id)
     const dot = PRIORITY_DOT[item.priority]
     const time = timeLabel(item)
+    const duration = formatDuration(item.duration_min, lang)
     const isHabit = item.type === 'habit'
     return (
       <div
@@ -540,6 +610,7 @@ export default function PlannerToday() {
               }`}
             >
               <span className="break-words">{item.title}</span>
+              {duration && <span className="font-normal text-neutral-400"> · {duration}</span>}
               {overrides[item.id] && !overrides[item.id].frozen && (
                 <span
                   title={t('today.edited')}
@@ -604,6 +675,7 @@ export default function PlannerToday() {
     const done = isDone(item.id)
     const dot = PRIORITY_DOT[item.priority]
     const time = timeLabel(item)
+    const duration = formatDuration(item.duration_min, lang)
     const isHabit = item.type === 'habit'
 
     return (
@@ -632,6 +704,7 @@ export default function PlannerToday() {
             }`}
           >
             {item.title}
+            {duration && <span className="font-normal text-neutral-400"> · {duration}</span>}
             {isHabit && <span className="ml-1 text-xs">🔁</span>}
           </p>
 
@@ -1011,6 +1084,78 @@ export default function PlannerToday() {
           </button>
         </div>
       )}
+
+      {/* Панель действий — часть sticky-шапки, поэтому «Переместить»,
+          «Изменить день», шаблоны и weekly-снимок остаются под рукой. */}
+      {!isCalendar && !loading && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-neutral-200/70 pt-2 dark:border-neutral-800/70">
+          {items.length > 1 && (
+            <button
+              type="button"
+              onClick={() => {
+                setReorder((v) => !v)
+                setEditDay(false)
+              }}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                reorder
+                  ? 'bg-emerald-500 text-neutral-950 hover:bg-emerald-400'
+                  : 'border border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
+              }`}
+            >
+              {reorder ? t('common.reorderDone') : t('common.reorder')}
+            </button>
+          )}
+          {items.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setEditDay((v) => !v)
+                setReorder(false)
+              }}
+              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
+                editDay
+                  ? 'bg-emerald-500 text-neutral-950 hover:bg-emerald-400'
+                  : 'border border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
+              }`}
+            >
+              {editDay ? t('today.editDayDone') : t('today.editDay')}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setTemplatesOpen(true)}
+            className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-500 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
+          >
+            📋 {lang === 'ru' ? 'Шаблоны' : 'Templates'}
+          </button>
+          {weeklySnapshot?.enabled ? (
+            <button
+              type="button"
+              onClick={() => setWeeklyDialog('clear')}
+              disabled={weeklySaving}
+              className="rounded-lg border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 transition hover:bg-violet-50 disabled:opacity-60 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-950/30"
+              title={lang === 'ru' ? 'Вернуть обычное расписание для этого дня недели' : 'Return to the normal schedule for this weekday'}
+            >
+              ↩️ {lang === 'ru' ? 'Обычное расписание' : 'Normal schedule'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setWeeklyDialog('apply')}
+              disabled={reorder || editDay || weeklySaving}
+              className="rounded-lg border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 transition hover:bg-violet-50 disabled:opacity-60 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-950/30"
+              title={weeklyLabel}
+            >
+              🔁 {lang === 'ru' ? 'Повторять еженедельно' : 'Repeat weekly'}
+            </button>
+          )}
+          {weeklySnapshot?.enabled && (
+            <span className="text-[11px] text-violet-600 dark:text-violet-300">
+              {lang === 'ru' ? 'Недельный снимок активен' : 'Weekly snapshot active'}
+            </span>
+          )}
+        </div>
+      )}
       </div>
 
       {error && <p className="text-sm text-red-500 dark:text-red-400">{error}</p>}
@@ -1048,58 +1193,9 @@ export default function PlannerToday() {
           {loading ? (
             <p className="text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
           ) : items.length === 0 ? (
-            <div className="flex flex-col items-start gap-3">
-              <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('today.empty')}</p>
-              <button
-                type="button"
-                onClick={() => setTemplatesOpen(true)}
-                className="rounded-lg border border-neutral-300 px-3 py-1.5 text-xs font-medium text-neutral-600 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-              >
-                📋 {lang === 'ru' ? 'Шаблоны дня' : 'Day templates'}
-              </button>
-            </div>
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('today.empty')}</p>
           ) : (
             <>
-              <div className="flex flex-wrap items-center gap-2">
-                {items.length > 1 && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setReorder((v) => !v)
-                      setEditDay(false)
-                    }}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-                      reorder
-                        ? 'bg-emerald-500 text-neutral-950 hover:bg-emerald-400'
-                        : 'border border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
-                    }`}
-                  >
-                    {reorder ? t('common.reorderDone') : t('common.reorder')}
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    setEditDay((v) => !v)
-                    setReorder(false)
-                  }}
-                  className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-                    editDay
-                      ? 'bg-emerald-500 text-neutral-950 hover:bg-emerald-400'
-                      : 'border border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
-                  }`}
-                >
-                  {editDay ? t('today.editDayDone') : t('today.editDay')}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setTemplatesOpen(true)}
-                  className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-500 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
-                >
-                  📋 {lang === 'ru' ? 'Шаблоны' : 'Templates'}
-                </button>
-              </div>
-
               {sections && !reorder && !editDay ? (
                 orderedSections.map((s) => (
                   <section key={s.key} className="flex flex-col gap-2">
@@ -1189,7 +1285,10 @@ export default function PlannerToday() {
           hasOverride={!!overrides[editItem.id] && !overrides[editItem.id].frozen}
           existing={overrides[editItem.id] ?? null}
           onClose={() => setEditItem(null)}
-          onSaved={reload}
+          onSaved={async () => {
+            await reload()
+            if (date === today) void rescheduleAll(user.id)
+          }}
         />
       )}
 
@@ -1203,6 +1302,34 @@ export default function PlannerToday() {
           onApplied={reload}
         />
       )}
+
+      <ConfirmDialog
+        open={weeklyDialog === 'apply'}
+        title={lang === 'ru' ? 'Сделать этот день еженедельным?' : 'Make this day weekly?'}
+        message={
+          lang === 'ru'
+            ? `Сохранится точный текущий состав дня: ${items.length} дел(а), их порядок, названия, время, длительность, заметки и важность. Начиная с ${formatDateHuman(date)} этот снимок будет применяться к каждому такому дню недели. Отдельные правки конкретной даты останутся выше него.`
+            : `This saves the exact current day: ${items.length} item(s), their order, names, times, durations, notes, and priority. Starting ${formatDateHuman(date)}, the snapshot will apply on every matching weekday. Direct changes to a specific date will still take priority.`
+        }
+        confirmLabel={lang === 'ru' ? 'Сохранить неделю' : 'Save weekly day'}
+        cancelLabel={t('common.cancel')}
+        onConfirm={saveAsWeeklyDay}
+        onCancel={() => setWeeklyDialog(null)}
+      />
+
+      <ConfirmDialog
+        open={weeklyDialog === 'clear'}
+        title={lang === 'ru' ? 'Вернуть обычное расписание?' : 'Return to the normal schedule?'}
+        message={
+          lang === 'ru'
+            ? `С ${formatDateHuman(date)} для этого дня недели снова будет использоваться обычное расписание. Сохранённый недельный снимок и история останутся в данных.`
+            : `Starting ${formatDateHuman(date)}, this weekday will use the normal schedule again. The saved weekly snapshot and history will remain in your data.`
+        }
+        confirmLabel={lang === 'ru' ? 'Вернуть обычное' : 'Use normal schedule'}
+        cancelLabel={t('common.cancel')}
+        onConfirm={clearWeeklyDay}
+        onCancel={() => setWeeklyDialog(null)}
+      />
 
       <ConfirmDialog
         open={!!delItem}

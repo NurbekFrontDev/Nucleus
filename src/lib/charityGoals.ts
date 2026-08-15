@@ -30,9 +30,12 @@ export async function createCharityGoal(
   name: string,
   target: number,
   makePrimary: boolean,
+  currentGoals?: CharityGoal[],
 ): Promise<CharityGoal> {
+  // Экран передаёт уже загруженный список: так добавление работает local-first
+  // даже без сетевого ответа на предварительный GET.
+  const existing = currentGoals ?? await loadCharityGoals(userId)
   // Первая цель автоматически становится главной.
-  const existing = await loadCharityGoals(userId)
   const primary = makePrimary || existing.length === 0
   if (primary) await clearPrimary(userId)
   const sort = existing.reduce((m, g) => Math.max(m, g.sort_order), 0) + 1
@@ -77,14 +80,24 @@ export async function setPrimaryCharityGoal(userId: string, goalId: string): Pro
  * Удаление цели. Сами пополнения НЕ трогаем: деньги остаются в копилке,
  * у записей charity_goal_id обнуляется (on delete set null) и они учитываются у главной.
  */
-export async function deleteCharityGoal(userId: string, goalId: string): Promise<void> {
+export async function deleteCharityGoal(
+  userId: string,
+  goalId: string,
+  currentGoals?: CharityGoal[],
+): Promise<CharityGoal[]> {
+  // Для local-first используем состояние экрана и не ждём повторной загрузки списка.
+  const before = currentGoals ?? await loadCharityGoals(userId)
+  const wasPrimary = before.some((goal) => goal.id === goalId && goal.is_primary)
   const { error } = await supabase.from('charity_goals').delete().eq('id', goalId)
   if (error) throw error
+
+  const rest = before.filter((goal) => goal.id !== goalId)
   // Если удалили главную — главной становится следующая по порядку.
-  const rest = await loadCharityGoals(userId)
-  if (rest.length > 0 && !rest.some((g) => g.is_primary)) {
+  if (wasPrimary && rest.length > 0) {
     await setPrimaryCharityGoal(userId, rest[0].id)
+    return rest.map((goal, index) => ({ ...goal, is_primary: index === 0 }))
   }
+  return rest
 }
 
 /**
@@ -108,6 +121,32 @@ export function collectedByGoal(
       it.charity_goal_id && known.has(it.charity_goal_id) ? it.charity_goal_id : primaryId
     if (!id) continue
     acc[id] = (acc[id] ?? 0) + Number(it.amount)
+  }
+  return acc
+}
+
+/**
+ * Сколько уже перечислено из копилки по каждой крупной цели.
+ * Старые списания без привязки относятся к главной цели, как и старые пополнения.
+ */
+export function donatedByGoal(
+  items: Array<{ amount: number; charity_goal_id: string | null; paid_from_pot: string | null }>,
+  goals: CharityGoal[] | null | undefined,
+): Record<string, number> {
+  const goalList = Array.isArray(goals) ? goals : []
+  const primaryId = goalList.find((goal) => goal.is_primary)?.id ?? null
+  const known = new Set(goalList.map((goal) => goal.id))
+  const acc: Record<string, number> = {}
+  for (const goal of goalList) acc[goal.id] = 0
+
+  for (const item of items) {
+    if (item.paid_from_pot !== 'charity') continue
+    const goalId =
+      item.charity_goal_id && known.has(item.charity_goal_id)
+        ? item.charity_goal_id
+        : primaryId
+    if (!goalId) continue
+    acc[goalId] = (acc[goalId] ?? 0) + Number(item.amount)
   }
   return acc
 }

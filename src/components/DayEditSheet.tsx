@@ -11,6 +11,7 @@ import {
   clearWeekdayOverride,
   isoWeekday,
   todayStr,
+  endTimeFromDuration,
   type PlannerItem,
   type PlannerDayOverride,
   type Priority,
@@ -90,6 +91,7 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>(item.time_of_day ?? null)
   const [start, setStart] = useState<string>(item.at_time_start ?? '')
   const [end, setEnd] = useState<string>(item.at_time_end ?? '')
+  const [duration, setDuration] = useState<string>(item.duration_min ? String(item.duration_min) : '')
   const [priority, setPriority] = useState<Priority>(item.priority)
   const [note, setNote] = useState<string>(item.note ?? '')
   const [busy, setBusy] = useState(false)
@@ -133,6 +135,25 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
   const today = todayStr()
   const dayLabel = date === today ? t('today.today') : formatDateHuman(date)
 
+  const durationValue = (raw: string = duration): number | null => {
+    const value = Number(raw)
+    return Number.isFinite(value) && value > 0 ? Math.min(1440, Math.round(value)) : null
+  }
+
+  const hasDuration = durationValue() !== null
+
+  const setStartWithDuration = (value: string) => {
+    setStart(value)
+    const minutes = durationValue()
+    if (minutes) setEnd(endTimeFromDuration(value, minutes))
+  }
+
+  const setDurationWithEnd = (value: string) => {
+    setDuration(value)
+    const minutes = durationValue(value)
+    if (minutes && start) setEnd(endTimeFromDuration(start, minutes))
+  }
+
   const save = async () => {
     if (busy) return
     setBusy(true)
@@ -147,6 +168,7 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
         time_of_day: timeOfDay,
         at_time_start: start || null,
         at_time_end: end || null,
+        duration_min: durationValue(),
         priority,
         note: note.trim() ? note.trim() : null,
       })
@@ -156,6 +178,7 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
           time_of_day: timeOfDay,
           at_time_start: start || null,
           at_time_end: end || null,
+          duration_min: durationValue(),
         })
       } else if (hadWeekly) {
         await clearWeekdayOverride(userId, item.id, weekday)
@@ -245,16 +268,38 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
           </div>
         </div>
 
-        {/* Время */}
+        {/* Время и длительность. При длительности конец рассчитывается сразу. */}
         <div className="mt-4 grid grid-cols-2 gap-3">
           <div>
             <p className="mb-1.5 text-sm font-medium">{t('items.timeStart')}</p>
-            <TimePicker value={start} onChange={setStart} />
+            <TimePicker value={start} onChange={setStartWithDuration} />
           </div>
           <div>
-            <p className="mb-1.5 text-sm font-medium">{t('items.timeEnd')}</p>
-            <TimePicker value={end} onChange={setEnd} />
+            <p className="mb-1.5 text-sm font-medium">{t('items.duration')}</p>
+            <input
+              type="number"
+              inputMode="numeric"
+              min="1"
+              max="1440"
+              value={duration}
+              onChange={(e) => setDurationWithEnd(e.target.value)}
+              placeholder={t('items.durationPh')}
+              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
+            />
           </div>
+        </div>
+        <div className="mt-3">
+          <p className="mb-1.5 text-sm font-medium">{t('items.timeEnd')}</p>
+          {hasDuration ? (
+            <>
+              <div className="rounded-lg border border-dashed border-emerald-400/70 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                {start ? endTimeFromDuration(start, durationValue()) : t('items.durationSetStart')}
+              </div>
+              <p className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400">{t('items.durationAuto')}</p>
+            </>
+          ) : (
+            <TimePicker value={end} onChange={setEnd} />
+          )}
         </div>
 
         {/* Важность */}
@@ -301,8 +346,8 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
             </span>
             <span className="mt-0.5 block text-xs text-neutral-500">
               {lang === 'en'
-                ? 'Time and day section will apply on this weekday every week.'
-                : 'Время и секция дня будут применяться в этот день недели каждую неделю.'}
+                ? 'Time, duration, and day section will apply on this weekday every week.'
+                : 'Время, длительность и секция дня будут применяться в этот день недели каждую неделю.'}
             </span>
           </span>
         </label>
