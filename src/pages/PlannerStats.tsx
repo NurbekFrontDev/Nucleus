@@ -41,9 +41,9 @@ export default function PlannerStats() {
     const ck = `planstats:${user.id}:${period}`
     const cached = readCache<StatsCache>(ck)
     if (cached) {
-      setStats(cached.stats)
-      setHabits(cached.habits)
-      setMoods(cached.moods)
+      setStats(cached.stats || null)
+      setHabits(cached.habits || [])
+      setMoods(cached.moods || {})
       setLoading(false)
     } else {
       setLoading(true)
@@ -124,8 +124,8 @@ export default function PlannerStats() {
     return (lang === 'en' ? en : ru)[wd]
   }
 
-  const procrastinationCount = Object.values(moods).filter(m => m === 'procrastination').length
-  const burnoutCount = Object.values(moods).filter(m => m === 'burnout').length
+  const procrastinationCount = Object.values(moods || {}).filter(m => m === 'procrastination').length
+  const burnoutCount = Object.values(moods || {}).filter(m => m === 'burnout').length
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">

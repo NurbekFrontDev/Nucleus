@@ -80,8 +80,32 @@ export type PlannerLog = {
 }
 
 // Набор колонок для запросов (держим в одном месте, чтобы не расходились).
+export const ITEM_BASE_COLS =
+  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today'
+
 export const ITEM_COLS =
   'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today, hidden_intervals'
+
+let hasHiddenIntervalsColumn = true
+
+export async function safePlannerItemsQuery<T = any>(
+  queryFn: (cols: string) => PromiseLike<{ data: T | null; error: any }>,
+): Promise<{ data: T | null; error: any }> {
+  if (hasHiddenIntervalsColumn) {
+    const res = await queryFn(ITEM_COLS)
+    if (!res.error) return res as { data: T | null; error: any }
+    const msg = String(res.error?.message || '')
+    if (msg.includes('hidden_intervals') || msg.includes('column') || msg.includes('schema')) {
+      hasHiddenIntervalsColumn = false
+      const fallbackRes = await queryFn(ITEM_BASE_COLS)
+      return fallbackRes as { data: T | null; error: any }
+    }
+    return res as { data: T | null; error: any }
+  }
+  const res = await queryFn(ITEM_BASE_COLS)
+  return res as { data: T | null; error: any }
+}
+
 export const LOG_COLS = 'id, item_id, date, status, value, note'
 
 // Эмодзи-кружок важности для UI. Для none -- пусто.
@@ -581,11 +605,13 @@ export async function clearWeeklyDaySnapshot(userId: string, dateStr: string): P
 // отметки и ручной порядок именно для этого дня, и сортирует список.
 export async function loadDay(userId: string, dateStr: string): Promise<DayData> {
   const [itemsRes, logsRes, orderRes, ovRes, wdOvs, weeklySnapshot] = await Promise.all([
-    supabase
-      .from('planner_items')
-      .select(ITEM_COLS)
-      .eq('user_id', userId)
-      .eq('archived', false),
+    safePlannerItemsQuery((cols) =>
+      supabase
+        .from('planner_items')
+        .select(cols)
+        .eq('user_id', userId)
+        .eq('archived', false),
+    ),
     supabase
       .from('planner_logs')
       .select(LOG_COLS)
@@ -612,7 +638,7 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
   if (orderRes.error) throw orderRes.error
   if (ovRes.error) throw ovRes.error
 
-  const all = (itemsRes.data ?? []) as PlannerItem[]
+  const all = (itemsRes.data ?? []) as unknown as PlannerItem[]
 
   // Персональные правки дел на ЭТОТ день (время/секция/важность/заметка).
   const ovMap = new Map<string, PlannerDayOverride>()
@@ -1111,15 +1137,17 @@ export type ItemInput = {
 
 // Загружает все НЕ архивированные дела пользователя (для списка «Мои дела»).
 export async function loadAllItems(userId: string): Promise<PlannerItem[]> {
-  const { data, error } = await supabase
-    .from('planner_items')
-    .select(ITEM_COLS)
-    .eq('user_id', userId)
-    .eq('archived', false)
-    .order('sort_order', { ascending: true })
-    .order('created_at', { ascending: true })
+  const { data, error } = await safePlannerItemsQuery((cols) =>
+    supabase
+      .from('planner_items')
+      .select(cols)
+      .eq('user_id', userId)
+      .eq('archived', false)
+      .order('sort_order', { ascending: true })
+      .order('created_at', { ascending: true }),
+  )
   if (error) throw error
-  return (data ?? []) as PlannerItem[]
+  return (data ?? []) as unknown as PlannerItem[]
 }
 
 // Готовит строку для базы. weekdays нужны только для repeat_rule='weekly'.
@@ -1147,13 +1175,15 @@ function itemRow(input: ItemInput) {
 
 // Создаёт новое дело и возвращает его.
 export async function createItem(userId: string, input: ItemInput): Promise<PlannerItem> {
-  const { data, error } = await supabase
-    .from('planner_items')
-    .insert({ user_id: userId, ...itemRow(input) })
-    .select(ITEM_COLS)
-    .single()
+  const { data, error } = await safePlannerItemsQuery((cols) =>
+    supabase
+      .from('planner_items')
+      .insert({ user_id: userId, ...itemRow(input) })
+      .select(cols)
+      .single(),
+  )
   if (error) throw error
-  return data as PlannerItem
+  return data as unknown as PlannerItem
 }
 
 // Обновляет существующее дело и возвращает его.
@@ -1168,12 +1198,14 @@ export async function updateItem(
   input: ItemInput,
 ): Promise<PlannerItem> {
   // 1) Читаем текущие (старые) значения дела и фиксируем ими прошлые дни.
-  const { data: oldData, error: oldErr } = await supabase
-    .from('planner_items')
-    .select(ITEM_COLS)
-    .eq('user_id', userId)
-    .eq('id', id)
-    .single()
+  const { data: oldData, error: oldErr } = await safePlannerItemsQuery((cols) =>
+    supabase
+      .from('planner_items')
+      .select(cols)
+      .eq('user_id', userId)
+      .eq('id', id)
+      .single(),
+  )
   if (oldErr) throw oldErr
   const old = (oldData ?? null) as PlannerItem | null
   if (old) await freezePastDays(userId, old)
@@ -1192,15 +1224,17 @@ export async function updateItem(
       (old.start_date ?? null) !== (row.start_date ?? null))
 
   // 2) Обновляем шаблон — это затронет только сегодня и будущие дни.
-  const { data, error } = await supabase
-    .from('planner_items')
-    .update(scheduleChanged ? { ...row, schedule_changed_at: todayStr() } : row)
-    .eq('user_id', userId)
-    .eq('id', id)
-    .select(ITEM_COLS)
-    .single()
+  const { data, error } = await safePlannerItemsQuery((cols) =>
+    supabase
+      .from('planner_items')
+      .update(scheduleChanged ? { ...row, schedule_changed_at: todayStr() } : row)
+      .eq('user_id', userId)
+      .eq('id', id)
+      .select(cols)
+      .single(),
+  )
   if (error) throw error
-  return data as PlannerItem
+  return data as unknown as PlannerItem
 }
 
 // «Замораживает» прошлые дни дела: для каждой прошедшей даты (от старта дела,
@@ -1422,15 +1456,18 @@ function computeHabitStats(
 // Загружает привычки пользователя со статистикой стриков.
 export async function loadHabits(userId: string): Promise<HabitStats[]> {
   const cutoff = addDays(todayStr(), -400)
-  const [itemsRes, logsRes] = await Promise.all([
+  const itemsResPromise = safePlannerItemsQuery((cols) =>
     supabase
       .from('planner_items')
-      .select(ITEM_COLS)
+      .select(cols)
       .eq('user_id', userId)
       .eq('type', 'habit')
       .eq('archived', false)
       .order('sort_order', { ascending: true })
       .order('created_at', { ascending: true }),
+  )
+  const [itemsRes, logsRes] = await Promise.all([
+    itemsResPromise,
     supabase
       .from('planner_logs')
       .select(LOG_COLS)
@@ -1440,7 +1477,7 @@ export async function loadHabits(userId: string): Promise<HabitStats[]> {
   if (itemsRes.error) throw itemsRes.error
   if (logsRes.error) throw logsRes.error
 
-  const habits = (itemsRes.data ?? []) as PlannerItem[]
+  const habits = (itemsRes.data ?? []) as unknown as PlannerItem[]
   const byItem = new Map<string, Record<string, LogStatus>>()
   for (const l of (logsRes.data ?? []) as PlannerLog[]) {
     let m = byItem.get(l.item_id)
@@ -1626,13 +1663,16 @@ function computeHabitDetail(
 
 // Загружает все данные одной привычки для окна привычки.
 export async function loadHabitDetail(userId: string, itemId: string): Promise<HabitDetail> {
-  const [itemRes, logsRes, reflRes] = await Promise.all([
+  const itemResPromise = safePlannerItemsQuery((cols) =>
     supabase
       .from('planner_items')
-      .select(ITEM_COLS)
+      .select(cols)
       .eq('user_id', userId)
       .eq('id', itemId)
       .single(),
+  )
+  const [itemRes, logsRes, reflRes] = await Promise.all([
+    itemResPromise,
     supabase.from('planner_logs').select(LOG_COLS).eq('user_id', userId).eq('item_id', itemId),
     supabase
       .from('planner_reflections')
@@ -1644,7 +1684,7 @@ export async function loadHabitDetail(userId: string, itemId: string): Promise<H
   if (itemRes.error) throw itemRes.error
   if (logsRes.error) throw logsRes.error
   if (reflRes.error) throw reflRes.error
-  const item = itemRes.data as PlannerItem
+  const item = itemRes.data as unknown as PlannerItem
   const statusByDate: Record<string, LogStatus> = {}
   for (const l of (logsRes.data ?? []) as PlannerLog[]) statusByDate[l.date] = l.status
   const reflections = (reflRes.data ?? []) as HabitReflection[]
@@ -1822,8 +1862,11 @@ export async function loadDaySummaries(
   startDate: string,
   endDate: string,
 ): Promise<Record<string, DaySummary>> {
+  const itemsResPromise = safePlannerItemsQuery((cols) =>
+    supabase.from('planner_items').select(cols).eq('user_id', userId).eq('archived', false),
+  )
   const [itemsRes, logsRes, overrideRes, snapshots] = await Promise.all([
-    supabase.from('planner_items').select(ITEM_COLS).eq('user_id', userId).eq('archived', false),
+    itemsResPromise,
     supabase
       .from('planner_logs')
       .select(LOG_COLS)
@@ -1842,7 +1885,7 @@ export async function loadDaySummaries(
   if (logsRes.error) throw logsRes.error
   if (overrideRes.error) throw overrideRes.error
 
-  const items = (itemsRes.data ?? []) as PlannerItem[]
+  const items = (itemsRes.data ?? []) as unknown as PlannerItem[]
   // дата -> (itemId -> статус)
   const logsByDate = new Map<string, Record<string, LogStatus>>()
   for (const l of (logsRes.data ?? []) as PlannerLog[]) {
@@ -2114,8 +2157,11 @@ export async function loadPlannerStats(
   const startIso = new Date(start + 'T00:00:00').toISOString()
   const endIso = new Date(end + 'T23:59:59').toISOString()
 
+  const itemsResPromise = safePlannerItemsQuery((cols) =>
+    supabase.from('planner_items').select(cols).eq('user_id', userId).eq('archived', false),
+  )
   const [itemsRes, logsRes, pomoRes, overrideRes, snapshots] = await Promise.all([
-    supabase.from('planner_items').select(ITEM_COLS).eq('user_id', userId).eq('archived', false),
+    itemsResPromise,
     supabase
       .from('planner_logs')
       .select(LOG_COLS)
@@ -2143,7 +2189,7 @@ export async function loadPlannerStats(
   if (pomoRes.error) throw pomoRes.error
   if (overrideRes.error) throw overrideRes.error
 
-  const items = (itemsRes.data ?? []) as PlannerItem[]
+  const items = (itemsRes.data ?? []) as unknown as PlannerItem[]
   const logsByDate = new Map<string, Record<string, LogStatus>>()
   for (const l of (logsRes.data ?? []) as PlannerLog[]) {
     let m = logsByDate.get(l.date)
