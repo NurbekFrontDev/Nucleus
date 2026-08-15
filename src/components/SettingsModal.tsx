@@ -215,19 +215,19 @@ export default function SettingsModal({ onClose }: Props) {
                   ? 'Used by AI assistant and personalization'
                   : 'Используется ИИ-ассистентом и персонализацией'}
               </p>
-              <div className="mt-3 flex gap-2">
+              <div className="mt-3 flex items-center gap-2">
                 <input
                   type="text"
                   value={userName}
                   onChange={(e) => setUserName(e.target.value)}
                   placeholder={lang === 'en' ? 'Enter your name' : 'Введите ваше имя'}
-                  className="flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
+                  className="min-w-0 flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
                 />
                 <button
                   type="button"
                   onClick={handleSaveName}
                   disabled={nameSaving || !userName.trim() || userName.trim() === initialName}
-                  className="rounded-lg bg-emerald-500 px-4 py-1.5 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50"
+                  className="shrink-0 whitespace-nowrap rounded-lg bg-emerald-500 px-4 py-1.5 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50"
                 >
                   {nameSaving ? '...' : lang === 'en' ? 'Save' : 'Сохранить'}
                 </button>
