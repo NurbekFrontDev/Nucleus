@@ -10,6 +10,7 @@ import {
   deleteOneoffTask,
   cleanupOldOneoff,
 } from '../lib/oneoff'
+import { onSyncEvent } from '../lib/realtimeSync'
 
 // Component that displays one-time tasks on the PlannerToday screen
 export default function OneoffSection({ currentDay }: { currentDay: string }) {
@@ -54,6 +55,23 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
     return () => {
       active = false
     }
+  }, [user, currentDay, filter])
+
+  // Мгновенная синхронизация разовых задач
+  useEffect(() => {
+    if (!user) return
+    const unsub = onSyncEvent(['oneoff_tasks'], async () => {
+      try {
+        const data = await loadOneoffTasks(
+          user.id,
+          filter === 'today' ? { date: currentDay } : undefined,
+        )
+        setTasks(data)
+      } catch (e) {
+        console.error(e)
+      }
+    })
+    return unsub
   }, [user, currentDay, filter])
 
   const handleAdd = async (e: React.FormEvent) => {

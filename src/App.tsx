@@ -16,6 +16,7 @@ import { initOta } from './lib/ota'
 import { initDesktopUpdates } from './lib/desktopUpdate'
 import UpdateDialog from './components/UpdateDialog'
 import { initPomoSync, type PomoSyncMessage } from './lib/pomoSync'
+import { startRealtimeSync, stopRealtimeSync } from './lib/realtimeSync'
 import { enableFocusDnd, disableFocusDnd } from './lib/dnd'
 
 // Код-сплиттинг (А-9, шаг 3): страницы грузятся отдельными чанками по мере
@@ -248,6 +249,15 @@ function App() {
     return () => {
       cleanup()
       window.removeEventListener('nucleus-pomo-sync', handler)
+    }
+  }, [userId])
+
+  // Мгновенная синхронизация базы данных (Realtime postgres_changes) между всеми устройствами
+  useEffect(() => {
+    if (!userId) return
+    startRealtimeSync(userId)
+    return () => {
+      stopRealtimeSync()
     }
   }, [userId])
 

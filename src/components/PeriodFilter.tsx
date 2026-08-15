@@ -25,7 +25,7 @@ const pad = (n: number) => String(n).padStart(2, '0')
 const iso = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 
 const chipCls = (active: boolean) =>
-  `flex-1 whitespace-nowrap rounded-full border px-1.5 py-1 text-center text-xs transition ${
+  `shrink-0 whitespace-nowrap rounded-full border px-1.5 py-1 text-center text-xs transition ${
     active
       ? 'border-emerald-500 bg-emerald-500 font-medium text-neutral-950'
       : 'border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
@@ -62,7 +62,7 @@ export default function PeriodFilter({
   // Один ряд без переноса: если ширины не хватает (например, длинные
   // русские подписи), ряд можно прокрутить горизонтально, чтобы «Период» не падал на 2-ю строку.
   // flex-1 растягивает чипы на равную ширину — отступы слева и справа равномерные.
-  const rowBase = 'flex gap-1.5'
+  const rowBase = 'flex gap-1.5 overflow-x-auto no-scrollbar'
   const rowCls = modesAlign === 'center' ? `justify-center ${rowBase}` : rowBase
   const todayISO = iso(new Date())
   const [mode, setMode] = useState<Mode>('month')

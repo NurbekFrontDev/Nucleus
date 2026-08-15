@@ -22,6 +22,7 @@ import {
   deletePreset,
 } from '../lib/db'
 import { readCache, writeCache } from '../lib/offlineCache'
+import { onSyncEvent } from '../lib/realtimeSync'
 
 type Income = {
   id: string
@@ -55,6 +56,7 @@ export default function Incomes() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sortOrder, setSortOrder] = useState<'new' | 'old'>('new')
+  const [reloadKey, setReloadKey] = useState(0)
 
   const [amount, setAmount] = useState('')
   // Валюта по умолчанию — последняя выбранная пользователем.
@@ -111,7 +113,16 @@ export default function Incomes() {
     return () => {
       active = false
     }
-  }, [user, period?.start, period?.end])
+  }, [user, period?.start, period?.end, reloadKey])
+
+  // Мгновенная синхронизация доходов при изменении на других устройствах
+  useEffect(() => {
+    if (!user) return
+    const unsub = onSyncEvent(['incomes'], () => {
+      setReloadKey((k) => k + 1)
+    })
+    return unsub
+  }, [user])
 
   const total = items.reduce((s, i) => s + Number(i.amount), 0)
 

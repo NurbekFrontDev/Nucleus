@@ -42,6 +42,7 @@ import { hapticTap } from '../lib/native'
 import { rescheduleAll } from '../lib/notifications'
 import ConfirmDialog from '../components/ConfirmDialog'
 import OneoffSection from '../components/OneoffSection'
+import { onSyncEvent } from '../lib/realtimeSync'
 
 // Экран «Сегодня» (П-3 + П-6): один экран с переключателем вида в правом
 // верхнем углу — Сегодня / Неделя / Месяц / Год (как в TickTick).
@@ -335,6 +336,19 @@ export default function PlannerToday() {
       setError((e as Error).message)
     }
   }
+
+  // Мгновенная синхронизация: при изменении дел или отметок на других устройствах перегружаем данные
+  useEffect(() => {
+    if (!user) return
+    const unsub = onSyncEvent(
+      ['planner_items', 'planner_logs', 'planner_day_moods', 'planner_day_overrides', 'planner_day_order'],
+      () => {
+        if (view === 'today') void reload()
+        else void reloadSummaries()
+      },
+    )
+    return unsub
+  }, [user, view, date, range.start, range.end])
 
   const saveAsWeeklyDay = async () => {
     if (!user || weeklySaving) return

@@ -81,7 +81,7 @@ export type PlannerLog = {
 
 // Набор колонок для запросов (держим в одном месте, чтобы не расходились).
 export const ITEM_COLS =
-  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today'
+  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today, hidden_intervals'
 export const LOG_COLS = 'id, item_id, date, status, value, note'
 
 // Эмодзи-кружок важности для UI. Для none -- пусто.

@@ -1,4 +1,5 @@
 import { Suspense, useEffect, useRef, useState } from 'react'
+import ErrorBoundary from './ErrorBoundary'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import BackupReminder from './BackupReminder'
 import AssistantWidget from './AssistantWidget'
@@ -231,11 +232,19 @@ export default function Layout() {
       <main ref={mainRef} className="flex-1 overflow-y-auto pb-20 [scrollbar-gutter:stable_both-edges] md:pb-0">
         <div className="mx-auto max-w-3xl px-4 pb-6">
           {/* Оболочка (шапка + нижняя навигация) видна мгновенно; тело страницы
-              подгружается ленивым чанком под Suspense. fallback={null} — без
-              спиннера: пустое тело на доли секунды, пока грузится чанк. */}
-          <Suspense fallback={null}>
-            <Outlet />
-          </Suspense>
+              подгружается ленивым чанком под Suspense. ErrorBoundary перехватывает
+              ошибки рендеринга чтобы экран не оставался чёрным. */}
+          <ErrorBoundary>
+            <Suspense
+              fallback={
+                <div className="flex min-h-[40vh] items-center justify-center">
+                  <span className="text-sm text-neutral-400 dark:text-neutral-500">Загрузка…</span>
+                </div>
+              }
+            >
+              <Outlet />
+            </Suspense>
+          </ErrorBoundary>
         </div>
       </main>
 

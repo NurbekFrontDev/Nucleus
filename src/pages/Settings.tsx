@@ -95,7 +95,7 @@ export default function Settings() {
             }}
             options={DISPLAY_CURRENCIES.map((c) => ({
               value: c.code,
-              label: `${c.symbol} ${c.code}`,
+              label: c.code === 'UZS' ? 'сум UZS' : `${c.symbol} ${c.code}`,
             }))}
           />
         </div>

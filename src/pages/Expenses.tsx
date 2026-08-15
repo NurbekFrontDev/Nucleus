@@ -26,6 +26,7 @@ import {
   isCharityCategory,
 } from '../lib/db'
 import { readCache, writeCache } from '../lib/offlineCache'
+import { onSyncEvent } from '../lib/realtimeSync'
 
 type Category = { id: string; name: string; archived?: boolean }
 type Expense = {
@@ -73,6 +74,7 @@ export default function Expenses() {
   const [error, setError] = useState<string | null>(null)
   const [sortOrder, setSortOrder] = useState<'new' | 'old'>('new')
   const [filterCat, setFilterCat] = useState('')
+  const [reloadKey, setReloadKey] = useState(0)
 
   const [amount, setAmount] = useState('')
   // Валюта по умолчанию — последняя выбранная пользователем.
@@ -160,7 +162,16 @@ export default function Expenses() {
     return () => {
       active = false
     }
-  }, [user, period?.start, period?.end])
+  }, [user, period, reloadKey])
+
+  // Мгновенная синхронизация расходов при изменении на других устройствах
+  useEffect(() => {
+    if (!user) return
+    const unsub = onSyncEvent(['expenses', 'categories'], () => {
+      setReloadKey((k) => k + 1)
+    })
+    return unsub
+  }, [user])
 
   // Если выбранной в фильтре категории нет среди расходов текущего периода — сбрасываем на «Все».
   useEffect(() => {

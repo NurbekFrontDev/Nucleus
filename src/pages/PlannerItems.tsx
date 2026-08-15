@@ -24,6 +24,7 @@ import {
   type ItemInput,
 } from '../lib/planner'
 import { readCache, writeCache } from '../lib/offlineCache'
+import { onSyncEvent } from '../lib/realtimeSync'
 
 // Экран «Мои дела»: единое место, где заводят и редактируют дела и привычки
 // (П-5, переделка под стиль Atoms). Это «склад/конструктор»: тут ТОЛЬКО
@@ -258,6 +259,16 @@ export default function PlannerItems() {
 
   useEffect(() => {
     loadAll()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
+  // Мгновенная синхронизация дел
+  useEffect(() => {
+    if (!user) return
+    const unsub = onSyncEvent(['planner_items'], () => {
+      void loadAll()
+    })
+    return unsub
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
 

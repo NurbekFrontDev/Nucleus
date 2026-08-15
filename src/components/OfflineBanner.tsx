@@ -37,7 +37,7 @@ export default function OfflineBanner() {
     <div
       role="status"
       aria-live="polite"
-      className="fixed right-3 top-3 z-50 rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs font-medium text-amber-800 shadow-lg backdrop-blur dark:text-amber-300"
+      className="fixed right-3 top-16 md:top-3 z-50 rounded-full border border-amber-500/40 bg-amber-500/15 px-3 py-1.5 text-xs font-medium text-amber-800 shadow-lg backdrop-blur dark:text-amber-300"
     >
       {status.online ? '↻' : '◌'} {message}{count}
     </div>

@@ -12,6 +12,7 @@ import {
   parseAmount,
 } from '../lib/db'
 import { readCache, writeCache } from '../lib/offlineCache'
+import { onSyncEvent } from '../lib/realtimeSync'
 
 type Category = { id: string; name: string; percent: number; sort_order: number; archived?: boolean }
 type BudgetCache = { monthId: string; goalIncome: string; received: number; categories: Category[] }
@@ -94,6 +95,7 @@ export default function Budget() {
   const [newCatName, setNewCatName] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [reloadKey, setReloadKey] = useState(0)
 
   // Управление категориями: меню (выпадает по тапу на точки), переименование, удаление.
   const [menuId, setMenuId] = useState<string | null>(null)
@@ -185,7 +187,16 @@ export default function Budget() {
     return () => {
       active = false
     }
-  }, [user, year, month])
+  }, [user, year, month, reloadKey])
+
+  // Мгновенная синхронизация бюджета при изменении на других устройствах
+  useEffect(() => {
+    if (!user) return
+    const unsub = onSyncEvent(['categories', 'months', 'incomes'], () => {
+      setReloadKey((k) => k + 1)
+    })
+    return unsub
+  }, [user])
 
   const totalPercent = categories.reduce((s, c) => s + Number(c.percent), 0)
 
@@ -409,7 +420,16 @@ export default function Budget() {
       setConfirmId(null)
       return
     }
-    setCategories((cs) => cs.filter((x) => x.id !== confirmId))
+    setCategories((cs) => {
+      const next = cs.filter((x) => x.id !== confirmId)
+      // Мгновенно обновляем локальный кэш, чтобы при переходе назад категория не «воскресала».
+      if (user) {
+        const ck = `budget:${user.id}:${year}-${month}`
+        const cached = readCache<BudgetCache>(ck)
+        if (cached) writeCache(ck, { ...cached, categories: next })
+      }
+      return next
+    })
     setConfirmId(null)
   }
 

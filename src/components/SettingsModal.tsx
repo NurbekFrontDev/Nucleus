@@ -38,6 +38,7 @@ export default function SettingsModal({ onClose }: Props) {
   const canPickDir = supportsFsAccess()
 
   const [userName, setUserName] = useState('')
+  const [initialName, setInitialName] = useState('')
   const [nameSaving, setNameSaving] = useState(false)
   const [autostart, setAutostartState] = useState(false)
   const [backupAuto, setBackupAuto] = useState(false)
@@ -64,7 +65,10 @@ export default function SettingsModal({ onClose }: Props) {
     if (!user) return
     let active = true
     loadUserName(user.id).then((name) => {
-      if (active && name) setUserName(name)
+      if (active && name) {
+        setUserName(name)
+        setInitialName(name)
+      }
     })
     return () => {
       active = false
@@ -77,6 +81,7 @@ export default function SettingsModal({ onClose }: Props) {
     try {
       await saveUserName(user.id, userName.trim())
       showToast(lang === 'en' ? 'Name saved' : 'Имя сохранено')
+      setInitialName(userName.trim())
     } catch {
       showToast(lang === 'en' ? 'Failed to save name' : 'Ошибка сохранения')
     } finally {
@@ -221,7 +226,7 @@ export default function SettingsModal({ onClose }: Props) {
                 <button
                   type="button"
                   onClick={handleSaveName}
-                  disabled={nameSaving || !userName.trim()}
+                  disabled={nameSaving || !userName.trim() || userName.trim() === initialName}
                   className="rounded-lg bg-emerald-500 px-4 py-1.5 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50"
                 >
                   {nameSaving ? '...' : lang === 'en' ? 'Save' : 'Сохранить'}
