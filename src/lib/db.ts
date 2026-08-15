@@ -12,7 +12,7 @@ export const DISPLAY_CURRENCIES: DisplayCurrency[] = [
   { code: 'USD', symbol: '$' },
   { code: 'EUR', symbol: '€' },
   { code: 'RUB', symbol: '₽' },
-  { code: 'UZS', symbol: 'сўм' },
+  { code: 'UZS', symbol: 'UZS' },
   { code: 'KZT', symbol: '₸' },
   { code: 'GBP', symbol: '£' },
   { code: 'TRY', symbol: '₺' },
@@ -181,7 +181,8 @@ export function formatSum(value: number): string {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number(value) || 0)
-  return displayCurrencySymbol + formatted
+  const sep = displayCurrencySymbol.length > 1 ? ' ' : ''
+  return displayCurrencySymbol + sep + formatted
 }
 
 // Форматирует ввод суммы с пробелами по тысячам и копейками (до 2 знаков):

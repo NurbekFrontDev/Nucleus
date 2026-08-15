@@ -1,18 +1,24 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
-import { loadCryptoAutoExpense, saveCryptoAutoExpense } from '../lib/db'
-import SettingsModal from '../components/SettingsModal'
+import {
+  DISPLAY_CURRENCIES,
+  getDisplayCurrency,
+  loadCryptoAutoExpense,
+  saveCryptoAutoExpense,
+  saveDisplayCurrencyToCloud,
+  setDisplayCurrency,
+} from '../lib/db'
+import Select from '../components/Select'
 
-// Экран «Настройки» FinLit: настройки, относящиеся именно к модулю финансов.
-// Общие настройки (язык, валюта, тема, бэкап, хранилище) перенесены в глобальное
-// модальное окно настроек (доступно из профиля в левом нижнем углу или шапке).
-
+// Экран «Настройки» FinLit: настройки модуля финансов.
+// 1. Авто-расход при покупке криптовалюты
+// 2. Валюта отображения
 export default function Settings() {
   const { user } = useAuth()
   const { t, lang } = useLang()
   const [cryptoAuto, setCryptoAuto] = useState(true)
-  const [modalOpen, setModalOpen] = useState(false)
+  const [dispCurrency, setDispCurrencyState] = useState<string>(() => getDisplayCurrency().code)
 
   useEffect(() => {
     if (!user) return
@@ -70,25 +76,30 @@ export default function Settings() {
         </button>
       </div>
 
-      {/* Кнопка открытия общих настроек */}
+      {/* Валюта отображения */}
       <div className="flex items-center justify-between gap-3 rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50">
         <div className="min-w-0">
-          <p className="font-medium">🌐 {lang === 'en' ? 'Global Settings' : 'Общие настройки'}</p>
+          <p className="font-medium">💱 {lang === 'en' ? 'Display currency' : 'Валюта отображения'}</p>
           <p className="mt-1 text-xs text-neutral-500 dark:text-neutral-400">
-            {lang === 'en'
-              ? 'Language, theme, display currency, backups, storage limits'
-              : 'Язык, тема, валюта отображения, бэкапы, лимиты хранилища'}
+            {lang === 'en' ? 'Symbol shown next to amounts' : 'Символ, отображаемый рядом с суммами'}
           </p>
         </div>
-        <button
-          onClick={() => setModalOpen(true)}
-          className="shrink-0 rounded-lg border border-neutral-300 px-4 py-2 text-sm font-medium transition hover:bg-neutral-100 dark:border-neutral-700 dark:hover:bg-neutral-800"
-        >
-          {lang === 'en' ? 'Open' : 'Открыть'}
-        </button>
+        <div className="shrink-0">
+          <Select
+            className="w-fit"
+            value={dispCurrency}
+            onChange={(v) => {
+              setDispCurrencyState(v)
+              setDisplayCurrency(v)
+              if (user) void saveDisplayCurrencyToCloud(user.id, v)
+            }}
+            options={DISPLAY_CURRENCIES.map((c) => ({
+              value: c.code,
+              label: `${c.symbol} ${c.code}`,
+            }))}
+          />
+        </div>
       </div>
-
-      {modalOpen && <SettingsModal onClose={() => setModalOpen(false)} />}
     </div>
   )
 }

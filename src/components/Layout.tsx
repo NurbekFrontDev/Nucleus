@@ -200,7 +200,6 @@ export default function Layout() {
             </span>
             <span className="min-w-0">
               <span className="block truncate text-sm font-medium">{user?.email || 'Nucleus'}</span>
-              <span className="block text-xs text-neutral-500 dark:text-neutral-400">⚙️ {t('profile.settings')}</span>
             </span>
           </button>
         </div>

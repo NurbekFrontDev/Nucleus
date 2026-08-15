@@ -25,6 +25,11 @@ export type PlannerType = 'task' | 'habit'
 //   weekly   -> по выбранным дням недели (см. weekdays: ISO 1=Пн..7=Вс)
 export type RepeatRule = 'none' | 'daily' | 'weekdays' | 'weekly'
 
+export type HiddenInterval = {
+  from: string // YYYY-MM-DD
+  to?: string  // YYYY-MM-DD
+}
+
 // Часть дня для группировки (Утро/День/Вечер). null -- без времени.
 export type TimeOfDay = 'morning' | 'day' | 'evening' | 'allday' | null
 
@@ -35,12 +40,13 @@ export type DayMood = 'procrastination' | 'burnout'
 
 export type PlannerItem = {
   id: string
+  user_id: string
   title: string
   note: string | null
   type: PlannerType
   repeat_rule: RepeatRule
   weekdays: number[] | null
-  time_of_day: TimeOfDay
+  time_of_day: TimeOfDay | null
   at_time_start: string | null
   at_time_end: string | null
   // Планируемая длительность в минутах. Если задана вместе с началом,
@@ -61,6 +67,7 @@ export type PlannerItem = {
   identity: string | null
   two_min: string | null
   hidden_today: boolean
+  hidden_intervals?: HiddenInterval[]
 }
 
 export type PlannerLog = {
@@ -626,7 +633,7 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
   //     Это закрывает обратный случай: вернул день недели на место (Вт -> Пн) —
   //     дело не должно воскреснуть в прошедшем понедельнике этой же недели.
   const keepInDay = (it: PlannerItem): boolean => {
-    if (it.hidden_today) return false
+    if (isItemHiddenOnDate(it, dateStr)) return false
     const ov = ovMap.get(it.id)
     // Убрано вручную только из этого дня — выше всех остальных правил.
     if (ov?.hidden) return false
@@ -870,18 +877,71 @@ export async function saveDayOrder(
   if (insErr) throw insErr
 }
 
-// Скрыть/показать дело в экране Сегодня, не архивируя его
+// Проверяет, скрыто ли дело на конкретную дату по интервалам скрытия.
+export function isItemHiddenOnDate(it: PlannerItem, dateStr: string): boolean {
+  if (it.hidden_intervals && Array.isArray(it.hidden_intervals) && it.hidden_intervals.length > 0) {
+    for (const inv of it.hidden_intervals) {
+      if (inv.from && dateStr >= inv.from) {
+        if (!inv.to || dateStr < inv.to) {
+          return true
+        }
+      }
+    }
+    return false
+  }
+  return !!it.hidden_today
+}
+
+// Скрыть/показать дело в экране Сегодня, сохраняя историю прошлых дней.
+// При скрытии фиксируется дата: дело скрывается с этого дня и далее.
+// При возвращении (показе) открытый интервал скрытия закрывается текущей датой.
 export async function toggleHiddenToday(
   userId: string,
   itemId: string,
   hidden: boolean,
+  dateStr: string = todayStr(),
 ): Promise<void> {
-  const { error } = await supabase
+  const { data } = await supabase
     .from('planner_items')
-    .update({ hidden_today: hidden })
+    .select('hidden_intervals')
     .eq('user_id', userId)
     .eq('id', itemId)
-  if (error) throw error
+    .maybeSingle()
+
+  const raw = (data as { hidden_intervals?: HiddenInterval[] } | null)?.hidden_intervals
+  const intervals: HiddenInterval[] = Array.isArray(raw) ? [...raw] : []
+
+  if (hidden) {
+    const openInv = intervals.find((i) => !i.to)
+    if (!openInv) {
+      intervals.push({ from: dateStr })
+    }
+  } else {
+    for (const inv of intervals) {
+      if (!inv.to) {
+        inv.to = dateStr
+      }
+    }
+  }
+
+  const { error } = await supabase
+    .from('planner_items')
+    .update({
+      hidden_today: hidden,
+      hidden_intervals: intervals,
+    })
+    .eq('user_id', userId)
+    .eq('id', itemId)
+
+  if (error) {
+    // Фоллбэк, если колонка hidden_intervals ещё не создана
+    const { error: err2 } = await supabase
+      .from('planner_items')
+      .update({ hidden_today: hidden })
+      .eq('user_id', userId)
+      .eq('id', itemId)
+    if (err2) throw err2
+  }
 }
 
 // ===== Персональная правка дела на КОНКРЕТНЫЙ день =====
@@ -1393,22 +1453,22 @@ export async function loadHabits(userId: string): Promise<HabitStats[]> {
   return habits.map((h) => computeHabitStats(h, byItem.get(h.id) ?? {}))
 }
 
-// Загружает текущий стрик для списка дел (фильтруя только привычки).
+// Загружает текущий стрик для всех активных дел и привычек.
 export async function loadHabitStreaks(
   userId: string,
   items: PlannerItem[],
 ): Promise<Record<string, number>> {
-  const habits = items.filter((i) => i.type === 'habit')
-  if (habits.length === 0) return {}
+  const activeItems = items.filter((i) => !i.archived)
+  if (activeItems.length === 0) return {}
 
   const cutoff = addDays(todayStr(), -400)
-  const habitIds = habits.map((h) => h.id)
+  const itemIds = activeItems.map((h) => h.id)
 
   const { data: logs, error } = await supabase
     .from('planner_logs')
     .select(LOG_COLS)
     .eq('user_id', userId)
-    .in('item_id', habitIds)
+    .in('item_id', itemIds)
     .gte('date', cutoff)
 
   if (error) throw error
@@ -1424,9 +1484,11 @@ export async function loadHabitStreaks(
   }
 
   const result: Record<string, number> = {}
-  for (const h of habits) {
-    const stats = computeHabitStats(h, byItem.get(h.id) ?? {})
-    result[h.id] = stats.current
+  for (const it of activeItems) {
+    const stats = computeHabitStats(it, byItem.get(it.id) ?? {})
+    if (stats.current > 0) {
+      result[it.id] = stats.current
+    }
   }
   return result
 }

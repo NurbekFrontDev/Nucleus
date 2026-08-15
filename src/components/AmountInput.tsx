@@ -7,7 +7,7 @@ const inputCls =
 
 // Порядок валют в выпадающем списке: сум, доллар, рубль.
 const CURRENCY_OPTIONS: { value: EntryCurrency; label: string }[] = [
-  { value: 'UZS', label: 'сум' },
+  { value: 'UZS', label: 'UZS' },
   { value: 'USD', label: '$' },
   { value: 'RUB', label: '₽' },
 ]

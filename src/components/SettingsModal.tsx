@@ -1,16 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
-import { useTheme } from '../lib/ThemeContext'
 import Select from './Select'
 import UsageCard from './UsageCard'
 import { useLang } from '../lib/i18n'
-import {
-  DISPLAY_CURRENCIES,
-  getDisplayCurrency,
-  setDisplayCurrency,
-  saveDisplayCurrencyToCloud,
-  loadDisplayCurrencyFromCloud,
-} from '../lib/db'
+import { loadUserName, saveUserName } from '../lib/db'
 import { supabase } from '../lib/supabase'
 import {
   runBackup,
@@ -25,9 +18,8 @@ import { APP_VERSION } from '../lib/version'
 import { useAnimatedMount } from '../lib/useAnimatedMount'
 
 // Глобальное модальное окно настроек (~80% экрана).
-// Открывается из popup-меню профиля (шестерёнка). Содержит все общие настройки,
-// которые раньше были на странице Settings (FinLit): язык, тему, валюту,
-// бэкап, хранилище, автозапуск, версию.
+// Открывается из popup-меню профиля (шестерёнка). Содержит все общие настройки:
+// имя пользователя, язык, бэкап, хранилище, автозапуск, версию.
 
 type Props = {
   onClose: () => void
@@ -38,7 +30,6 @@ const cardCls =
 
 export default function SettingsModal({ onClose }: Props) {
   const { user } = useAuth()
-  const { theme, setTheme } = useTheme()
   const { t, lang, setLang } = useLang()
   const [open, setOpen] = useState(true)
   const visible = useAnimatedMount(open, 220)
@@ -46,7 +37,8 @@ export default function SettingsModal({ onClose }: Props) {
   const onDesktop = isDesktop()
   const canPickDir = supportsFsAccess()
 
-  const [dispCurrency, setDispCurrencyState] = useState(getDisplayCurrency().code)
+  const [userName, setUserName] = useState('')
+  const [nameSaving, setNameSaving] = useState(false)
   const [autostart, setAutostartState] = useState(false)
   const [backupAuto, setBackupAuto] = useState(false)
   const [backupBusy, setBackupBusy] = useState(false)
@@ -67,21 +59,30 @@ export default function SettingsModal({ onClose }: Props) {
     }
   }, [])
 
-  // Загрузка валюты из облака.
+  // Загрузка имени пользователя
   useEffect(() => {
     if (!user) return
     let active = true
-    ;(async () => {
-      try {
-        const cloud = await loadDisplayCurrencyFromCloud(user.id)
-        if (active && cloud) {
-          setDisplayCurrency(cloud)
-          setDispCurrencyState(cloud)
-        }
-      } catch { /* не критично */ }
-    })()
-    return () => { active = false }
+    loadUserName(user.id).then((name) => {
+      if (active && name) setUserName(name)
+    })
+    return () => {
+      active = false
+    }
   }, [user])
+
+  const handleSaveName = async () => {
+    if (!user || !userName.trim()) return
+    setNameSaving(true)
+    try {
+      await saveUserName(user.id, userName.trim())
+      showToast(lang === 'en' ? 'Name saved' : 'Имя сохранено')
+    } catch {
+      showToast(lang === 'en' ? 'Failed to save name' : 'Ошибка сохранения')
+    } finally {
+      setNameSaving(false)
+    }
+  }
 
   // Загрузка настроек бэкапа.
   useEffect(() => {
@@ -201,6 +202,33 @@ export default function SettingsModal({ onClose }: Props) {
               <p className="mt-1 font-medium break-all">{user?.email}</p>
             </div>
 
+            {/* Имя пользователя (для ИИ-ассистента и приветствий) */}
+            <div className={cardCls}>
+              <p className="font-medium">👤 {lang === 'en' ? 'Your Name' : 'Ваше имя'}</p>
+              <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+                {lang === 'en'
+                  ? 'Used by AI assistant and personalization'
+                  : 'Используется ИИ-ассистентом и персонализацией'}
+              </p>
+              <div className="mt-3 flex gap-2">
+                <input
+                  type="text"
+                  value={userName}
+                  onChange={(e) => setUserName(e.target.value)}
+                  placeholder={lang === 'en' ? 'Enter your name' : 'Введите ваше имя'}
+                  className="flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveName}
+                  disabled={nameSaving || !userName.trim()}
+                  className="rounded-lg bg-emerald-500 px-4 py-1.5 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50"
+                >
+                  {nameSaving ? '...' : lang === 'en' ? 'Save' : 'Сохранить'}
+                </button>
+              </div>
+            </div>
+
             {/* Язык */}
             <div className={`flex items-center justify-between gap-3 ${cardCls}`}>
               <div className="min-w-0">
@@ -216,56 +244,6 @@ export default function SettingsModal({ onClose }: Props) {
                     { value: 'en', label: 'English' },
                   ]}
                 />
-              </div>
-            </div>
-
-            {/* Валюта отображения */}
-            <div className={`flex items-center justify-between gap-3 ${cardCls}`}>
-              <div className="min-w-0">
-                <p className="font-medium">💱 {lang === 'en' ? 'Display currency' : 'Валюта отображения'}</p>
-                <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-                  {lang === 'en' ? 'Symbol shown next to amounts' : 'Символ, отображаемый рядом с суммами'}
-                </p>
-              </div>
-              <div className="shrink-0">
-                <Select
-                  className="w-fit"
-                  value={dispCurrency}
-                  onChange={(v) => {
-                    setDispCurrencyState(v)
-                    setDisplayCurrency(v)
-                    if (user) void saveDisplayCurrencyToCloud(user.id, v)
-                  }}
-                  options={DISPLAY_CURRENCIES.map((c) => ({
-                    value: c.code,
-                    label: `${c.symbol} ${c.code}`,
-                  }))}
-                />
-              </div>
-            </div>
-
-            {/* Тема */}
-            <div className={`flex items-center justify-between gap-3 ${cardCls}`}>
-              <p className="font-medium">{t('set.theme')}</p>
-              <div className="flex items-center gap-1 rounded-xl bg-neutral-100 p-1 dark:bg-neutral-800">
-                <button
-                  onClick={() => setTheme('system')}
-                  className={`rounded-lg px-3 py-1.5 text-sm transition ${theme === 'system' ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-500 font-medium' : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400'}`}
-                >
-                  💻
-                </button>
-                <button
-                  onClick={() => setTheme('light')}
-                  className={`rounded-lg px-3 py-1.5 text-sm transition ${theme === 'light' ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-500 font-medium' : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400'}`}
-                >
-                  ☀️
-                </button>
-                <button
-                  onClick={() => setTheme('dark')}
-                  className={`rounded-lg px-3 py-1.5 text-sm transition ${theme === 'dark' ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-500 font-medium' : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400'}`}
-                >
-                  🌙
-                </button>
               </div>
             </div>
 

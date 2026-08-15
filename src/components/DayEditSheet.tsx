@@ -91,7 +91,12 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
   const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>(item.time_of_day ?? null)
   const [start, setStart] = useState<string>(item.at_time_start ?? '')
   const [end, setEnd] = useState<string>(item.at_time_end ?? '')
-  const [duration, setDuration] = useState<string>(item.duration_min ? String(item.duration_min) : '')
+  const initDurationMin = item.duration_min
+  const initHours = initDurationMin !== null && initDurationMin >= 60 && initDurationMin % 60 === 0
+  const [durationUnit, setDurationUnit] = useState<'min' | 'hour'>(initHours ? 'hour' : 'min')
+  const [duration, setDuration] = useState<string>(
+    initDurationMin ? (initHours ? String(initDurationMin / 60) : String(initDurationMin)) : '',
+  )
   const [priority, setPriority] = useState<Priority>(item.priority)
   const [note, setNote] = useState<string>(item.note ?? '')
   const [busy, setBusy] = useState(false)
@@ -135,9 +140,11 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
   const today = todayStr()
   const dayLabel = date === today ? t('today.today') : formatDateHuman(date)
 
-  const durationValue = (raw: string = duration): number | null => {
-    const value = Number(raw)
-    return Number.isFinite(value) && value > 0 ? Math.min(1440, Math.round(value)) : null
+  const durationValue = (raw: string = duration, unit: 'min' | 'hour' = durationUnit): number | null => {
+    const value = parseFloat(raw)
+    if (!Number.isFinite(value) || value <= 0) return null
+    const inMins = unit === 'hour' ? Math.round(value * 60) : Math.round(value)
+    return inMins > 0 ? Math.min(1440, inMins) : null
   }
 
   const hasDuration = durationValue() !== null
@@ -148,10 +155,20 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
     if (minutes) setEnd(endTimeFromDuration(value, minutes))
   }
 
-  const setDurationWithEnd = (value: string) => {
+  const setDurationWithEnd = (value: string, unit: 'min' | 'hour' = durationUnit) => {
     setDuration(value)
-    const minutes = durationValue(value)
+    const minutes = durationValue(value, unit)
     if (minutes && start) setEnd(endTimeFromDuration(start, minutes))
+  }
+
+  const toggleDurationUnit = () => {
+    const nextUnit = durationUnit === 'min' ? 'hour' : 'min'
+    const currentMins = durationValue(duration, durationUnit)
+    setDurationUnit(nextUnit)
+    if (currentMins !== null) {
+      const nextVal = nextUnit === 'hour' ? String(+(currentMins / 60).toFixed(2)) : String(currentMins)
+      setDurationWithEnd(nextVal, nextUnit)
+    }
   }
 
   const save = async () => {
@@ -276,16 +293,27 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
           </div>
           <div>
             <p className="mb-1.5 text-sm font-medium">{t('items.duration')}</p>
-            <input
-              type="number"
-              inputMode="numeric"
-              min="1"
-              max="1440"
-              value={duration}
-              onChange={(e) => setDurationWithEnd(e.target.value)}
-              placeholder={t('items.durationPh')}
-              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
-            />
+            <div className="relative flex items-center">
+              <input
+                type="number"
+                inputMode="decimal"
+                step={durationUnit === 'hour' ? '0.25' : '1'}
+                min="0.1"
+                max={durationUnit === 'hour' ? '24' : '1440'}
+                value={duration}
+                onChange={(e) => setDurationWithEnd(e.target.value)}
+                placeholder={durationUnit === 'hour' ? '1' : t('items.durationPh')}
+                className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 pr-11 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
+              />
+              <button
+                type="button"
+                onClick={toggleDurationUnit}
+                className="absolute right-1 top-1/2 -translate-y-1/2 rounded bg-neutral-100 dark:bg-neutral-800 px-1.5 py-1 text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition"
+                title={durationUnit === 'hour' ? t('items.hour') : t('items.min')}
+              >
+                {durationUnit === 'hour' ? t('items.hour') : t('items.min')} ▾
+              </button>
+            </div>
           </div>
           <div>
             <p className="mb-1.5 text-sm font-medium">{t('items.timeEnd')}</p>

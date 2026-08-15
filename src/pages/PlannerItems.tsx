@@ -85,6 +85,7 @@ export default function PlannerItems() {
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
+  const [durationUnit, setDurationUnit] = useState<'min' | 'hour'>('min')
   const [form, setForm] = useState<FormState>(emptyForm)
   const [saving, setSaving] = useState(false)
   const [delItem, setDelItem] = useState<PlannerItem | null>(null)
@@ -262,6 +263,7 @@ export default function PlannerItems() {
 
   const openAdd = () => {
     setEditId(null)
+    setDurationUnit('min')
     setForm(emptyForm)
     setShowForm(true)
   }
@@ -273,6 +275,9 @@ export default function PlannerItems() {
       return
     }
     setEditId(it.id)
+    const dMin = it.duration_min
+    const useHours = dMin !== null && dMin >= 60 && dMin % 60 === 0
+    setDurationUnit(useHours ? 'hour' : 'min')
     setForm({
       type: it.type,
       title: it.title,
@@ -285,7 +290,7 @@ export default function PlannerItems() {
       time_of_day: it.time_of_day,
       at_time_start: it.at_time_start ?? '',
       at_time_end: it.at_time_end ?? '',
-      duration_min: it.duration_min ? String(it.duration_min) : '',
+      duration_min: dMin !== null ? (useHours ? String(dMin / 60) : String(dMin)) : '',
       icon: it.icon ?? '',
       cue: it.cue ?? '',
       identity: it.identity ?? '',
@@ -345,7 +350,7 @@ export default function PlannerItems() {
         time_of_day: form.time_of_day,
         at_time_start: form.at_time_start || null,
         at_time_end: form.at_time_end || null,
-        duration_min: durationFromForm(form.duration_min),
+        duration_min: durationFromForm(form.duration_min, durationUnit),
         icon: form.icon.trim() || null,
         cue: isHabit ? form.cue.trim() || null : null,
         identity: isHabit ? form.identity.trim() || null : null,
@@ -422,14 +427,16 @@ export default function PlannerItems() {
     return ''
   }
 
-  const durationFromForm = (raw: string): number | null => {
-    const parsed = Number(raw)
-    return Number.isFinite(parsed) && parsed > 0 ? Math.min(1440, Math.round(parsed)) : null
+  const durationFromForm = (raw: string, unit: 'min' | 'hour' = durationUnit): number | null => {
+    const parsed = parseFloat(raw)
+    if (!Number.isFinite(parsed) || parsed <= 0) return null
+    const inMins = unit === 'hour' ? Math.round(parsed * 60) : Math.round(parsed)
+    return inMins > 0 ? Math.min(1440, inMins) : null
   }
 
   const setStartTime = (value: string) => {
     setForm((f) => {
-      const duration = durationFromForm(f.duration_min)
+      const duration = durationFromForm(f.duration_min, durationUnit)
       return {
         ...f,
         at_time_start: value,
@@ -438,9 +445,9 @@ export default function PlannerItems() {
     })
   }
 
-  const setDuration = (value: string) => {
+  const setDuration = (value: string, unit: 'min' | 'hour' = durationUnit) => {
     setForm((f) => {
-      const duration = durationFromForm(value)
+      const duration = durationFromForm(value, unit)
       return {
         ...f,
         duration_min: value,
@@ -449,12 +456,22 @@ export default function PlannerItems() {
     })
   }
 
+  const toggleDurationUnit = () => {
+    const nextUnit = durationUnit === 'min' ? 'hour' : 'min'
+    const currentMins = durationFromForm(form.duration_min, durationUnit)
+    setDurationUnit(nextUnit)
+    if (currentMins !== null) {
+      const nextVal = nextUnit === 'hour' ? String(+(currentMins / 60).toFixed(2)) : String(currentMins)
+      setDuration(nextVal, nextUnit)
+    }
+  }
+
   const isHabitForm = form.type === 'habit'
 
   // Форма добавления/редактирования. При добавлении показывается сверху,
   // при редактировании — встраивается прямо под нужным делом (см. ниже).
   const renderForm = () => {
-    const formDuration = durationFromForm(form.duration_min)
+    const formDuration = durationFromForm(form.duration_min, durationUnit)
     const hasDuration = formDuration !== null
     return (
       <div className={`${cardCls} animate-pop flex flex-col gap-3`}>
@@ -567,9 +584,15 @@ export default function PlannerItems() {
         <label className={labelCls}>{t('items.repeat')}</label>
         <Select
           value={form.repeat_rule}
-          onChange={(v) => setForm((f) => ({ ...f, repeat_rule: v as RepeatRule }))}
+          onChange={(v) =>
+            setForm((f) => ({
+              ...f,
+              repeat_rule: v as RepeatRule,
+              weekdays: v === 'weekly' ? (f.weekdays.length ? f.weekdays : [1]) : f.weekdays,
+            }))
+          }
           options={[
-            ...(isHabitForm ? [] : [{ value: 'none', label: t('items.repeatNone') }]),
+            ...(!isHabitForm ? [{ value: 'none', label: t('items.repeatNone') }] : []),
             { value: 'daily', label: t('items.repeatDaily') },
             { value: 'weekdays', label: t('items.repeatWeekdays') },
             { value: 'weekly', label: t('items.repeatWeekly') },
@@ -579,23 +602,23 @@ export default function PlannerItems() {
 
       {form.repeat_rule === 'weekly' && (
         <div>
-          <label className={labelCls}>{t('items.weekdays')}</label>
+          <label className={labelCls}>{t('items.weekdaysLabel')}</label>
           <div className="flex flex-wrap gap-1.5">
-            {WEEKDAYS.map((w, idx) => {
-              const d = idx + 1
-              const on = form.weekdays.includes(d)
+            {WEEKDAYS.map((name, i) => {
+              const d = i + 1
+              const active = form.weekdays.includes(d)
               return (
                 <button
-                  key={w}
                   type="button"
+                  key={d}
                   onClick={() => toggleWeekday(d)}
-                  className={`h-9 w-9 rounded-lg text-xs font-medium transition ${
-                    on
-                      ? 'bg-emerald-500 text-neutral-950'
-                      : 'bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300'
+                  className={`rounded-lg px-3 py-1.5 text-xs font-medium transition ${
+                    active
+                      ? 'bg-emerald-500 text-neutral-950 font-semibold'
+                      : 'border border-neutral-300 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800'
                   }`}
                 >
-                  {w}
+                  {name}
                 </button>
               )
             })}
@@ -676,16 +699,27 @@ export default function PlannerItems() {
         </div>
         <div>
           <label className={labelCls}>{t('items.duration')}</label>
-          <input
-            className={inputCls}
-            type="number"
-            inputMode="numeric"
-            min="1"
-            max="1440"
-            value={form.duration_min}
-            onChange={(e) => setDuration(e.target.value)}
-            placeholder={t('items.durationPh')}
-          />
+          <div className="relative flex items-center">
+            <input
+              className={`${inputCls} pr-11`}
+              type="number"
+              inputMode="decimal"
+              step={durationUnit === 'hour' ? '0.25' : '1'}
+              min="0.1"
+              max={durationUnit === 'hour' ? '24' : '1440'}
+              value={form.duration_min}
+              onChange={(e) => setDuration(e.target.value)}
+              placeholder={durationUnit === 'hour' ? '1' : t('items.durationPh')}
+            />
+            <button
+              type="button"
+              onClick={toggleDurationUnit}
+              className="absolute right-1 top-1/2 -translate-y-1/2 rounded bg-neutral-100 dark:bg-neutral-800 px-1.5 py-1 text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-200 dark:hover:bg-neutral-700 transition"
+              title={durationUnit === 'hour' ? t('items.hour') : t('items.min')}
+            >
+              {durationUnit === 'hour' ? t('items.hour') : t('items.min')} ▾
+            </button>
+          </div>
         </div>
         <div>
           <label className={labelCls}>{t('items.timeEnd')}</label>
