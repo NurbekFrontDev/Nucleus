@@ -1,6 +1,95 @@
 import { supabase } from './supabase'
 import { isOnline } from './offlineSync'
 
+// ===== Валюта отображения =====
+// Символ валюты, который подставляется в formatSum. По умолчанию '$' (доллар).
+// Все данные внутри приложения хранятся в долларах, а этот символ — просто
+// визуальный префикс. Пользователь может выбрать любой символ в настройках.
+
+export type DisplayCurrency = { code: string; symbol: string }
+
+export const DISPLAY_CURRENCIES: DisplayCurrency[] = [
+  { code: 'USD', symbol: '$' },
+  { code: 'EUR', symbol: '€' },
+  { code: 'RUB', symbol: '₽' },
+  { code: 'UZS', symbol: 'сўм' },
+  { code: 'KZT', symbol: '₸' },
+  { code: 'GBP', symbol: '£' },
+  { code: 'TRY', symbol: '₺' },
+  { code: 'CNY', symbol: '¥' },
+]
+
+const DISPLAY_CUR_KEY = 'nucleus:displayCurrency'
+let displayCurrencySymbol = '$'
+let displayCurrencyCode = 'USD'
+
+try {
+  const saved = localStorage.getItem(DISPLAY_CUR_KEY)
+  if (saved) {
+    const found = DISPLAY_CURRENCIES.find((c) => c.code === saved)
+    if (found) {
+      displayCurrencySymbol = found.symbol
+      displayCurrencyCode = found.code
+    }
+  }
+} catch {
+  // localStorage may be unavailable
+}
+
+export function getDisplayCurrency(): DisplayCurrency {
+  return { code: displayCurrencyCode, symbol: displayCurrencySymbol }
+}
+
+export function setDisplayCurrency(code: string): void {
+  const found = DISPLAY_CURRENCIES.find((c) => c.code === code)
+  if (!found) return
+  displayCurrencySymbol = found.symbol
+  displayCurrencyCode = found.code
+  try { localStorage.setItem(DISPLAY_CUR_KEY, code) } catch { /* не критично */ }
+}
+
+/** Сохраняет выбранную валюту отображения в облако (app_settings). */
+export async function saveDisplayCurrencyToCloud(userId: string, code: string): Promise<void> {
+  try {
+    await supabase
+      .from('app_settings')
+      .upsert(
+        { user_id: userId, display_currency: code, updated_at: new Date().toISOString() },
+        { onConflict: 'user_id' },
+      )
+  } catch { /* не критично */ }
+}
+
+export async function loadUserName(userId: string): Promise<string | null> {
+  const { data } = await supabase
+    .from('app_settings')
+    .select('user_name')
+    .eq('user_id', userId)
+    .maybeSingle()
+  return (data as { user_name?: string } | null)?.user_name ?? null
+}
+
+export async function saveUserName(userId: string, name: string): Promise<void> {
+  await supabase.from('app_settings').upsert(
+    { user_id: userId, user_name: name, updated_at: new Date().toISOString() },
+    { onConflict: 'user_id' }
+  )
+}
+
+/** Загружает валюту отображения из облака. */
+export async function loadDisplayCurrencyFromCloud(userId: string): Promise<string | null> {
+  try {
+    const { data } = await supabase
+      .from('app_settings')
+      .select('display_currency')
+      .eq('user_id', userId)
+      .maybeSingle()
+    const v = (data as { display_currency?: string } | null)?.display_currency
+    if (v && DISPLAY_CURRENCIES.some((c) => c.code === v)) return v
+  } catch { /* не критично */ }
+  return null
+}
+
 export type MonthRow = {
   id: string
   user_id: string
@@ -85,14 +174,14 @@ export function formatDateHuman(dateStr: string | null | undefined): string {
   return `${d} ${monthGen(m - 1)} ${y}`
 }
 
-// Форматирует число как сумму в долларах: «$5 000.00» / «$5,000.00».
+// Форматирует число как сумму в выбранной валюте: «$5 000.00» / «€5,000.00».
 export function formatSum(value: number): string {
   const locale = dbLang === 'en' ? 'en-US' : 'ru-RU'
   const formatted = new Intl.NumberFormat(locale, {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(Number(value) || 0)
-  return '$' + formatted
+  return displayCurrencySymbol + formatted
 }
 
 // Форматирует ввод суммы с пробелами по тысячам и копейками (до 2 знаков):

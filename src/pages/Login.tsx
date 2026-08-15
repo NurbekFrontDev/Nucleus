@@ -10,6 +10,7 @@ export default function Login() {
   const { signIn, signUp } = useAuth()
   const { t, lang } = useLang()
   const [mode, setMode] = useState<'signin' | 'signup'>('signin')
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState<string | null>(null)
@@ -29,6 +30,7 @@ export default function Login() {
       return
     }
     if (mode === 'signup') {
+      localStorage.setItem('nucleus:pendingName', name)
       setInfo(t('login.created'))
       setMode('signin')
     }
@@ -63,6 +65,19 @@ export default function Login() {
           onSubmit={handleSubmit}
           className="flex flex-col gap-4 rounded-2xl border border-neutral-200 bg-white p-6 dark:border-neutral-800 dark:bg-neutral-900/50"
         >
+          {mode === 'signup' && (
+            <div className="flex flex-col gap-1">
+              <label className="text-sm text-neutral-500 dark:text-neutral-400">{t('login.name')}</label>
+              <input
+                type="text"
+                required
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                className={inputCls}
+                placeholder={t('login.namePh')}
+              />
+            </div>
+          )}
           <div className="flex flex-col gap-1">
             <label className="text-sm text-neutral-500 dark:text-neutral-400">{t('login.email')}</label>
             <input

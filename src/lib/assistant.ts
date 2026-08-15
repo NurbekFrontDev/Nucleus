@@ -1,5 +1,5 @@
 import { supabase } from './supabase'
-import { buildAiContext, getOrCreateMonth, formatSum, SUBCATEGORY_PRESETS } from './db'
+import { buildAiContext, getOrCreateMonth, formatSum, SUBCATEGORY_PRESETS, loadUserName } from './db'
 
 // ===== ИИ-ассистент «FinLit Бухгалтер» (ИИ-3) =====
 // Здесь живёт «душа» ассистента (SOUL) и работа с историей чата.
@@ -559,7 +559,11 @@ export async function askAssistant(
 
   // Системный промпт собираем слоями: душа (своя или встроенная) + навыки + память + данные.
   const soul = profile.soul.trim() || SOUL
+  const userName = await loadUserName(userId).catch(() => null)
   const parts: string[] = [soul, ACTIONS_SKILL, MEMORY_SKILL, buildCategoryGuide()]
+  if (userName) {
+    parts.push(`Имя пользователя: ${userName}. Обращайся к нему по имени.`)
+  }
   if (profile.userMd.trim()) {
     parts.push(`===== О ПОЛЬЗОВАТЕЛЕ (заметки, которые он задал сам) =====\n${profile.userMd.trim()}`)
   }

@@ -12,6 +12,7 @@ import {
   updateItem,
   archiveItem,
   saveItemsOrder,
+  toggleHiddenToday,
   endTimeFromDuration,
   formatDuration,
   PRIORITY_DOT,
@@ -372,6 +373,23 @@ export default function PlannerItems() {
     }
   }
 
+  const toggleHidden = async (it: PlannerItem) => {
+    if (!user) return
+    const nextVal = !it.hidden_today
+    setItems((all) =>
+      all.map((x) => (x.id === it.id ? { ...x, hidden_today: nextVal } : x)),
+    )
+    try {
+      await toggleHiddenToday(user.id, it.id, nextVal)
+    } catch (e) {
+      // rollback
+      setItems((all) =>
+        all.map((x) => (x.id === it.id ? { ...x, hidden_today: !nextVal } : x)),
+      )
+      setError((e as Error).message)
+    }
+  }
+
   const describeRepeat = (it: PlannerItem): string => {
     switch (it.repeat_rule) {
       case 'daily':
@@ -651,7 +669,7 @@ export default function PlannerItems() {
         />
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         <div>
           <label className={labelCls}>{t('items.timeStart')}</label>
           <TimePicker value={form.at_time_start} onChange={setStartTime} />
@@ -669,27 +687,23 @@ export default function PlannerItems() {
             placeholder={t('items.durationPh')}
           />
         </div>
-      </div>
-
-      <div>
-        <label className={labelCls}>{t('items.timeEnd')}</label>
-        {hasDuration ? (
-          <div className="rounded-lg border border-dashed border-emerald-400/70 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-            {form.at_time_start
-              ? lang === 'en'
-                ? fmtTime12(endTimeFromDuration(form.at_time_start, formDuration))
-                : endTimeFromDuration(form.at_time_start, formDuration)
-              : t('items.durationSetStart')}
-          </div>
-        ) : (
-          <TimePicker
-            value={form.at_time_end}
-            onChange={(v) => setForm((f) => ({ ...f, at_time_end: v }))}
-          />
-        )}
-        {hasDuration && (
-          <p className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400">{t('items.durationAuto')}</p>
-        )}
+        <div>
+          <label className={labelCls}>{t('items.timeEnd')}</label>
+          {hasDuration ? (
+            <div className="rounded-lg border border-dashed border-emerald-400/70 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+              {form.at_time_start
+                ? lang === 'en'
+                  ? fmtTime12(endTimeFromDuration(form.at_time_start, formDuration))
+                  : endTimeFromDuration(form.at_time_start, formDuration)
+                : t('items.durationSetStart')}
+            </div>
+          ) : (
+            <TimePicker
+              value={form.at_time_end}
+              onChange={(v) => setForm((f) => ({ ...f, at_time_end: v }))}
+            />
+          )}
+        </div>
       </div>
 
       <div>
@@ -787,7 +801,7 @@ export default function PlannerItems() {
                   drag?.id === it.id && drag.active
                     ? ' border-emerald-500/60 shadow-xl ring-1 ring-emerald-500/40'
                     : ''
-                }`}
+                }${it.hidden_today ? ' opacity-50 grayscale transition-all' : ''}`}
               >
                 {grip(it.id, index)}
                 {dot && <span className="mt-0.5 shrink-0 text-xs leading-none">{dot}</span>}
@@ -823,7 +837,7 @@ export default function PlannerItems() {
                 <div
                   className={`flex items-start gap-3 ${cardCls}${
                     editing ? ' border-emerald-500/60 ring-1 ring-emerald-500/40' : ''
-                  }`}
+                  }${it.hidden_today && !editing ? ' opacity-50 grayscale transition-all' : ''}`}
                 >
                   {dot && <span className="mt-0.5 shrink-0 text-xs leading-none">{dot}</span>}
                   {it.icon && <span className="shrink-0">{it.icon}</span>}
@@ -856,6 +870,20 @@ export default function PlannerItems() {
                     )}
                   </div>
                   <div className="flex shrink-0 gap-1">
+                    <button
+                      type="button"
+                      title={it.hidden_today ? t('items.showToday') : t('items.hideToday')}
+                      onClick={() => toggleHidden(it)}
+                      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${
+                        it.hidden_today
+                          ? 'bg-neutral-200/50 text-neutral-500 dark:bg-neutral-800/50 dark:text-neutral-400'
+                          : 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-400'
+                      }`}
+                    >
+                      <span className={it.hidden_today ? 'text-[11px] opacity-70' : 'text-[13px] opacity-70'}>
+                        {it.hidden_today ? '👁‍🗨' : '👁️'}
+                      </span>
+                    </button>
                     <IconButton icon="edit" title={t('common.edit')} onClick={() => openEdit(it)} />
                     <IconButton
                       icon="delete"

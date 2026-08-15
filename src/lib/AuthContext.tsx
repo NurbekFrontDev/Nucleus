@@ -7,7 +7,8 @@ import { setOfflineUser, startOfflineSync } from './offlineSync'
 
 type AuthContextType = {
   session: Session | null
-  user: User | null
+  user: User | { id: string; email: string } | null
+  isOffline: boolean
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signUp: (email: string, password: string) => Promise<{ error: string | null }>
@@ -18,6 +19,7 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
+  const [offlineUser, setOfflineUserFallback] = useState<{ id: string; email: string } | null>(null)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -34,7 +36,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // Так медленное нативное хранилище не разлогинивает пользователя.
         void sessionRequest
           .then(({ data }) => {
-            if (active) setSession(data.session)
+            if (active) {
+              setSession(data.session)
+              if (data.session?.user) {
+                localStorage.setItem('nucleus:offlineUserId', data.session.user.id)
+                if (data.session.user.email) {
+                  localStorage.setItem('nucleus:offlineEmail', data.session.user.email)
+                }
+              }
+            }
           })
           .catch(() => {
             // На старте без сети остаёмся в безопасном состоянии без сессии.
@@ -43,9 +53,30 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           sessionRequest,
           new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 3_000)),
         ])
-        if (active && result) setSession(result.data.session)
+        if (active && result) {
+          setSession(result.data.session)
+          if (result.data.session?.user) {
+            localStorage.setItem('nucleus:offlineUserId', result.data.session.user.id)
+            if (result.data.session.user.email) {
+              localStorage.setItem('nucleus:offlineEmail', result.data.session.user.email)
+            }
+          }
+        } else if (active && !result) {
+          const cachedUserId = localStorage.getItem('nucleus:offlineUserId')
+          const cachedEmail = localStorage.getItem('nucleus:offlineEmail')
+          if (cachedUserId) {
+            setOfflineUserFallback({ id: cachedUserId, email: cachedEmail || '' })
+          }
+        }
       } catch {
-        if (active) setSession(null)
+        if (active) {
+          setSession(null)
+          const cachedUserId = localStorage.getItem('nucleus:offlineUserId')
+          const cachedEmail = localStorage.getItem('nucleus:offlineEmail')
+          if (cachedUserId) {
+            setOfflineUserFallback({ id: cachedUserId, email: cachedEmail || '' })
+          }
+        }
       } finally {
         if (active) setLoading(false)
       }
@@ -55,6 +86,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       (_event, newSession) => {
         if (!active) return
         setSession(newSession)
+        if (newSession?.user) {
+          localStorage.setItem('nucleus:offlineUserId', newSession.user.id)
+          if (newSession.user.email) {
+            localStorage.setItem('nucleus:offlineEmail', newSession.user.email)
+          }
+          setOfflineUserFallback(null)
+          
+          const pendingName = localStorage.getItem('nucleus:pendingName')
+          if (pendingName) {
+            void (async () => {
+              try {
+                await supabase.from('app_settings').upsert(
+                  { user_id: newSession.user.id, user_name: pendingName, updated_at: new Date().toISOString() },
+                  { onConflict: 'user_id' }
+                )
+                localStorage.removeItem('nucleus:pendingName')
+              } catch {
+                // не критично
+              }
+            })()
+          }
+        }
         setLoading(false)
       },
     )
@@ -68,11 +121,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Привязываем кэш и очередь к текущему пользователю. Когда сеть появляется,
   // очередь отправляется с новым токеном и не может уйти в чужой аккаунт.
   useEffect(() => {
-    const userId = session?.user.id ?? null
+    const userId = session?.user.id ?? offlineUser?.id ?? null
     setOfflineUser(userId)
     if (!userId) return
     return startOfflineSync(syncOfflineChanges)
-  }, [session?.user.id])
+  }, [session?.user.id, offlineUser?.id])
 
   // Фикс бага: после возврата в приложение (на телефоне было свёрнуто несколько
   // минут) принудительно перечитываем сессию из хранилища. WebView иногда теряет
@@ -110,12 +163,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   const signOut = async () => {
+    localStorage.removeItem('nucleus:offlineUserId')
+    localStorage.removeItem('nucleus:offlineEmail')
+    setOfflineUserFallback(null)
     await supabase.auth.signOut()
   }
 
   const value: AuthContextType = {
     session,
-    user: session?.user ?? null,
+    user: session?.user ?? offlineUser,
+    isOffline: !session && !!offlineUser,
     loading,
     signIn,
     signUp,

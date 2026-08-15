@@ -269,7 +269,7 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
         </div>
 
         {/* Время и длительность. При длительности конец рассчитывается сразу. */}
-        <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className="mt-4 grid grid-cols-3 gap-3">
           <div>
             <p className="mb-1.5 text-sm font-medium">{t('items.timeStart')}</p>
             <TimePicker value={start} onChange={setStartWithDuration} />
@@ -287,19 +287,16 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
               className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
             />
           </div>
-        </div>
-        <div className="mt-3">
-          <p className="mb-1.5 text-sm font-medium">{t('items.timeEnd')}</p>
-          {hasDuration ? (
-            <>
+          <div>
+            <p className="mb-1.5 text-sm font-medium">{t('items.timeEnd')}</p>
+            {hasDuration ? (
               <div className="rounded-lg border border-dashed border-emerald-400/70 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
                 {start ? endTimeFromDuration(start, durationValue()) : t('items.durationSetStart')}
               </div>
-              <p className="mt-1 text-[11px] text-neutral-500 dark:text-neutral-400">{t('items.durationAuto')}</p>
-            </>
-          ) : (
-            <TimePicker value={end} onChange={setEnd} />
-          )}
+            ) : (
+              <TimePicker value={end} onChange={setEnd} />
+            )}
+          </div>
         </div>
 
         {/* Важность */}

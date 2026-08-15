@@ -31,6 +31,8 @@ export type TimeOfDay = 'morning' | 'day' | 'evening' | 'allday' | null
 // Статус отметки за конкретный день.
 export type LogStatus = 'done' | 'skip' | 'fail'
 
+export type DayMood = 'procrastination' | 'burnout'
+
 export type PlannerItem = {
   id: string
   title: string
@@ -58,6 +60,7 @@ export type PlannerItem = {
   cue: string | null
   identity: string | null
   two_min: string | null
+  hidden_today: boolean
 }
 
 export type PlannerLog = {
@@ -71,7 +74,7 @@ export type PlannerLog = {
 
 // Набор колонок для запросов (держим в одном месте, чтобы не расходились).
 export const ITEM_COLS =
-  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at'
+  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today'
 export const LOG_COLS = 'id, item_id, date, status, value, note'
 
 // Эмодзи-кружок важности для UI. Для none -- пусто.
@@ -623,6 +626,7 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
   //     Это закрывает обратный случай: вернул день недели на место (Вт -> Пн) —
   //     дело не должно воскреснуть в прошедшем понедельнике этой же недели.
   const keepInDay = (it: PlannerItem): boolean => {
+    if (it.hidden_today) return false
     const ov = ovMap.get(it.id)
     // Убрано вручную только из этого дня — выше всех остальных правил.
     if (ov?.hidden) return false
@@ -796,22 +800,87 @@ export async function toggleDone(
   return data as PlannerLog
 }
 
+export async function loadDayMood(userId: string, date: string): Promise<{ mood: DayMood; note: string | null } | null> {
+  const { data, error } = await supabase
+    .from('planner_day_mood')
+    .select('mood, note')
+    .eq('user_id', userId)
+    .eq('date', date)
+    .maybeSingle()
+  if (error || !data) return null
+  return data as { mood: DayMood; note: string | null }
+}
+
+export async function setDayMood(userId: string, date: string, mood: DayMood, note?: string): Promise<void> {
+  const { error } = await supabase
+    .from('planner_day_mood')
+    .upsert(
+      { user_id: userId, date, mood, note: note || null },
+      { onConflict: 'user_id,date' }
+    )
+  if (error) throw error
+}
+
+export async function clearDayMood(userId: string, date: string): Promise<void> {
+  const { error } = await supabase
+    .from('planner_day_mood')
+    .delete()
+    .eq('user_id', userId)
+    .eq('date', date)
+  if (error) throw error
+}
+
+export async function loadDayMoods(userId: string, startDate: string, endDate: string): Promise<Record<string, DayMood>> {
+  const { data, error } = await supabase
+    .from('planner_day_mood')
+    .select('date, mood')
+    .eq('user_id', userId)
+    .gte('date', startDate)
+    .lte('date', endDate)
+  
+  const result: Record<string, DayMood> = {}
+  if (error || !data) return result
+  for (const row of data) {
+    result[row.date] = row.mood as DayMood
+  }
+  return result
+}
+
+
 // Сохраняет ручной порядок дел внутри конкретного дня.
 export async function saveDayOrder(
   userId: string,
   dateStr: string,
-  orderedIds: string[],
+  itemIds: string[],
 ): Promise<void> {
-  if (orderedIds.length === 0) return
-  const rows = orderedIds.map((id, i) => ({
-    user_id: userId,
-    item_id: id,
-    date: dateStr,
-    sort_order: i + 1,
-  }))
-  const { error } = await supabase
+  const { error: delErr } = await supabase
     .from('planner_day_order')
-    .upsert(rows, { onConflict: 'user_id,item_id,date' })
+    .delete()
+    .eq('user_id', userId)
+    .eq('date', dateStr)
+  if (delErr) throw delErr
+  if (itemIds.length === 0) return
+  const rows = itemIds.map((id, index) => ({
+    user_id: userId,
+    date: dateStr,
+    item_id: id,
+    sort_order: index + 1,
+  }))
+  const { error: insErr } = await supabase.from('planner_day_order').insert(rows)
+  if (insErr) throw insErr
+}
+
+// Скрыть/показать дело в экране Сегодня, не архивируя его
+export async function toggleHiddenToday(
+  userId: string,
+  itemId: string,
+  hidden: boolean,
+): Promise<void> {
+  const { error } = await supabase
+    .from('planner_items')
+    .update({ hidden_today: hidden })
+    .eq('user_id', userId)
+    .eq('id', itemId)
   if (error) throw error
 }
 
@@ -1322,6 +1391,44 @@ export async function loadHabits(userId: string): Promise<HabitStats[]> {
     m[l.date] = l.status
   }
   return habits.map((h) => computeHabitStats(h, byItem.get(h.id) ?? {}))
+}
+
+// Загружает текущий стрик для списка дел (фильтруя только привычки).
+export async function loadHabitStreaks(
+  userId: string,
+  items: PlannerItem[],
+): Promise<Record<string, number>> {
+  const habits = items.filter((i) => i.type === 'habit')
+  if (habits.length === 0) return {}
+
+  const cutoff = addDays(todayStr(), -400)
+  const habitIds = habits.map((h) => h.id)
+
+  const { data: logs, error } = await supabase
+    .from('planner_logs')
+    .select(LOG_COLS)
+    .eq('user_id', userId)
+    .in('item_id', habitIds)
+    .gte('date', cutoff)
+
+  if (error) throw error
+
+  const byItem = new Map<string, Record<string, LogStatus>>()
+  for (const l of (logs ?? []) as PlannerLog[]) {
+    let m = byItem.get(l.item_id)
+    if (!m) {
+      m = {}
+      byItem.set(l.item_id, m)
+    }
+    m[l.date] = l.status
+  }
+
+  const result: Record<string, number> = {}
+  for (const h of habits) {
+    const stats = computeHabitStats(h, byItem.get(h.id) ?? {})
+    result[h.id] = stats.current
+  }
+  return result
 }
 
 // Ставит/снимает статус привычки за день (done/skip); null -> убрать отметку.

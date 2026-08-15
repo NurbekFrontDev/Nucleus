@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef } from 'react'
+import { Suspense, useEffect, useRef, useState } from 'react'
 import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import BackupReminder from './BackupReminder'
 import AssistantWidget from './AssistantWidget'
@@ -8,10 +8,15 @@ import { useLang } from '../lib/i18n'
 import { useAuth } from '../lib/AuthContext'
 import { MODULES, moduleForPath } from '../lib/modules'
 import { saveModulePath, loadModulePath } from '../lib/moduleNav'
+import { useTheme } from '../lib/ThemeContext'
+import SettingsModal from './SettingsModal'
 
 export default function Layout() {
   const { t } = useLang()
-  const { user } = useAuth()
+  const { user, signOut } = useAuth()
+  const { theme, setTheme } = useTheme()
+  const [profileOpen, setProfileOpen] = useState(false)
+  const [settingsModalOpen, setSettingsModalOpen] = useState(false)
   const location = useLocation()
   const navigate = useNavigate()
   const activeModule = moduleForPath(location.pathname)
@@ -66,6 +71,68 @@ export default function Layout() {
     </div>
   )
 
+  const renderProfilePopup = (isMobile: boolean) => {
+    if (!profileOpen) return null
+    
+    return (
+      <>
+        <div 
+          className="fixed inset-0 z-40" 
+          onClick={() => setProfileOpen(false)}
+        />
+        <div className={`absolute z-50 w-64 rounded-2xl border border-neutral-200 bg-white p-4 shadow-xl dark:border-neutral-800 dark:bg-neutral-900/95 backdrop-blur ${isMobile ? 'right-0 top-full mt-2' : 'bottom-full left-0 mb-2'}`}>
+          <div className="flex items-center justify-between mb-4">
+            <span className="truncate text-sm font-medium text-neutral-900 dark:text-neutral-100">{user?.email || 'Nucleus'}</span>
+            <button
+              onClick={() => {
+                setProfileOpen(false)
+                setSettingsModalOpen(true)
+              }}
+              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 hover:text-neutral-900 dark:text-neutral-400 dark:hover:bg-neutral-800 dark:hover:text-neutral-100 transition"
+              title={t('profile.settings')}
+            >
+              ⚙️
+            </button>
+          </div>
+          
+          <div className="mb-4 flex items-center justify-between rounded-xl bg-neutral-100 p-1 dark:bg-neutral-800">
+            <button
+              onClick={() => setTheme('system')}
+              className={`flex flex-1 items-center justify-center rounded-lg py-1.5 text-sm transition ${theme === 'system' ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-500' : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200'}`}
+              title={t('profile.themeSystem')}
+            >
+              💻
+            </button>
+            <button
+              onClick={() => setTheme('light')}
+              className={`flex flex-1 items-center justify-center rounded-lg py-1.5 text-sm transition ${theme === 'light' ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-500' : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200'}`}
+              title={t('profile.themeLight')}
+            >
+              ☀️
+            </button>
+            <button
+              onClick={() => setTheme('dark')}
+              className={`flex flex-1 items-center justify-center rounded-lg py-1.5 text-sm transition ${theme === 'dark' ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-500' : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200'}`}
+              title={t('profile.themeDark')}
+            >
+              🌙
+            </button>
+          </div>
+          
+          <button
+            onClick={() => {
+              setProfileOpen(false)
+              if (signOut) signOut()
+            }}
+            className="w-full rounded-lg bg-red-50 py-2 text-sm font-medium text-red-600 transition hover:bg-red-100 dark:bg-red-950/30 dark:text-red-400 dark:hover:bg-red-900/40"
+          >
+            {t('profile.logout')}
+          </button>
+        </div>
+      </>
+    )
+  }
+
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden md:flex-row">
       {/* Sidebar (desktop) */}
@@ -98,21 +165,24 @@ export default function Layout() {
         </nav>
 
         {/* Аккаунт всегда закреплён в левом нижнем углу сайдбара. */}
-        <button
-          type="button"
-          onClick={() => navigate('/settings')}
-          title={accountLabel}
-          aria-label={accountLabel}
-          className="mt-auto flex items-center gap-3 rounded-xl p-2 text-left transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
-        >
-          <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500 font-semibold text-neutral-950">
-            {accountInitial}
-          </span>
-          <span className="min-w-0">
-            <span className="block truncate text-sm font-medium">{user?.email || 'Nucleus'}</span>
-            <span className="block text-xs text-neutral-500 dark:text-neutral-400">⚙️ {t('set.title')}</span>
-          </span>
-        </button>
+        <div className="relative mt-auto">
+          {renderProfilePopup(false)}
+          <button
+            type="button"
+            onClick={() => setProfileOpen(true)}
+            title={accountLabel}
+            aria-label={accountLabel}
+            className="flex w-full items-center gap-3 rounded-xl p-2 text-left transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+          >
+            <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500 font-semibold text-neutral-950">
+              {accountInitial}
+            </span>
+            <span className="min-w-0">
+              <span className="block truncate text-sm font-medium">{user?.email || 'Nucleus'}</span>
+              <span className="block text-xs text-neutral-500 dark:text-neutral-400">⚙️ {t('profile.settings')}</span>
+            </span>
+          </button>
+        </div>
       </aside>
 
       {/* Top bar (mobile): brand + module switcher. Не скроллится — main скроллится сам. */}
@@ -124,15 +194,18 @@ export default function Layout() {
           Nucleus
         </span>
         <div className="ml-auto min-w-0 flex-1">{moduleSwitcher}</div>
-        <button
-          type="button"
-          onClick={() => navigate('/settings')}
-          title={accountLabel}
-          aria-label={accountLabel}
-          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-sm font-semibold text-neutral-950"
-        >
-          {accountInitial}
-        </button>
+        <div className="relative flex shrink-0">
+          <button
+            type="button"
+            onClick={() => setProfileOpen(true)}
+            title={accountLabel}
+            aria-label={accountLabel}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-emerald-500 text-sm font-semibold text-neutral-950"
+          >
+            {accountInitial}
+          </button>
+          {renderProfilePopup(true)}
+        </div>
       </header>
 
       {/* Content (scroll container) */}
@@ -180,6 +253,9 @@ export default function Layout() {
 
       {/* Всплывающие тосты (напр. «автобэкап сделан»). */}
       <Toaster />
+
+      {/* Глобальное модальное окно настроек (80% экрана). */}
+      {settingsModalOpen && <SettingsModal onClose={() => setSettingsModalOpen(false)} />}
     </div>
   )
 }

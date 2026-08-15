@@ -23,6 +23,7 @@ import {
   saveWeeklyDaySnapshot,
   clearWeeklyDaySnapshot,
   formatDuration,
+  loadHabitStreaks,
   type PlannerItem,
   type PlannerLog,
   type TimeOfDay,
@@ -30,11 +31,17 @@ import {
   type DayMark,
   type PlannerDayOverride,
   type PlannerWeeklyDaySnapshot,
+  type DayMood,
+  loadDayMood,
+  setDayMood,
+  clearDayMood,
+  loadDayMoods,
 } from '../lib/planner'
 import EnergyCharacter from '../components/EnergyCharacter'
 import { hapticTap } from '../lib/native'
 import { rescheduleAll } from '../lib/notifications'
 import ConfirmDialog from '../components/ConfirmDialog'
+import OneoffSection from '../components/OneoffSection'
 
 // Экран «Сегодня» (П-3 + П-6): один экран с переключателем вида в правом
 // верхнем углу — Сегодня / Неделя / Месяц / Год (как в TickTick).
@@ -98,6 +105,8 @@ export default function PlannerToday() {
     overrides: Record<string, PlannerDayOverride>
     sections: boolean
     weeklySnapshot?: PlannerWeeklyDaySnapshot | null
+    mood?: DayMood | null
+    moodNote?: string | null
   }
   const cachedDay = user ? readCache<DayCache>(`planday:${user.id}:${today}`) : null
   const [items, setItems] = useState<PlannerItem[]>(cachedDay?.items ?? [])
@@ -122,11 +131,16 @@ export default function PlannerToday() {
   const [weeklyDialog, setWeeklyDialog] = useState<'apply' | 'clear' | null>(null)
   const [weeklySaving, setWeeklySaving] = useState(false)
   const [overrides, setOverrides] = useState<Record<string, PlannerDayOverride>>(cachedDay?.overrides ?? {})
+  const [habitStreaks, setHabitStreaks] = useState<Record<string, number>>({})
   const [stripSummaries, setStripSummaries] = useState<Record<string, DaySummary>>({})
+  const [mood, setMood] = useState<DayMood | null>(cachedDay?.mood ?? null)
+  const [moodNote, setMoodNote] = useState<string | null>(cachedDay?.moodNote ?? null)
+  const [moodMenuOpen, setMoodMenuOpen] = useState(false)
 
   // ===== Виды «Неделя / Месяц / Год» (календарь) =====
   const [anchor, setAnchor] = useState(today) // дата внутри текущего периода
   const [summaries, setSummaries] = useState<Record<string, DaySummary>>({})
+  const [moods, setMoods] = useState<Record<string, DayMood>>({})
   const [calLoading, setCalLoading] = useState(true)
   const [panelDate, setPanelDate] = useState<string | null>(null)
 
@@ -177,25 +191,34 @@ export default function PlannerToday() {
       setOverrides(cached.overrides)
       setSections(cached.sections)
       setWeeklySnapshot(cached.weeklySnapshot ?? null)
+      setMood(cached.mood ?? null)
+      setMoodNote(cached.moodNote ?? null)
       setLoading(false)
     } else {
       setItems([])
       setLogs({})
       setWeeklySnapshot(null)
+      setMood(null)
+      setMoodNote(null)
       setLoading(true)
     }
     ;(async () => {
       try {
-        const [day, sec] = await Promise.all([
+        const [day, sec, m] = await Promise.all([
           loadDay(user.id, date),
           loadDaySections(user.id),
+          loadDayMood(user.id, date),
         ])
+        const streaks = await loadHabitStreaks(user.id, day.items)
         if (!active) return
         setItems(day.items)
         setLogs(day.logs)
         setOverrides(day.overrides)
         setSections(sec)
         setWeeklySnapshot(day.weeklySnapshot)
+        setHabitStreaks(streaks)
+        setMood(m?.mood ?? null)
+        setMoodNote(m?.note ?? null)
         setError(null)
         writeCache(ck, {
           items: day.items,
@@ -203,6 +226,8 @@ export default function PlannerToday() {
           overrides: day.overrides,
           sections: sec,
           weeklySnapshot: day.weeklySnapshot,
+          mood: m?.mood ?? null,
+          moodNote: m?.note ?? null,
         })
       } catch (e) {
         if (active) setError((e as Error).message)
@@ -257,9 +282,13 @@ export default function PlannerToday() {
     ;(async () => {
       try {
         setCalLoading(true)
-        const s = await loadDaySummaries(user.id, range.start, range.end)
+        const [s, m] = await Promise.all([
+          loadDaySummaries(user.id, range.start, range.end),
+          loadDayMoods(user.id, range.start, range.end),
+        ])
         if (!active) return
         setSummaries(s)
+        setMoods(m)
         setError(null)
       } catch (e) {
         if (active) setError((e as Error).message)
@@ -276,17 +305,24 @@ export default function PlannerToday() {
   const reload = async () => {
     if (!user) return
     try {
-      const day = await loadDay(user.id, date)
+      const [day, m] = await Promise.all([
+        loadDay(user.id, date),
+        loadDayMood(user.id, date),
+      ])
       setItems(day.items)
       setLogs(day.logs)
       setOverrides(day.overrides)
       setWeeklySnapshot(day.weeklySnapshot)
+      setMood(m?.mood ?? null)
+      setMoodNote(m?.note ?? null)
       writeCache(`planday:${user.id}:${date}`, {
         items: day.items,
         logs: day.logs,
         overrides: day.overrides,
         sections,
         weeklySnapshot: day.weeklySnapshot,
+        mood: m?.mood ?? null,
+        moodNote: m?.note ?? null,
       })
     } catch (e) {
       setError((e as Error).message)
@@ -354,8 +390,12 @@ export default function PlannerToday() {
   const reloadSummaries = async () => {
     if (!user) return
     try {
-      const s = await loadDaySummaries(user.id, range.start, range.end)
+      const [s, m] = await Promise.all([
+        loadDaySummaries(user.id, range.start, range.end),
+        loadDayMoods(user.id, range.start, range.end),
+      ])
       setSummaries(s)
+      setMoods(m)
     } catch (e) {
       setError((e as Error).message)
     }
@@ -639,6 +679,11 @@ export default function PlannerToday() {
             {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
           </div>
         </div>
+        {isHabit && habitStreaks[item.id] > 0 && (
+          <span className="shrink-0 rounded-full bg-orange-50 px-2 py-0.5 text-xs font-bold text-orange-600 dark:bg-orange-950/40 dark:text-orange-400">
+            🔥 {habitStreaks[item.id]}
+          </span>
+        )}
         {editDay && (
           <button
             type="button"
@@ -796,27 +841,42 @@ export default function PlannerToday() {
   // Ячейка дня (для месяца и недели).
   const dayCell = (dateStr: string, inMonth: boolean) => {
     const sum = summaries[dateStr]
+    const cellMood = moods[dateStr]
     const dayNum = Number(dateStr.slice(8, 10))
     const cellToday = dateStr === today
     const marks = sum ? sum.marks.slice(0, 4) : []
     const extra = sum ? sum.total - marks.length : 0
+
+    let bgColor = cellToday ? 'bg-emerald-500/5' : ''
+    let borderColor = cellToday ? 'border-emerald-500' : 'border-neutral-200 dark:border-neutral-800'
+
+    if (cellMood === 'procrastination') {
+      bgColor = 'bg-amber-500/10'
+      borderColor = 'border-amber-400'
+    } else if (cellMood === 'burnout') {
+      bgColor = 'bg-red-500/10'
+      borderColor = 'border-red-400'
+    }
+
     return (
       <button
         key={dateStr}
         type="button"
         onClick={() => setPanelDate(dateStr)}
-        className={`flex min-h-[64px] flex-col gap-1 rounded-xl border p-1.5 text-left transition hover:border-emerald-400 ${
-          cellToday ? 'border-emerald-500 bg-emerald-500/5' : 'border-neutral-200 dark:border-neutral-800'
-        } ${inMonth ? '' : 'opacity-40'}`}
+        className={`flex min-h-[64px] flex-col gap-1 rounded-xl border p-1.5 text-left transition hover:border-emerald-400 ${borderColor} ${bgColor} ${inMonth ? '' : 'opacity-40'}`}
       >
-        <span
-          className={`text-xs font-medium ${
-            cellToday
-              ? 'flex h-5 w-5 items-center justify-center self-start rounded-full bg-emerald-500 text-white'
-              : 'text-neutral-600 dark:text-neutral-300'
-          }`}
-        >
-          {dayNum}
+        <span className="flex items-center justify-between w-full">
+          <span
+            className={`text-xs font-medium ${
+              cellToday
+                ? 'flex h-5 w-5 items-center justify-center rounded-full bg-emerald-500 text-white'
+                : 'text-neutral-600 dark:text-neutral-300'
+            }`}
+          >
+            {dayNum}
+          </span>
+          {cellMood === 'procrastination' && <span className="text-xs">😤</span>}
+          {cellMood === 'burnout' && <span className="text-xs">💥</span>}
         </span>
         <span className="flex flex-col gap-0.5">
           {marks.map((m, i) => (
@@ -891,17 +951,19 @@ export default function PlannerToday() {
             if (d === null) return <span key={idx} className="h-3.5" />
             const dateStr = iso(year, mi, d)
             const has = !!summaries[dateStr]
+            const cellMood = moods[dateStr]
             const cellToday = dateStr === today
+
+            let cellClass = 'text-neutral-400'
+            if (cellToday) cellClass = 'bg-emerald-500 text-white'
+            else if (cellMood === 'burnout') cellClass = 'bg-red-500/20 text-red-600 dark:text-red-400'
+            else if (cellMood === 'procrastination') cellClass = 'bg-amber-500/20 text-amber-600 dark:text-amber-400'
+            else if (has) cellClass = 'bg-emerald-500/20 text-neutral-600 dark:text-neutral-300'
+
             return (
               <span
                 key={idx}
-                className={`flex h-3.5 items-center justify-center rounded-[3px] text-[8px] ${
-                  cellToday
-                    ? 'bg-emerald-500 text-white'
-                    : has
-                      ? 'bg-emerald-500/20 text-neutral-600 dark:text-neutral-300'
-                      : 'text-neutral-400'
-                }`}
+                className={`flex h-3.5 items-center justify-center rounded-[3px] text-[8px] ${cellClass}`}
               >
                 {d}
               </span>
@@ -942,13 +1004,15 @@ export default function PlannerToday() {
           {isCalendar ? (
             <span className="text-sm font-semibold">{periodLabel}</span>
           ) : (
-            <span className="text-sm font-semibold">
+            <span className="text-sm font-semibold flex items-center justify-center gap-1.5">
               {relLabel || formatDateHuman(date)}
               {relLabel && (
-                <span className="ml-1.5 text-xs font-normal text-neutral-500 dark:text-neutral-400">
+                <span className="text-xs font-normal text-neutral-500 dark:text-neutral-400">
                   · {formatDateHuman(date)}
                 </span>
               )}
+              {mood === 'procrastination' && <span title={`${t('mood.procrastination')}${moodNote ? `: ${moodNote}` : ''}`}>😤</span>}
+              {mood === 'burnout' && <span title={`${t('mood.burnout')}${moodNote ? `: ${moodNote}` : ''}`}>💥</span>}
             </span>
           )}
         </button>
@@ -1088,7 +1152,7 @@ export default function PlannerToday() {
       {/* Панель действий — часть sticky-шапки, поэтому «Переместить»,
           «Изменить день», шаблоны и weekly-снимок остаются под рукой. */}
       {!isCalendar && !loading && (
-        <div className="flex flex-wrap items-center gap-2 border-t border-neutral-200/70 pt-2 dark:border-neutral-800/70">
+        <div className="-mx-4 flex flex-wrap items-center gap-2 border-t border-neutral-200/70 px-4 pt-2 dark:border-neutral-800/70">
           {items.length > 1 && (
             <button
               type="button"
@@ -1133,7 +1197,7 @@ export default function PlannerToday() {
               type="button"
               onClick={() => setWeeklyDialog('clear')}
               disabled={weeklySaving}
-              className="rounded-lg border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 transition hover:bg-violet-50 disabled:opacity-60 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-950/30"
+              className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-500 transition hover:bg-neutral-100 disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
               title={lang === 'ru' ? 'Вернуть обычное расписание для этого дня недели' : 'Return to the normal schedule for this weekday'}
             >
               ↩️ {lang === 'ru' ? 'Обычное расписание' : 'Normal schedule'}
@@ -1143,17 +1207,83 @@ export default function PlannerToday() {
               type="button"
               onClick={() => setWeeklyDialog('apply')}
               disabled={reorder || editDay || weeklySaving}
-              className="rounded-lg border border-violet-300 px-2.5 py-1 text-xs font-medium text-violet-700 transition hover:bg-violet-50 disabled:opacity-60 dark:border-violet-700 dark:text-violet-300 dark:hover:bg-violet-950/30"
+              className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-500 transition hover:bg-neutral-100 disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
               title={weeklyLabel}
             >
               🔁 {lang === 'ru' ? 'Повторять еженедельно' : 'Repeat weekly'}
             </button>
           )}
           {weeklySnapshot?.enabled && (
-            <span className="text-[11px] text-violet-600 dark:text-violet-300">
+            <span className="text-[11px] text-emerald-600 dark:text-emerald-400">
               {lang === 'ru' ? 'Недельный снимок активен' : 'Weekly snapshot active'}
             </span>
           )}
+
+          <div className="relative ml-auto">
+            <button
+              type="button"
+              onClick={() => setMoodMenuOpen((v) => !v)}
+              className={`flex items-center justify-center rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
+                mood
+                  ? mood === 'procrastination'
+                    ? 'border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
+                    : 'border-red-400 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
+                  : 'border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
+              }`}
+            >
+              {mood === 'procrastination' ? '😤' : mood === 'burnout' ? '💥' : '😐'}
+            </button>
+            {moodMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-10" onClick={() => setMoodMenuOpen(false)} />
+                <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-lg dark:border-neutral-800 dark:bg-neutral-900">
+                  <div className="p-2 flex flex-col gap-1">
+                    <button
+                      onClick={async () => {
+                        if (!user) return
+                        setMoodMenuOpen(false)
+                        await setDayMood(user.id, date, 'procrastination')
+                        setMood('procrastination')
+                        reload()
+                      }}
+                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    >
+                      <span>😤</span>
+                      <span className={mood === 'procrastination' ? 'font-semibold' : ''}>{t('mood.procrastination')}</span>
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (!user) return
+                        setMoodMenuOpen(false)
+                        await setDayMood(user.id, date, 'burnout')
+                        setMood('burnout')
+                        reload()
+                      }}
+                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    >
+                      <span>💥</span>
+                      <span className={mood === 'burnout' ? 'font-semibold' : ''}>{t('mood.burnout')}</span>
+                    </button>
+                    {mood && (
+                      <button
+                        onClick={async () => {
+                          if (!user) return
+                          setMoodMenuOpen(false)
+                          await clearDayMood(user.id, date)
+                          setMood(null)
+                          setMoodNote(null)
+                          reload()
+                        }}
+                        className="mt-1 border-t border-neutral-200 pt-1 text-center text-xs text-neutral-500 hover:text-neutral-700 dark:border-neutral-800 dark:hover:text-neutral-300"
+                      >
+                        {t('mood.clear')}
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </div>
       )}
       </div>
@@ -1212,6 +1342,8 @@ export default function PlannerToday() {
               )}
             </>
           )}
+
+          {!loading && <OneoffSection currentDay={date} />}
 
           {/* Прогресс-бар дня — закреплён ВНИЗУ экрана отдельной панелью
               (всегда виден, не «висит» в воздухе). Кнопка чата ассистента

@@ -4,9 +4,11 @@ import { useLang } from '../lib/i18n'
 import {
   loadPlannerStats,
   loadHabits,
+  loadDayMoods,
   type PlannerStats,
   type StatsPeriod,
   type HabitStats,
+  type DayMood,
 } from '../lib/planner'
 import { readCache, writeCache } from '../lib/offlineCache'
 
@@ -19,7 +21,7 @@ const cardCls =
 
 const PERIODS: StatsPeriod[] = ['week', 'month', 'all']
 
-type StatsCache = { stats: PlannerStats; habits: HabitStats[] }
+type StatsCache = { stats: PlannerStats; habits: HabitStats[]; moods: Record<string, DayMood> }
 
 export default function PlannerStats() {
   const { user } = useAuth()
@@ -28,6 +30,7 @@ export default function PlannerStats() {
   const [period, setPeriod] = useState<StatsPeriod>('week')
   const [stats, setStats] = useState<PlannerStats | null>(null)
   const [habits, setHabits] = useState<HabitStats[]>([])
+  const [moods, setMoods] = useState<Record<string, DayMood>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -40,6 +43,7 @@ export default function PlannerStats() {
     if (cached) {
       setStats(cached.stats)
       setHabits(cached.habits)
+      setMoods(cached.moods)
       setLoading(false)
     } else {
       setLoading(true)
@@ -50,11 +54,20 @@ export default function PlannerStats() {
           loadPlannerStats(user.id, period),
           loadHabits(user.id),
         ])
+        let startD = '2000-01-01'
+        let endD = '2100-01-01'
+        if (s.perDay.length > 0) {
+          startD = s.perDay[0].date
+          endD = s.perDay[s.perDay.length - 1].date
+        }
+        const m = await loadDayMoods(user.id, startD, endD)
+        
         if (!active) return
         setStats(s)
         setHabits(h)
+        setMoods(m)
         setError(null)
-        writeCache(ck, { stats: s, habits: h })
+        writeCache(ck, { stats: s, habits: h, moods: m })
       } catch (e) {
         if (active) setError((e as Error).message)
       } finally {
@@ -110,6 +123,9 @@ export default function PlannerStats() {
     const en = ['Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa', 'Su']
     return (lang === 'en' ? en : ru)[wd]
   }
+
+  const procrastinationCount = Object.values(moods).filter(m => m === 'procrastination').length
+  const burnoutCount = Object.values(moods).filter(m => m === 'burnout').length
 
   return (
     <div className="mx-auto flex max-w-2xl flex-col gap-4">
@@ -187,6 +203,21 @@ export default function PlannerStats() {
               <p className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
                 {t('stats.focusSessions', { n: stats.focusSessions })}
               </p>
+            </div>
+          </div>
+
+          {/* Настроения дней */}
+          <div className={cardCls}>
+            <p className="mb-3 text-sm font-medium">{t('mood.stats')}</p>
+            <div className="flex gap-4">
+              <div className="flex-1 rounded-xl bg-amber-50 p-3 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400">
+                <p className="text-xl font-bold">{procrastinationCount}</p>
+                <p className="text-xs font-medium">{t('mood.procrastination')}</p>
+              </div>
+              <div className="flex-1 rounded-xl bg-red-50 p-3 text-red-700 dark:bg-red-500/10 dark:text-red-400">
+                <p className="text-xl font-bold">{burnoutCount}</p>
+                <p className="text-xs font-medium">{t('mood.burnout')}</p>
+              </div>
             </div>
           </div>
 

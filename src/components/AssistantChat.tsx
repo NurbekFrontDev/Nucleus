@@ -23,6 +23,7 @@ import {
   type AiMessage,
   type AiAction,
 } from '../lib/assistant'
+import { loadUserName } from '../lib/db'
 
 // Основная «зелёная» кнопка в формах помощника (разбор покупки / быстрый ввод).
 const btnPrimary =
@@ -45,6 +46,7 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
   const { t, lang } = useLang()
 
   const [messages, setMessages] = useState<AiMessage[]>([])
+  const [userName, setUserName] = useState<string | null>(null)
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
@@ -89,8 +91,14 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
     ;(async () => {
       try {
         setLoading(true)
-        const rows = await loadAiMessages(user.id)
-        if (active) setMessages(rows)
+        const [rows, name] = await Promise.all([
+          loadAiMessages(user.id),
+          loadUserName(user.id),
+        ])
+        if (active) {
+          setMessages(rows)
+          setUserName(name)
+        }
       } catch (e) {
         if (active) setError((e as Error).message)
       } finally {
@@ -426,7 +434,7 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
         ) : messages.length === 0 ? (
           <div className="m-auto px-6 text-center">
             <p className="text-xl font-semibold text-neutral-700 dark:text-neutral-200">
-              {lang === 'en' ? 'Hi, Nurbek 👋' : 'Привет, Нурбек 👋'}
+              {lang === 'en' ? `Hi, ${userName || 'friend'} 👋` : `Привет, ${userName || 'друг'} 👋`}
             </p>
           </div>
         ) : (

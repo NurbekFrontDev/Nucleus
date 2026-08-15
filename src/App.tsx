@@ -52,7 +52,7 @@ function NotFoundRedirect({ fallback }: { fallback: string }) {
 }
 
 function App() {
-  const { session, loading } = useAuth()
+  const { session, user, loading } = useAuth()
   const { lang } = useLang()
   const location = useLocation()
   const navigate = useNavigate()
@@ -83,7 +83,7 @@ function App() {
   // '/') мгновенно отбрасывает обратно на сохранённый '/planner' — вкладка
   // «не переключается».
   const didBoot = useRef(false)
-  const userId = session?.user?.id
+  const userId = user?.id
 
   // Мгновенное открытие последней вкладки (до первой отрисовки). Если на старте
   // мы на корне '/', а в локальном кэше есть другая последняя вкладка — сразу
@@ -349,7 +349,7 @@ function App() {
     )
   }
 
-  if (!session) {
+  if (!session && !user) {
     return (
       <>
         {/* Окно обновления показываем и до входа: проверка версии идёт сразу
