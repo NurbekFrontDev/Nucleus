@@ -524,7 +524,7 @@ export default function PlannerItems() {
   // при редактировании — встраивается прямо под нужным делом (см. ниже).
   const renderForm = () => {
     return (
-      <div className={`${cardCls} animate-pop flex flex-col gap-3`}>
+      <div className={`${cardCls} relative z-20 animate-pop flex flex-col gap-3 shadow-xl`}>
       <h2 className="text-base font-semibold">
         {editId
           ? isHabitForm

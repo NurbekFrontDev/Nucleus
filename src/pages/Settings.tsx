@@ -10,10 +10,12 @@ import {
   setDisplayCurrency,
 } from '../lib/db'
 import Select from '../components/Select'
+import CurrencyConverter from '../components/CurrencyConverter'
 
 // Экран «Настройки» FinLit: настройки модуля финансов.
 // 1. Авто-расход при покупке криптовалюты
 // 2. Валюта отображения
+// 3. Конвертер валют
 export default function Settings() {
   const { user } = useAuth()
   const { t, lang } = useLang()
@@ -100,6 +102,9 @@ export default function Settings() {
           />
         </div>
       </div>
+
+      {/* Конвертер валют */}
+      <CurrencyConverter />
     </div>
   )
 }

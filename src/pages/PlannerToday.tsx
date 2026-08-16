@@ -138,6 +138,22 @@ export default function PlannerToday() {
   const [mood, setMood] = useState<DayMood | null>(cachedDay?.mood ?? null)
   const [moodNote, setMoodNote] = useState<string | null>(cachedDay?.moodNote ?? null)
   const [moodMenuOpen, setMoodMenuOpen] = useState(false)
+  const menuContainerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!moodMenuOpen) return
+    const onDocClick = (e: MouseEvent | TouchEvent) => {
+      if (menuContainerRef.current && !menuContainerRef.current.contains(e.target as Node)) {
+        setMoodMenuOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', onDocClick)
+    document.addEventListener('touchstart', onDocClick)
+    return () => {
+      document.removeEventListener('mousedown', onDocClick)
+      document.removeEventListener('touchstart', onDocClick)
+    }
+  }, [moodMenuOpen])
 
   // ===== Виды «Неделя / Месяц / Год» (календарь) =====
   const [anchor, setAnchor] = useState(today) // дата внутри текущего периода
@@ -485,11 +501,13 @@ export default function PlannerToday() {
       else next[item.id] = optimistic
       return next
     })
-    setHabitStreaks((prev) => {
-      const cur = prev[item.id] || 0
-      const next = currentlyDone ? Math.max(0, cur - 1) : cur + 1
-      return { ...prev, [item.id]: next }
-    })
+      if (item.repeat_rule !== 'none') {
+        setHabitStreaks((prev) => {
+          const cur = prev[item.id] || 0
+          const next = currentlyDone ? Math.max(0, cur - 1) : cur + 1
+          return { ...prev, [item.id]: next }
+        })
+      }
     try {
       const newLog = await toggleDone(user.id, item.id, date, currentlyDone)
       setLogs((prev) => {
@@ -510,11 +528,13 @@ export default function PlannerToday() {
         else delete next[item.id]
         return next
       })
-      setHabitStreaks((prev) => {
-        const cur = prev[item.id] || 0
-        const next = currentlyDone ? cur + 1 : Math.max(0, cur - 1)
-        return { ...prev, [item.id]: next }
-      })
+      if (item.repeat_rule !== 'none') {
+        setHabitStreaks((prev) => {
+          const cur = prev[item.id] || 0
+          const next = currentlyDone ? cur + 1 : Math.max(0, cur - 1)
+          return { ...prev, [item.id]: next }
+        })
+      }
       setError((e as Error).message)
     }
   }
@@ -710,7 +730,7 @@ export default function PlannerToday() {
             {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
           </div>
         </div>
-        {(habitStreaks[item.id] ?? 0) > 0 && (
+        {item.repeat_rule !== 'none' && (habitStreaks[item.id] ?? 0) > 0 && (
           <span className="shrink-0 rounded-full bg-orange-50 px-2 py-0.5 text-xs font-bold text-orange-600 dark:bg-orange-950/40 dark:text-orange-400">
             🔥 {habitStreaks[item.id]}
           </span>
@@ -1190,7 +1210,7 @@ export default function PlannerToday() {
                 onClick={() => setReorder(false)}
                 className="rounded-lg bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-neutral-950 transition hover:bg-emerald-400"
               >
-                ✓ {t('common.reorderDone')}
+                {t('common.reorderDone')}
               </button>
             )}
             {editDay && (
@@ -1199,7 +1219,7 @@ export default function PlannerToday() {
                 onClick={() => setEditDay(false)}
                 className="rounded-lg bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-neutral-950 transition hover:bg-emerald-400"
               >
-                ✓ {t('today.editDayDone')}
+                {t('today.editDayDone')}
               </button>
             )}
             {weeklySnapshot?.enabled && (
@@ -1214,7 +1234,7 @@ export default function PlannerToday() {
             )}
           </div>
 
-          <div className="relative ml-auto">
+          <div className="relative ml-auto" ref={menuContainerRef}>
             <button
               type="button"
               onClick={() => setMoodMenuOpen((v) => !v)}
@@ -1230,142 +1250,132 @@ export default function PlannerToday() {
             </button>
 
             {moodMenuOpen && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setMoodMenuOpen(false)} />
-                <div className="absolute right-0 z-50 mt-1 w-56 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1.5 shadow-2xl backdrop-blur-md dark:border-neutral-800 dark:bg-neutral-900 animate-pop">
-                  {items.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMoodMenuOpen(false)
-                        setReorder((v) => !v)
-                        setEditDay(false)
-                      }}
-                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                    >
-                      <span>🔀</span>
-                      <span>{reorder ? t('common.reorderDone') : t('common.reorder')}</span>
-                    </button>
-                  )}
-
-                  {items.length > 0 && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMoodMenuOpen(false)
-                        setEditDay((v) => !v)
-                        setReorder(false)
-                      }}
-                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                    >
-                      <span>✏️</span>
-                      <span>{editDay ? t('today.editDayDone') : t('today.editDay')}</span>
-                    </button>
-                  )}
-
+              <div className="absolute right-0 z-50 mt-1 w-56 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1.5 shadow-2xl backdrop-blur-md dark:border-neutral-800 dark:bg-neutral-900 animate-pop">
+                {items.length > 1 && (
                   <button
                     type="button"
                     onClick={() => {
                       setMoodMenuOpen(false)
-                      setTemplatesOpen(true)
+                      setReorder((v) => !v)
+                      setEditDay(false)
                     }}
                     className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   >
-                    <span>📋</span>
-                    <span>{lang === 'ru' ? 'Шаблоны' : 'Templates'}</span>
+                    <span>{reorder ? t('common.reorderDone') : t('common.reorder')}</span>
                   </button>
+                )}
 
-                  {weeklySnapshot?.enabled ? (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMoodMenuOpen(false)
-                        setWeeklyDialog('clear')
-                      }}
-                      disabled={weeklySaving}
-                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 disabled:opacity-60 dark:hover:bg-neutral-800"
-                    >
-                      <span>↩️</span>
-                      <span>{lang === 'ru' ? 'Обычное расписание' : 'Normal schedule'}</span>
-                    </button>
-                  ) : (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setMoodMenuOpen(false)
-                        setWeeklyDialog('apply')
-                      }}
-                      disabled={reorder || editDay || weeklySaving}
-                      title={weeklyLabel}
-                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 disabled:opacity-60 dark:hover:bg-neutral-800"
-                    >
-                      <span>🔁</span>
-                      <span>{lang === 'ru' ? 'Повторять еженедельно' : 'Repeat weekly'}</span>
-                    </button>
-                  )}
-
-                  <div className="my-1 border-t border-neutral-200/80 dark:border-neutral-800/80" />
-
-                  <div className="px-2.5 py-1 text-[11px] font-semibold text-neutral-400">
-                    {lang === 'ru' ? 'Настроение дня' : 'Day Mood'}
-                  </div>
-
+                {items.length > 0 && (
                   <button
                     type="button"
-                    onClick={async () => {
-                      if (!user) return
+                    onClick={() => {
                       setMoodMenuOpen(false)
-                      await setDayMood(user.id, date, 'procrastination')
-                      setMood('procrastination')
-                      reload()
+                      setEditDay((v) => !v)
+                      setReorder(false)
                     }}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition ${
-                      mood === 'procrastination'
-                        ? 'bg-amber-500/15 font-semibold text-amber-700 dark:text-amber-300'
-                        : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                    }`}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
                   >
-                    <span>😤</span>
-                    <span>{t('mood.procrastination')}</span>
+                    <span>{editDay ? t('today.editDayDone') : t('today.editDay')}</span>
                   </button>
+                )}
 
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMoodMenuOpen(false)
+                    setTemplatesOpen(true)
+                  }}
+                  className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                >
+                  <span>📋 {lang === 'ru' ? 'Шаблоны' : 'Templates'}</span>
+                </button>
+
+                {weeklySnapshot?.enabled ? (
                   <button
                     type="button"
-                    onClick={async () => {
-                      if (!user) return
+                    onClick={() => {
                       setMoodMenuOpen(false)
-                      await setDayMood(user.id, date, 'burnout')
-                      setMood('burnout')
-                      reload()
+                      setWeeklyDialog('clear')
                     }}
-                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition ${
-                      mood === 'burnout'
-                        ? 'bg-red-500/15 font-semibold text-red-700 dark:text-red-300'
-                        : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
-                    }`}
+                    disabled={weeklySaving}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 disabled:opacity-60 dark:hover:bg-neutral-800"
                   >
-                    <span>💥</span>
-                    <span>{t('mood.burnout')}</span>
+                    <span>↩️ {lang === 'ru' ? 'Обычное расписание' : 'Normal schedule'}</span>
                   </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoodMenuOpen(false)
+                      setWeeklyDialog('apply')
+                    }}
+                    disabled={reorder || editDay || weeklySaving}
+                    title={weeklyLabel}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 disabled:opacity-60 dark:hover:bg-neutral-800"
+                  >
+                    <span>🔁 {lang === 'ru' ? 'Повторять еженедельно' : 'Repeat weekly'}</span>
+                  </button>
+                )}
 
-                  {mood && (
-                    <button
-                      type="button"
-                      onClick={async () => {
-                        if (!user) return
-                        setMoodMenuOpen(false)
-                        await clearDayMood(user.id, date)
-                        setMood(null)
-                        setMoodNote(null)
-                        reload()
-                      }}
-                      className="mt-1 flex w-full items-center justify-center rounded-lg py-1 text-center text-xs text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
-                    >
-                      {t('mood.clear')}
-                    </button>
-                  )}
+                <div className="my-1 border-t border-neutral-200/80 dark:border-neutral-800/80" />
+
+                <div className="px-2.5 py-1 text-[11px] font-semibold text-neutral-400">
+                  {lang === 'ru' ? 'Настроение дня' : 'Day Mood'}
                 </div>
-              </>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!user) return
+                    setMoodMenuOpen(false)
+                    await setDayMood(user.id, date, 'procrastination')
+                    setMood('procrastination')
+                    reload()
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition ${
+                    mood === 'procrastination'
+                      ? 'bg-amber-500/15 font-semibold text-amber-700 dark:text-amber-300'
+                      : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                  }`}
+                >
+                  <span>{t('mood.procrastination')}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={async () => {
+                    if (!user) return
+                    setMoodMenuOpen(false)
+                    await setDayMood(user.id, date, 'burnout')
+                    setMood('burnout')
+                    reload()
+                  }}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition ${
+                    mood === 'burnout'
+                      ? 'bg-red-500/15 font-semibold text-red-700 dark:text-red-300'
+                      : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                  }`}
+                >
+                  <span>{t('mood.burnout')}</span>
+                </button>
+
+                {mood && (
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!user) return
+                      setMoodMenuOpen(false)
+                      await clearDayMood(user.id, date)
+                      setMood(null)
+                      setMoodNote(null)
+                      reload()
+                    }}
+                    className="mt-1 flex w-full items-center justify-center rounded-lg py-1 text-center text-xs text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                  >
+                    {t('mood.clear')}
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>

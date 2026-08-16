@@ -106,8 +106,8 @@ export default function TimePicker({ value, onChange, placeholder }: Props) {
           } ${
             alignRight ? 'right-0' : 'left-0'
           } ${
-            alignTop ? 'bottom-full mb-1' : 'top-full mt-1'
-          } absolute z-30 w-56 max-w-[calc(100vw-2rem)] rounded-lg border border-neutral-200 bg-white p-2 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}
+            alignTop ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+          } absolute z-50 w-56 max-w-[calc(100vw-2rem)] rounded-xl border border-neutral-200 bg-white p-2.5 shadow-2xl backdrop-blur-md dark:border-neutral-700 dark:bg-neutral-900`}
         >
           <div className="flex gap-2">
             <div className="flex-1">

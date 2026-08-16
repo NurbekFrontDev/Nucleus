@@ -16,6 +16,7 @@ const WATCHED_TABLES = [
   'categories',
   'months',
   'planner_day_moods',
+  'app_settings',
 ] as const
 
 export type SyncEvent = {

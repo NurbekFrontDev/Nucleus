@@ -327,21 +327,21 @@ export function formatDuration(durationMin: number | null | undefined, lang: 'ru
 
 // Попадает ли дело в указанный день (с учётом правила повторения и старта).
 export function isItemOnDate(item: PlannerItem, dateStr: string): boolean {
-  if (item.archived) return false
+  if (item.archived && item.repeat_rule !== 'none') return false
   // До даты начала дело ещё "не существует".
   if (item.start_date && dateStr < item.start_date) return false
   const wd = isoWeekday(dateStr)
   switch (item.repeat_rule) {
     case 'daily':
-      return true
+      return !item.archived
     case 'weekdays':
-      return wd >= 1 && wd <= 5
+      return !item.archived && wd >= 1 && wd <= 5
     case 'weekly':
-      return Array.isArray(item.weekdays) && item.weekdays.includes(wd)
+      return !item.archived && Array.isArray(item.weekdays) && item.weekdays.includes(wd)
     case 'none':
     default:
-      // Разовое: показываем только в его собственный день.
-      return !!item.start_date && item.start_date === dateStr
+      // Разовое: показываем в его собственный день (даже если архивировано после выполнения).
+      return !item.start_date || item.start_date === dateStr
   }
 }
 
@@ -677,14 +677,19 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
   //     Это закрывает обратный случай: вернул день недели на место (Вт -> Пн) —
   //     дело не должно воскреснуть в прошедшем понедельнике этой же недели.
   const keepInDay = (it: PlannerItem): boolean => {
-    // Если дело архивировано (например, выполненное разовое дело), оно остаётся в дне
-    // ТОЛЬКО если по нему есть фактическая отметка (лог) или правка на этот день.
-    if (it.archived && !loggedIds.has(it.id) && !ovMap.has(it.id)) return false
     if (isItemHiddenOnDate(it, dateStr)) return false
     const ov = ovMap.get(it.id)
     // Убрано вручную только из этого дня — выше всех остальных правил.
     if (ov?.hidden) return false
     if (ov || loggedIds.has(it.id)) return true
+    // Если дело архивировано, оно остаётся в дне если есть отметка (лог), правка дня,
+    // либо если это разовое дело, дата которого совпадает с этой датой (или не задана).
+    if (it.archived) {
+      if (it.repeat_rule === 'none' && (!it.start_date || it.start_date === dateStr)) {
+        return true
+      }
+      return false
+    }
     if (it.schedule_changed_at && dateStr < it.schedule_changed_at) return false
     return isItemOnDate(it, dateStr)
   }
@@ -743,7 +748,8 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
       .map((snapshotItem) => {
         const original = allById.get(snapshotItem.item_id)
         const directOverride = ovMap.get(snapshotItem.item_id)
-        if (!original || original.archived || directOverride?.hidden) return null
+        if (!original || directOverride?.hidden) return null
+        if (original.archived && original.repeat_rule !== 'none' && !loggedIds.has(original.id) && !directOverride) return null
         return applyDateOverride({
           ...original,
           title: snapshotItem.title,
@@ -760,10 +766,17 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
       })
       .filter((item): item is PlannerItem => item !== null)
 
-    // Явно отредактированное только на эту дату дело не должно исчезнуть,
-    // даже если оно не вошло в недельный снимок.
+    // Разовые дела, дела с отметками за сегодня или с прямыми правками даты
+    // не должны исчезать при включённом недельном снимке.
     const directExtras = all
-      .filter((item) => !snapshotItemIds.has(item.id) && !!ovMap.get(item.id) && !ovMap.get(item.id)?.hidden)
+      .filter((item) => {
+        if (snapshotItemIds.has(item.id)) return false
+        const ov = ovMap.get(item.id)
+        if (ov?.hidden) return false
+        if (ov || loggedIds.has(item.id)) return true
+        if (item.repeat_rule === 'none' && (!item.start_date || item.start_date === dateStr)) return true
+        return false
+      })
       .map(applyDateOverride)
     occurring = [...snapshotItems, ...directExtras]
   }
@@ -1189,8 +1202,35 @@ export type ItemInput = {
   two_min?: string | null
 }
 
-// Загружает все НЕ архивированные дела пользователя (для списка «Мои дела»).
 export async function loadAllItems(userId: string): Promise<PlannerItem[]> {
+  // Авто-восстановление разовых дел, у которых снята отметка выполнения
+  try {
+    const { data: oneoffs } = await supabase
+      .from('planner_items')
+      .select('id, repeat_rule, archived')
+      .eq('user_id', userId)
+      .eq('repeat_rule', 'none')
+      .eq('archived', true)
+    if (oneoffs && oneoffs.length > 0) {
+      const today = todayStr()
+      const { data: logs } = await supabase
+        .from('planner_logs')
+        .select('item_id')
+        .eq('user_id', userId)
+        .eq('date', today)
+        .eq('status', 'done')
+        .in('item_id', oneoffs.map((o) => o.id))
+      const loggedDoneIds = new Set((logs ?? []).map((l) => l.item_id))
+      const toUnarchive = oneoffs.filter((o) => !loggedDoneIds.has(o.id)).map((o) => o.id)
+      if (toUnarchive.length > 0) {
+        await supabase
+          .from('planner_items')
+          .update({ archived: false })
+          .in('id', toUnarchive)
+      }
+    }
+  } catch {}
+
   const { data, error } = await safePlannerItemsQuery((cols) =>
     supabase
       .from('planner_items')
@@ -1549,7 +1589,7 @@ export async function loadHabitStreaks(
   userId: string,
   items: PlannerItem[],
 ): Promise<Record<string, number>> {
-  const activeItems = items.filter((i) => !i.archived)
+  const activeItems = items.filter((i) => !i.archived && i.repeat_rule !== 'none')
   if (activeItems.length === 0) return {}
 
   const cutoff = addDays(todayStr(), -400)

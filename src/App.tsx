@@ -16,7 +16,7 @@ import { initOta } from './lib/ota'
 import { initDesktopUpdates } from './lib/desktopUpdate'
 import UpdateDialog from './components/UpdateDialog'
 import { initPomoSync, type PomoSyncMessage } from './lib/pomoSync'
-import { startRealtimeSync, stopRealtimeSync } from './lib/realtimeSync'
+import { startRealtimeSync, stopRealtimeSync, onSyncEvent } from './lib/realtimeSync'
 import { enableFocusDnd, disableFocusDnd } from './lib/dnd'
 
 // Код-сплиттинг (А-9, шаг 3): страницы грузятся отдельными чанками по мере
@@ -115,7 +115,7 @@ function App() {
     setBooting(false)
   }, [userId, navigate])
 
-  // Загрузка резервного last_path из БД для устройств, где ещё нет локального кэша.
+  // Загрузка резервного last_path из БД для устройств, где ещё нет локального кэша или был переход с другого устройства.
   useEffect(() => {
     if (!userId) return
     if (didRestore.current) return
@@ -133,14 +133,17 @@ function App() {
           console.warn('[last_path] ошибка чтения из БД:', error.message)
         }
         const dbPath = (data as { last_path?: string } | null)?.last_path
-        if (active && dbPath && dbPath !== '/login' && dbPath !== '/index.html') {
+        if (active && dbPath && dbPath !== '/login' && dbPath !== '/index.html' && dbPath !== '/') {
           setLastPath(dbPath)
           try {
-            if (!localStorage.getItem(LAST_PATH_KEY)) {
-              localStorage.setItem(LAST_PATH_KEY, dbPath)
-            }
+            localStorage.setItem(LAST_PATH_KEY, dbPath)
           } catch {
             // кэш недоступен — не критично
+          }
+          const current = window.location.pathname
+          const isInitialRoute = current === '/' || current === '/index.html' || current === ''
+          if (isInitialRoute) {
+            navigate(dbPath, { replace: true })
           }
         }
       } catch (e) {
@@ -151,7 +154,22 @@ function App() {
     return () => {
       active = false
     }
-  }, [userId])
+  }, [userId, navigate])
+
+  // Синхронизация пути в реальном времени при навигации на другом устройстве.
+  useEffect(() => {
+    return onSyncEvent(['app_settings'], (evt) => {
+      if (evt.table === 'app_settings' && evt.new) {
+        const newPath = (evt.new as { last_path?: string }).last_path
+        if (newPath && typeof newPath === 'string' && newPath !== '/login' && newPath !== '/index.html' && newPath !== '/') {
+          setLastPath(newPath)
+          try {
+            localStorage.setItem(LAST_PATH_KEY, newPath)
+          } catch {}
+        }
+      }
+    })
+  }, [])
 
   // Сохраняем текущую страницу локально на этом устройстве и синхронизируем в БД.
   useEffect(() => {

@@ -29,6 +29,8 @@ export default function DatePicker({ value, onChange, placeholder, placement = '
   const [viewYear, setViewYear] = useState(init.getFullYear())
   const [viewMonth, setViewMonth] = useState(init.getMonth())
 
+  const [popupStyle, setPopupStyle] = useState<React.CSSProperties>({})
+
   useEffect(() => {
     const onDoc = (e: MouseEvent) => {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
@@ -41,14 +43,29 @@ export default function DatePicker({ value, onChange, placeholder, placement = '
     const d = value ? new Date(value + 'T00:00:00') : new Date()
     setViewYear(d.getFullYear())
     setViewMonth(d.getMonth())
-    if (placement === 'top') {
-      setOpenUpwards(true)
-    } else if (placement === 'bottom') {
-      setOpenUpwards(false)
-    } else if (ref.current) {
+    if (ref.current) {
       const rect = ref.current.getBoundingClientRect()
       const spaceBelow = window.innerHeight - rect.bottom
-      setOpenUpwards(spaceBelow < 320 && rect.top > 250)
+      const isUp = placement === 'top' || (placement === 'auto' && spaceBelow < 320 && rect.top > 250)
+      setOpenUpwards(isUp)
+
+      const popWidth = Math.min(288, window.innerWidth - 16)
+      let leftOffset = 0
+      if (rect.left + popWidth > window.innerWidth - 8) {
+        leftOffset = rect.width - popWidth
+        if (rect.left + leftOffset < 8) {
+          leftOffset = 8 - rect.left
+        }
+      } else if (rect.left < 8) {
+        leftOffset = 8 - rect.left
+      }
+      setPopupStyle({
+        left: `${leftOffset}px`,
+        maxWidth: 'calc(100vw - 16px)',
+      })
+    } else {
+      if (placement === 'top') setOpenUpwards(true)
+      else if (placement === 'bottom') setOpenUpwards(false)
     }
     setOpen((v) => !v)
   }
@@ -89,9 +106,10 @@ export default function DatePicker({ value, onChange, placeholder, placement = '
       </button>
       {show && (
         <div
+          style={popupStyle}
           className={`${open ? 'animate-pop' : 'animate-pop-out'} absolute z-50 w-72 rounded-xl border border-neutral-200 bg-white p-3 shadow-2xl backdrop-blur-md dark:border-neutral-700 dark:bg-neutral-900 ${
             openUpwards ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
-          } right-0 sm:right-auto`}
+          }`}
         >
           <div className="mb-2 flex items-center justify-between">
             <button
