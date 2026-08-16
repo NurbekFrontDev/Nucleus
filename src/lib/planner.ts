@@ -1202,31 +1202,46 @@ export type ItemInput = {
   two_min?: string | null
 }
 
+// Загружает все НЕ архивированные дела пользователя (для списка «Мои дела»).
 export async function loadAllItems(userId: string): Promise<PlannerItem[]> {
-  // Авто-восстановление разовых дел, у которых снята отметка выполнения
+  // Одноразовый фикс v0.1.21 → v0.1.22: заархивировать обратно разовые дела,
+  // которые были ошибочно разархивированы массовым авто-восстановлением.
+  // Такое дело считается «неправильно восстановленным», если:
+  //   - repeat_rule = 'none', archived = false
+  //   - start_date < сегодня  (старое завершённое дело, не нужно в списке)
+  //   - по нему есть лог done за его start_date (т.е. оно было выполнено)
+  // Если у дела нет лога — значит пользователь его действительно хочет видеть.
+  const FIX_KEY = 'nucleus_fix_rearchive_oneoffs_v1'
   try {
-    const { data: oneoffs } = await supabase
-      .from('planner_items')
-      .select('id, repeat_rule, archived')
-      .eq('user_id', userId)
-      .eq('repeat_rule', 'none')
-      .eq('archived', true)
-    if (oneoffs && oneoffs.length > 0) {
+    if (!localStorage.getItem(FIX_KEY)) {
+      localStorage.setItem(FIX_KEY, '1')
       const today = todayStr()
-      const { data: logs } = await supabase
-        .from('planner_logs')
-        .select('item_id')
+      // Найти все разовые дела, у которых start_date < сегодня и archived = false
+      const { data: staleOneoffs } = await supabase
+        .from('planner_items')
+        .select('id, start_date')
         .eq('user_id', userId)
-        .eq('date', today)
-        .eq('status', 'done')
-        .in('item_id', oneoffs.map((o) => o.id))
-      const loggedDoneIds = new Set((logs ?? []).map((l) => l.item_id))
-      const toUnarchive = oneoffs.filter((o) => !loggedDoneIds.has(o.id)).map((o) => o.id)
-      if (toUnarchive.length > 0) {
-        await supabase
-          .from('planner_items')
-          .update({ archived: false })
-          .in('id', toUnarchive)
+        .eq('repeat_rule', 'none')
+        .eq('archived', false)
+        .lt('start_date', today)
+      if (staleOneoffs && staleOneoffs.length > 0) {
+        // Проверить, у каких из них есть лог «done» за их start_date
+        const ids = staleOneoffs.map((o) => o.id)
+        const { data: logs } = await supabase
+          .from('planner_logs')
+          .select('item_id')
+          .eq('user_id', userId)
+          .eq('status', 'done')
+          .in('item_id', ids)
+        const loggedIds = new Set((logs ?? []).map((l) => l.item_id))
+        // Архивируем те, у которых есть лог (значит они были выполнены)
+        const toArchive = staleOneoffs.filter((o) => loggedIds.has(o.id)).map((o) => o.id)
+        if (toArchive.length > 0) {
+          await supabase
+            .from('planner_items')
+            .update({ archived: true })
+            .in('id', toArchive)
+        }
       }
     }
   } catch {}

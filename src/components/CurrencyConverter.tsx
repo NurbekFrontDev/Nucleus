@@ -98,6 +98,14 @@ export default function CurrencyConverter() {
               inputMode="decimal"
               value={amounts[r.code]}
               onChange={(e) => recompute(r.code, e.target.value)}
+              onFocus={(e) => {
+                // На мобильном при открытии клавиатуры поле может оказаться
+                // за ней. Прокручиваем его в видимую область с небольшой задержкой,
+                // чтобы клавиатура успела появиться.
+                setTimeout(() => {
+                  e.target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                }, 300)
+              }}
               placeholder="0"
               className={inputCls}
             />

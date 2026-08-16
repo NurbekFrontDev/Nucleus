@@ -115,7 +115,8 @@ function App() {
     setBooting(false)
   }, [userId, navigate])
 
-  // Загрузка резервного last_path из БД для устройств, где ещё нет локального кэша или был переход с другого устройства.
+  // Загрузка last_path из БД и навигация к нему. Выполняется ОДИН РАЗ при старте.
+  // Если в БД есть осмысленный путь, и мы стоим на дефолтном маршруте — переходим.
   useEffect(() => {
     if (!userId) return
     if (didRestore.current) return
@@ -134,15 +135,12 @@ function App() {
         }
         const dbPath = (data as { last_path?: string } | null)?.last_path
         if (active && dbPath && dbPath !== '/login' && dbPath !== '/index.html' && dbPath !== '/') {
-          setLastPath(dbPath)
           try {
             localStorage.setItem(LAST_PATH_KEY, dbPath)
-          } catch {
-            // кэш недоступен — не критично
-          }
+          } catch {}
+          // Переходим, только если мы на дефолтном/корневом маршруте
           const current = window.location.pathname
-          const isInitialRoute = current === '/' || current === '/index.html' || current === ''
-          if (isInitialRoute) {
+          if (current === '/' || current === '/index.html' || current === '') {
             navigate(dbPath, { replace: true })
           }
         }
@@ -157,6 +155,9 @@ function App() {
   }, [userId, navigate])
 
   // Синхронизация пути в реальном времени при навигации на другом устройстве.
+  // Только обновляем localStorage, НЕ навигируем автоматически (чтобы не мешать
+  // текущей работе пользователя на этом устройстве). При следующем запуске —
+  // приложение откроется на актуальном пути.
   useEffect(() => {
     return onSyncEvent(['app_settings'], (evt) => {
       if (evt.table === 'app_settings' && evt.new) {
@@ -171,21 +172,27 @@ function App() {
     })
   }, [])
 
-  // Сохраняем текущую страницу локально на этом устройстве и синхронизируем в БД.
+  // Сохраняем текущую страницу локально и синхронизируем в БД.
+  // Пропускаем дефолтный '/' — это промежуточный маршрут при переключении вкладок,
+  // и его запись перезатирает реальный последний путь.
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     const p = location.pathname
-    if (!p || p === '/login' || p === '/index.html') return
+    if (!p || p === '/' || p === '/login' || p === '/index.html') return
     setLastPath(p)
     try {
       localStorage.setItem(LAST_PATH_KEY, p)
-    } catch {
-      // кэш недоступен — не критично
-    }
+    } catch {}
+    // Дебаунс записи в БД — при быстром переключении вкладок
+    // предотвращает лишние запросы и перезапись осмысленного пути.
     if (userId) {
-      void supabase.from('app_settings').upsert(
-        { user_id: userId, last_path: p, updated_at: new Date().toISOString() },
-        { onConflict: 'user_id' },
-      )
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      saveTimerRef.current = setTimeout(() => {
+        void supabase.from('app_settings').upsert(
+          { user_id: userId, last_path: p, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id' },
+        )
+      }, 1000)
     }
   }, [userId, location.pathname])
 
