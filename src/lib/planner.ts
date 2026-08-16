@@ -289,6 +289,25 @@ export function endTimeFromDuration(start: string, durationMin: number | null | 
   return `${pad2(Math.floor(total / 60))}:${pad2(total % 60)}`
 }
 
+// Рассчитывает длительность в минутах между временем начала и временем конца.
+// Поддерживает перенос через полночь (например: 23:00 - 01:00 -> 120 мин).
+export function durationBetweenTimes(start: string, end: string): number | null {
+  const ms = /^(\d{1,2}):(\d{2})$/.exec(start)
+  const me = /^(\d{1,2}):(\d{2})$/.exec(end)
+  if (!ms || !me) return null
+  const startH = Number(ms[1])
+  const startM = Number(ms[2])
+  const endH = Number(me[1])
+  const endM = Number(me[2])
+  if (startH > 23 || startM > 59 || endH > 23 || endM > 59) return null
+  const startTotal = startH * 60 + startM
+  const endTotal = endH * 60 + endM
+  if (startTotal === endTotal) return null
+  let diff = endTotal - startTotal
+  if (diff < 0) diff += 24 * 60 // перенос через полночь
+  return diff > 0 ? diff : null
+}
+
 // Компактная подпись рядом с названием дела. Не зависит от i18n-словаря,
 // чтобы одинаково использоваться во всех карточках Planner.
 export function formatDuration(durationMin: number | null | undefined, lang: 'ru' | 'en' = 'ru'): string {
@@ -609,8 +628,7 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
       supabase
         .from('planner_items')
         .select(cols)
-        .eq('user_id', userId)
-        .eq('archived', false),
+        .eq('user_id', userId),
     ),
     supabase
       .from('planner_logs')
@@ -659,6 +677,9 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
   //     Это закрывает обратный случай: вернул день недели на место (Вт -> Пн) —
   //     дело не должно воскреснуть в прошедшем понедельнике этой же недели.
   const keepInDay = (it: PlannerItem): boolean => {
+    // Если дело архивировано (например, выполненное разовое дело), оно остаётся в дне
+    // ТОЛЬКО если по нему есть фактическая отметка (лог) или правка на этот день.
+    if (it.archived && !loggedIds.has(it.id) && !ovMap.has(it.id)) return false
     if (isItemHiddenOnDate(it, dateStr)) return false
     const ov = ovMap.get(it.id)
     // Убрано вручную только из этого дня — выше всех остальных правил.
@@ -815,6 +836,22 @@ export async function toggleDone(
       .eq('item_id', itemId)
       .eq('date', dateStr)
     if (error) throw error
+
+    // Если это разовое дело, возвращаем его в список активных «Мои дела»
+    try {
+      const { data: item } = await supabase
+        .from('planner_items')
+        .select('repeat_rule')
+        .eq('id', itemId)
+        .maybeSingle()
+      if (item?.repeat_rule === 'none') {
+        await supabase
+          .from('planner_items')
+          .update({ archived: false })
+          .eq('id', itemId)
+      }
+    } catch {}
+
     // Галочка снята -> напоминание должно вернуться (если время ещё не прошло).
     notifyStatusChanged(userId, itemId, dateStr, false)
     return null
@@ -828,6 +865,23 @@ export async function toggleDone(
     .select(LOG_COLS)
     .single()
   if (error) throw error
+
+  // Если это разовое дело (repeat_rule === 'none'), архивируем его,
+  // чтобы оно мгновенно удалилось из списка «Мои дела», но осталось в истории этого дня
+  try {
+    const { data: item } = await supabase
+      .from('planner_items')
+      .select('repeat_rule')
+      .eq('id', itemId)
+      .maybeSingle()
+    if (item?.repeat_rule === 'none') {
+      await supabase
+        .from('planner_items')
+        .update({ archived: true })
+        .eq('id', itemId)
+    }
+  } catch {}
+
   // Дело выполнено -> мгновенно снимаем его напоминание.
   notifyStatusChanged(userId, itemId, dateStr, true)
   return data as PlannerLog

@@ -7,6 +7,7 @@ type Props = {
   value: string
   onChange: (v: string) => void
   placeholder?: string
+  placement?: 'bottom' | 'top' | 'auto'
 }
 
 const triggerCls =
@@ -17,10 +18,11 @@ const WEEKDAYS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
 const pad = (n: number) => String(n).padStart(2, '0')
 
 // Календарь в стиле приложения. Значение — строка YYYY-MM-DD.
-export default function DatePicker({ value, onChange, placeholder }: Props) {
+export default function DatePicker({ value, onChange, placeholder, placement = 'auto' }: Props) {
   const { t, lang } = useLang()
   const WEEKDAYS = lang === 'en' ? WEEKDAYS_EN : WEEKDAYS_RU
   const [open, setOpen] = useState(false)
+  const [openUpwards, setOpenUpwards] = useState(placement === 'top')
   const show = useAnimatedMount(open)
   const ref = useRef<HTMLDivElement>(null)
   const init = value ? new Date(value + 'T00:00:00') : new Date()
@@ -39,6 +41,15 @@ export default function DatePicker({ value, onChange, placeholder }: Props) {
     const d = value ? new Date(value + 'T00:00:00') : new Date()
     setViewYear(d.getFullYear())
     setViewMonth(d.getMonth())
+    if (placement === 'top') {
+      setOpenUpwards(true)
+    } else if (placement === 'bottom') {
+      setOpenUpwards(false)
+    } else if (ref.current) {
+      const rect = ref.current.getBoundingClientRect()
+      const spaceBelow = window.innerHeight - rect.bottom
+      setOpenUpwards(spaceBelow < 320 && rect.top > 250)
+    }
     setOpen((v) => !v)
   }
 
@@ -77,7 +88,11 @@ export default function DatePicker({ value, onChange, placeholder }: Props) {
         <span className="shrink-0 text-neutral-400">📅</span>
       </button>
       {show && (
-        <div className={`${open ? 'animate-pop' : 'animate-pop-out'} absolute z-30 mt-1 w-72 rounded-lg border border-neutral-200 bg-white p-3 shadow-lg dark:border-neutral-700 dark:bg-neutral-900`}>
+        <div
+          className={`${open ? 'animate-pop' : 'animate-pop-out'} absolute z-50 w-72 rounded-xl border border-neutral-200 bg-white p-3 shadow-2xl backdrop-blur-md dark:border-neutral-700 dark:bg-neutral-900 ${
+            openUpwards ? 'bottom-full mb-1.5' : 'top-full mt-1.5'
+          } right-0 sm:right-auto`}
+        >
           <div className="mb-2 flex items-center justify-between">
             <button
               type="button"

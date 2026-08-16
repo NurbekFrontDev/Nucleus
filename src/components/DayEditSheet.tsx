@@ -12,6 +12,7 @@ import {
   isoWeekday,
   todayStr,
   endTimeFromDuration,
+  durationBetweenTimes,
   type PlannerItem,
   type PlannerDayOverride,
   type Priority,
@@ -92,10 +93,14 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
   const [start, setStart] = useState<string>(item.at_time_start ?? '')
   const [end, setEnd] = useState<string>(item.at_time_end ?? '')
   const initDurationMin = item.duration_min
-  const initHours = initDurationMin !== null && initDurationMin >= 60 && initDurationMin % 60 === 0
-  const [durationUnit, setDurationUnit] = useState<'min' | 'hour'>(initHours ? 'hour' : 'min')
+  let savedUnit = localStorage.getItem(`nucleus:durationUnit:${item.id}`) as 'min' | 'hour' | null
+  if (!savedUnit) {
+    const initHours = initDurationMin !== null && initDurationMin >= 60 && initDurationMin % 60 === 0
+    savedUnit = initHours ? 'hour' : 'min'
+  }
+  const [durationUnit, setDurationUnit] = useState<'min' | 'hour'>(savedUnit)
   const [duration, setDuration] = useState<string>(
-    initDurationMin ? (initHours ? String(initDurationMin / 60) : String(initDurationMin)) : '',
+    initDurationMin ? (savedUnit === 'hour' ? String(+(initDurationMin / 60).toFixed(2)) : String(initDurationMin)) : '',
   )
   const [priority, setPriority] = useState<Priority>(item.priority)
   const [note, setNote] = useState<string>(item.note ?? '')
@@ -147,18 +152,35 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
     return inMins > 0 ? Math.min(1440, inMins) : null
   }
 
-  const hasDuration = durationValue() !== null
-
   const setStartWithDuration = (value: string) => {
     setStart(value)
     const minutes = durationValue()
-    if (minutes) setEnd(endTimeFromDuration(value, minutes))
+    if (minutes && value) {
+      setEnd(endTimeFromDuration(value, minutes))
+    } else if (value && end) {
+      const diff = durationBetweenTimes(value, end)
+      if (diff !== null) {
+        setDuration(durationUnit === 'hour' ? String(+(diff / 60).toFixed(2)) : String(diff))
+      }
+    }
   }
 
   const setDurationWithEnd = (value: string, unit: 'min' | 'hour' = durationUnit) => {
     setDuration(value)
     const minutes = durationValue(value, unit)
-    if (minutes && start) setEnd(endTimeFromDuration(start, minutes))
+    if (minutes && start) {
+      setEnd(endTimeFromDuration(start, minutes))
+    }
+  }
+
+  const setEndWithDuration = (value: string) => {
+    setEnd(value)
+    if (start && value) {
+      const diff = durationBetweenTimes(start, value)
+      if (diff !== null) {
+        setDuration(durationUnit === 'hour' ? String(+(diff / 60).toFixed(2)) : String(diff))
+      }
+    }
   }
 
   const toggleDurationUnit = () => {
@@ -200,6 +222,9 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
       } else if (hadWeekly) {
         await clearWeekdayOverride(userId, item.id, weekday)
       }
+      try {
+        localStorage.setItem(`nucleus:durationUnit:${item.id}`, durationUnit)
+      } catch {}
       onSaved()
       close()
     } catch {
@@ -298,7 +323,7 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
                 type="number"
                 inputMode="decimal"
                 step={durationUnit === 'hour' ? '0.25' : '1'}
-                min="0.1"
+                min={durationUnit === 'hour' ? '0.25' : '1'}
                 max={durationUnit === 'hour' ? '24' : '1440'}
                 value={duration}
                 onChange={(e) => setDurationWithEnd(e.target.value)}
@@ -317,13 +342,7 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
           </div>
           <div>
             <p className="mb-1.5 text-sm font-medium">{t('items.timeEnd')}</p>
-            {hasDuration ? (
-              <div className="rounded-lg border border-dashed border-emerald-400/70 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-                {start ? endTimeFromDuration(start, durationValue()) : t('items.durationSetStart')}
-              </div>
-            ) : (
-              <TimePicker value={end} onChange={setEnd} />
-            )}
+            <TimePicker value={end} onChange={setEndWithDuration} />
           </div>
         </div>
 

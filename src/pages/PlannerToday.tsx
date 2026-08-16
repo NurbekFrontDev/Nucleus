@@ -1180,139 +1180,190 @@ export default function PlannerToday() {
         </div>
       )}
 
-      {/* Панель действий — часть sticky-шапки, поэтому «Переместить»,
-          «Изменить день», шаблоны и weekly-снимок остаются под рукой. */}
+      {/* Панель действий — часть sticky-шапки: скрыта в аккуратное выпадающее меню «⋯» справа. */}
       {!isCalendar && !loading && (
-        <div className="-mx-4 flex flex-wrap items-center gap-2 border-t border-neutral-200/70 px-4 pt-2 dark:border-neutral-800/70">
-          {items.length > 1 && (
-            <button
-              type="button"
-              onClick={() => {
-                setReorder((v) => !v)
-                setEditDay(false)
-              }}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-                reorder
-                  ? 'bg-emerald-500 text-neutral-950 hover:bg-emerald-400'
-                  : 'border border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
-              }`}
-            >
-              {reorder ? t('common.reorderDone') : t('common.reorder')}
-            </button>
-          )}
-          {items.length > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                setEditDay((v) => !v)
-                setReorder(false)
-              }}
-              className={`rounded-lg px-2.5 py-1 text-xs font-medium transition ${
-                editDay
-                  ? 'bg-emerald-500 text-neutral-950 hover:bg-emerald-400'
-                  : 'border border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
-              }`}
-            >
-              {editDay ? t('today.editDayDone') : t('today.editDay')}
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setTemplatesOpen(true)}
-            className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-500 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
-          >
-            📋 {lang === 'ru' ? 'Шаблоны' : 'Templates'}
-          </button>
-          {weeklySnapshot?.enabled ? (
-            <button
-              type="button"
-              onClick={() => setWeeklyDialog('clear')}
-              disabled={weeklySaving}
-              className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-500 transition hover:bg-neutral-100 disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
-              title={lang === 'ru' ? 'Вернуть обычное расписание для этого дня недели' : 'Return to the normal schedule for this weekday'}
-            >
-              ↩️ {lang === 'ru' ? 'Обычное расписание' : 'Normal schedule'}
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => setWeeklyDialog('apply')}
-              disabled={reorder || editDay || weeklySaving}
-              className="rounded-lg border border-neutral-300 px-2.5 py-1 text-xs font-medium text-neutral-500 transition hover:bg-neutral-100 disabled:opacity-60 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800"
-              title={weeklyLabel}
-            >
-              🔁 {lang === 'ru' ? 'Повторять еженедельно' : 'Repeat weekly'}
-            </button>
-          )}
-          {weeklySnapshot?.enabled && (
-            <span className="text-[11px] text-emerald-600 dark:text-emerald-400">
-              {lang === 'ru' ? 'Недельный снимок активен' : 'Weekly snapshot active'}
-            </span>
-          )}
+        <div className="-mx-4 flex items-center justify-between border-t border-neutral-200/70 px-4 pt-2 dark:border-neutral-800/70">
+          <div className="flex items-center gap-2">
+            {reorder && (
+              <button
+                type="button"
+                onClick={() => setReorder(false)}
+                className="rounded-lg bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-neutral-950 transition hover:bg-emerald-400"
+              >
+                ✓ {t('common.reorderDone')}
+              </button>
+            )}
+            {editDay && (
+              <button
+                type="button"
+                onClick={() => setEditDay(false)}
+                className="rounded-lg bg-emerald-500 px-2.5 py-1 text-xs font-semibold text-neutral-950 transition hover:bg-emerald-400"
+              >
+                ✓ {t('today.editDayDone')}
+              </button>
+            )}
+            {weeklySnapshot?.enabled && (
+              <span className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium">
+                {lang === 'ru' ? '🔁 Недельный снимок' : '🔁 Weekly snapshot'}
+              </span>
+            )}
+            {mood && (
+              <span className="text-xs">
+                {mood === 'procrastination' ? '😤 Прокрастинация' : '💥 Выгорание'}
+              </span>
+            )}
+          </div>
 
           <div className="relative ml-auto">
             <button
               type="button"
               onClick={() => setMoodMenuOpen((v) => !v)}
-              className={`flex items-center justify-center rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
-                mood
-                  ? mood === 'procrastination'
-                    ? 'border-amber-400 bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400'
-                    : 'border-red-400 bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-400'
-                  : 'border-neutral-300 text-neutral-500 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-400 dark:hover:bg-neutral-800'
+              className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium transition ${
+                moodMenuOpen || reorder || editDay || mood
+                  ? 'border-emerald-500/60 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'
+                  : 'border-neutral-300 text-neutral-600 hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800'
               }`}
+              title={lang === 'ru' ? 'Действия' : 'Actions'}
             >
-              {mood === 'procrastination' ? '😤' : mood === 'burnout' ? '💥' : '🙂'}
+              {mood === 'procrastination' ? '😤' : mood === 'burnout' ? '💥' : null}
+              <span className="text-sm tracking-widest font-bold">⋯</span>
             </button>
+
             {moodMenuOpen && (
               <>
-                <div className="fixed inset-0 z-10" onClick={() => setMoodMenuOpen(false)} />
-                <div className="absolute right-0 z-20 mt-1 w-48 overflow-hidden rounded-xl border border-neutral-200 bg-white shadow-lg dark:border-neutral-800 dark:bg-neutral-900">
-                  <div className="p-2 flex flex-col gap-1">
+                <div className="fixed inset-0 z-40" onClick={() => setMoodMenuOpen(false)} />
+                <div className="absolute right-0 z-50 mt-1 w-56 overflow-hidden rounded-xl border border-neutral-200 bg-white p-1.5 shadow-2xl backdrop-blur-md dark:border-neutral-800 dark:bg-neutral-900 animate-pop">
+                  {items.length > 1 && (
                     <button
-                      onClick={async () => {
-                        if (!user) return
+                      type="button"
+                      onClick={() => {
                         setMoodMenuOpen(false)
-                        await setDayMood(user.id, date, 'procrastination')
-                        setMood('procrastination')
-                        reload()
+                        setReorder((v) => !v)
+                        setEditDay(false)
                       }}
-                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
                     >
-                      <span className={mood === 'procrastination' ? 'font-semibold text-amber-600 dark:text-amber-400' : ''}>
-                        {t('mood.procrastination')}
-                      </span>
+                      <span>🔀</span>
+                      <span>{reorder ? t('common.reorderDone') : t('common.reorder')}</span>
                     </button>
+                  )}
+
+                  {items.length > 0 && (
                     <button
-                      onClick={async () => {
-                        if (!user) return
+                      type="button"
+                      onClick={() => {
                         setMoodMenuOpen(false)
-                        await setDayMood(user.id, date, 'burnout')
-                        setMood('burnout')
-                        reload()
+                        setEditDay((v) => !v)
+                        setReorder(false)
                       }}
-                      className="flex items-center gap-2 rounded-lg px-2 py-1.5 text-sm transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
                     >
-                      <span className={mood === 'burnout' ? 'font-semibold text-red-600 dark:text-red-400' : ''}>
-                        {t('mood.burnout')}
-                      </span>
+                      <span>✏️</span>
+                      <span>{editDay ? t('today.editDayDone') : t('today.editDay')}</span>
                     </button>
-                    {mood && (
-                      <button
-                        onClick={async () => {
-                          if (!user) return
-                          setMoodMenuOpen(false)
-                          await clearDayMood(user.id, date)
-                          setMood(null)
-                          setMoodNote(null)
-                          reload()
-                        }}
-                        className="mt-1 border-t border-neutral-200 pt-1 text-center text-xs text-neutral-500 hover:text-neutral-700 dark:border-neutral-800 dark:hover:text-neutral-300"
-                      >
-                        {t('mood.clear')}
-                      </button>
-                    )}
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoodMenuOpen(false)
+                      setTemplatesOpen(true)
+                    }}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                  >
+                    <span>📋</span>
+                    <span>{lang === 'ru' ? 'Шаблоны' : 'Templates'}</span>
+                  </button>
+
+                  {weeklySnapshot?.enabled ? (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoodMenuOpen(false)
+                        setWeeklyDialog('clear')
+                      }}
+                      disabled={weeklySaving}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 disabled:opacity-60 dark:hover:bg-neutral-800"
+                    >
+                      <span>↩️</span>
+                      <span>{lang === 'ru' ? 'Обычное расписание' : 'Normal schedule'}</span>
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMoodMenuOpen(false)
+                        setWeeklyDialog('apply')
+                      }}
+                      disabled={reorder || editDay || weeklySaving}
+                      title={weeklyLabel}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium transition hover:bg-neutral-100 disabled:opacity-60 dark:hover:bg-neutral-800"
+                    >
+                      <span>🔁</span>
+                      <span>{lang === 'ru' ? 'Повторять еженедельно' : 'Repeat weekly'}</span>
+                    </button>
+                  )}
+
+                  <div className="my-1 border-t border-neutral-200/80 dark:border-neutral-800/80" />
+
+                  <div className="px-2.5 py-1 text-[11px] font-semibold text-neutral-400">
+                    {lang === 'ru' ? 'Настроение дня' : 'Day Mood'}
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!user) return
+                      setMoodMenuOpen(false)
+                      await setDayMood(user.id, date, 'procrastination')
+                      setMood('procrastination')
+                      reload()
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition ${
+                      mood === 'procrastination'
+                        ? 'bg-amber-500/15 font-semibold text-amber-700 dark:text-amber-300'
+                        : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                    }`}
+                  >
+                    <span>😤</span>
+                    <span>{t('mood.procrastination')}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!user) return
+                      setMoodMenuOpen(false)
+                      await setDayMood(user.id, date, 'burnout')
+                      setMood('burnout')
+                      reload()
+                    }}
+                    className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-xs transition ${
+                      mood === 'burnout'
+                        ? 'bg-red-500/15 font-semibold text-red-700 dark:text-red-300'
+                        : 'hover:bg-neutral-100 dark:hover:bg-neutral-800'
+                    }`}
+                  >
+                    <span>💥</span>
+                    <span>{t('mood.burnout')}</span>
+                  </button>
+
+                  {mood && (
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        if (!user) return
+                        setMoodMenuOpen(false)
+                        await clearDayMood(user.id, date)
+                        setMood(null)
+                        setMoodNote(null)
+                        reload()
+                      }}
+                      className="mt-1 flex w-full items-center justify-center rounded-lg py-1 text-center text-xs text-neutral-400 hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                    >
+                      {t('mood.clear')}
+                    </button>
+                  )}
                 </div>
               </>
             )}

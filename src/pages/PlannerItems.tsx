@@ -14,6 +14,7 @@ import {
   saveItemsOrder,
   toggleHiddenToday,
   endTimeFromDuration,
+  durationBetweenTimes,
   formatDuration,
   PRIORITY_DOT,
   type PlannerItem,
@@ -287,8 +288,12 @@ export default function PlannerItems() {
     }
     setEditId(it.id)
     const dMin = it.duration_min
-    const useHours = dMin !== null && dMin >= 60 && dMin % 60 === 0
-    setDurationUnit(useHours ? 'hour' : 'min')
+    let savedUnit = localStorage.getItem(`nucleus:durationUnit:${it.id}`) as 'min' | 'hour' | null
+    if (!savedUnit) {
+      const useHours = dMin !== null && dMin >= 60 && dMin % 60 === 0
+      savedUnit = useHours ? 'hour' : 'min'
+    }
+    setDurationUnit(savedUnit)
     setForm({
       type: it.type,
       title: it.title,
@@ -301,7 +306,7 @@ export default function PlannerItems() {
       time_of_day: it.time_of_day,
       at_time_start: it.at_time_start ?? '',
       at_time_end: it.at_time_end ?? '',
-      duration_min: dMin !== null ? (useHours ? String(dMin / 60) : String(dMin)) : '',
+      duration_min: dMin !== null ? (savedUnit === 'hour' ? String(+(dMin / 60).toFixed(2)) : String(dMin)) : '',
       icon: it.icon ?? '',
       cue: it.cue ?? '',
       identity: it.identity ?? '',
@@ -367,9 +372,17 @@ export default function PlannerItems() {
         identity: isHabit ? form.identity.trim() || null : null,
         two_min: isHabit ? form.two_min.trim() || null : null,
       }
-      if (editId) await updateItem(user.id, editId, input)
-      else await createItem(user.id, input)
-      cancel()
+      if (editId) {
+        await updateItem(user.id, editId, input)
+        try {
+          localStorage.setItem(`nucleus:durationUnit:${editId}`, durationUnit)
+        } catch {}
+      } else {
+        const created = await createItem(user.id, input)
+        try {
+          localStorage.setItem(`nucleus:durationUnit:${created.id}`, durationUnit)
+        } catch {}
+      }cancel()
       await loadAll()
     } catch (e) {
       setError((e as Error).message || t('common.saveFailed'))
@@ -448,10 +461,21 @@ export default function PlannerItems() {
   const setStartTime = (value: string) => {
     setForm((f) => {
       const duration = durationFromForm(f.duration_min, durationUnit)
+      let nextEnd = f.at_time_end
+      let nextDuration = f.duration_min
+      if (duration && value) {
+        nextEnd = endTimeFromDuration(value, duration) || f.at_time_end
+      } else if (value && f.at_time_end) {
+        const diff = durationBetweenTimes(value, f.at_time_end)
+        if (diff !== null) {
+          nextDuration = durationUnit === 'hour' ? String(+(diff / 60).toFixed(2)) : String(diff)
+        }
+      }
       return {
         ...f,
         at_time_start: value,
-        at_time_end: duration ? endTimeFromDuration(value, duration) || f.at_time_end : f.at_time_end,
+        at_time_end: nextEnd,
+        duration_min: nextDuration,
       }
     })
   }
@@ -462,7 +486,24 @@ export default function PlannerItems() {
       return {
         ...f,
         duration_min: value,
-        at_time_end: duration && f.at_time_start ? endTimeFromDuration(f.at_time_start, duration) : f.at_time_end,
+        at_time_end: duration && f.at_time_start ? endTimeFromDuration(f.at_time_start, duration) || f.at_time_end : f.at_time_end,
+      }
+    })
+  }
+
+  const setEndTime = (value: string) => {
+    setForm((f) => {
+      let nextDuration = f.duration_min
+      if (f.at_time_start && value) {
+        const diff = durationBetweenTimes(f.at_time_start, value)
+        if (diff !== null) {
+          nextDuration = durationUnit === 'hour' ? String(+(diff / 60).toFixed(2)) : String(diff)
+        }
+      }
+      return {
+        ...f,
+        at_time_end: value,
+        duration_min: nextDuration,
       }
     })
   }
@@ -482,8 +523,6 @@ export default function PlannerItems() {
   // Форма добавления/редактирования. При добавлении показывается сверху,
   // при редактировании — встраивается прямо под нужным делом (см. ниже).
   const renderForm = () => {
-    const formDuration = durationFromForm(form.duration_min, durationUnit)
-    const hasDuration = formDuration !== null
     return (
       <div className={`${cardCls} animate-pop flex flex-col gap-3`}>
       <h2 className="text-base font-semibold">
@@ -716,7 +755,7 @@ export default function PlannerItems() {
               type="number"
               inputMode="decimal"
               step={durationUnit === 'hour' ? '0.25' : '1'}
-              min="0.1"
+              min={durationUnit === 'hour' ? '0.25' : '1'}
               max={durationUnit === 'hour' ? '24' : '1440'}
               value={form.duration_min}
               onChange={(e) => setDuration(e.target.value)}
@@ -734,20 +773,10 @@ export default function PlannerItems() {
         </div>
         <div>
           <label className={labelCls}>{t('items.timeEnd')}</label>
-          {hasDuration ? (
-            <div className="rounded-lg border border-dashed border-emerald-400/70 bg-emerald-50 px-3 py-2 text-sm font-medium text-emerald-800 dark:border-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-              {form.at_time_start
-                ? lang === 'en'
-                  ? fmtTime12(endTimeFromDuration(form.at_time_start, formDuration))
-                  : endTimeFromDuration(form.at_time_start, formDuration)
-                : t('items.durationSetStart')}
-            </div>
-          ) : (
-            <TimePicker
-              value={form.at_time_end}
-              onChange={(v) => setForm((f) => ({ ...f, at_time_end: v }))}
-            />
-          )}
+          <TimePicker
+            value={form.at_time_end}
+            onChange={setEndTime}
+          />
         </div>
       </div>
 

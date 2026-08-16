@@ -68,7 +68,6 @@ function App() {
       return '/'
     }
   })
-  const [restored, setRestored] = useState(false)
   // Пока идёт первичное решение «куда открыть» — показываем экран загрузки,
   // а не Дашборд. Снимается в useLayoutEffect ниже (мгновенно, до отрисовки).
   const [booting, setBooting] = useState(true)
@@ -87,28 +86,26 @@ function App() {
   const userId = user?.id
 
   // Мгновенное открытие последней вкладки (до первой отрисовки). Если на старте
-  // мы на корне '/', а в локальном кэше есть другая последняя вкладка — сразу
+  // мы на корне '/' или '/index.html', а в локальном кэше есть другая последняя вкладка — сразу
   // уводим туда через replace, ещё до paint. Так пользователь не видит вспышку
-  // Дашборда с последующим перескоком. БД (ниже) синхронизирует кэш и остаётся
-  // источником правды между устройствами.
+  // Дашборда с последующим перескоком.
   useLayoutEffect(() => {
-    // Уже загрузились один раз — больше НИКОГДА не трогаем маршрут
-    // автоматически, иначе ломается ручное переключение вкладок (см. didBoot).
     if (didBoot.current) return
     if (!userId) {
-      // Сессия ещё грузится — не финализируем boot, дождёмся userId.
       setBooting(false)
       return
     }
-    // Есть пользователь — это и есть единственный холодный старт: помечаем сразу.
     didBoot.current = true
     try {
       const cached = localStorage.getItem(LAST_PATH_KEY)
+      const current = window.location.pathname
+      const isInitialRoute = current === '/' || current === '/index.html' || current === ''
       if (
         cached &&
         cached !== '/login' &&
         cached !== '/' &&
-        window.location.pathname === '/'
+        cached !== '/index.html' &&
+        isInitialRoute
       ) {
         navigate(cached, { replace: true })
       }
@@ -118,13 +115,9 @@ function App() {
     setBooting(false)
   }, [userId, navigate])
 
-  // Восстановление последней открытой страницы — ИСТОЧНИК ПРАВДЫ ТОЛЬКО БАЗА
-  // ДАННЫХ (app_settings.last_path). localStorage больше НЕ используется: это
-  // даёт одинаковое поведение на телефоне и компьютере и убирает баг, когда
-  // мобильный браузер очищает локальное хранилище и вкладка не восстанавливалась.
+  // Загрузка резервного last_path из БД для устройств, где ещё нет локального кэша.
   useEffect(() => {
     if (!userId) return
-    // Только один раз за загрузку (см. комментарий к didRestore выше).
     if (didRestore.current) return
     didRestore.current = true
     let active = true
@@ -137,58 +130,46 @@ function App() {
           .eq('user_id', userId)
           .maybeSingle()
         if (error) {
-          // Чаще всего это кеш схемы PostgREST: колонка last_path ещё не видна REST API.
           console.warn('[last_path] ошибка чтения из БД:', error.message)
         }
         const dbPath = (data as { last_path?: string } | null)?.last_path
-        if (active && dbPath && dbPath !== '/login') {
+        if (active && dbPath && dbPath !== '/login' && dbPath !== '/index.html') {
           setLastPath(dbPath)
-          // Обновляем ТОЛЬКО локальный кэш (для мгновенного редиректа при
-          // следующем холодном старте) и fallback для 404. Автоматический
-          // navigate здесь убран намеренно: единственный boot-редирект делает
-          // useLayoutEffect выше (из локального кэша), а любые более поздние
-          // переходы полностью в руках пользователя — иначе асинхронный ответ БД
-          // мог «перебить» ручное переключение вкладки (баг с FinLit).
           try {
-            localStorage.setItem(LAST_PATH_KEY, dbPath)
+            if (!localStorage.getItem(LAST_PATH_KEY)) {
+              localStorage.setItem(LAST_PATH_KEY, dbPath)
+            }
           } catch {
             // кэш недоступен — не критично
           }
         }
       } catch (e) {
         console.warn('[last_path] сбой восстановления:', e)
-      } finally {
-        if (active) setRestored(true)
       }
     })()
 
     return () => {
       active = false
     }
-  }, [userId, navigate])
+  }, [userId])
 
-  // После восстановления сохраняем текущую страницу ТОЛЬКО в БД (синхрон между
-  // устройствами). Локальное хранилище намеренно не трогаем.
+  // Сохраняем текущую страницу локально на этом устройстве и синхронизируем в БД.
   useEffect(() => {
-    if (!restored || !userId) return
     const p = location.pathname
-    if (p === '/login') return
+    if (!p || p === '/login' || p === '/index.html') return
     setLastPath(p)
     try {
       localStorage.setItem(LAST_PATH_KEY, p)
     } catch {
       // кэш недоступен — не критично
     }
-    void (async () => {
-      const { error } = await supabase.from('app_settings').upsert(
+    if (userId) {
+      void supabase.from('app_settings').upsert(
         { user_id: userId, last_path: p, updated_at: new Date().toISOString() },
         { onConflict: 'user_id' },
       )
-      if (error) {
-        console.warn('[last_path] ошибка сохранения в БД:', error.message)
-      }
-    })()
-  }, [restored, userId, location.pathname])
+    }
+  }, [userId, location.pathname])
 
   // Нативная авторизация: обновление токена при возврате в приложение и
   // обработка возврата из браузера после входа через Google (deep link).

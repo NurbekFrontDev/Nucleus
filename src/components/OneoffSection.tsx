@@ -222,6 +222,7 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
                   value={targetDate}
                   onChange={setTargetDate}
                   placeholder={t('oneoff.forToday')}
+                  placement="top"
                 />
               </div>
               {targetDate && (
