@@ -601,6 +601,8 @@ const UI: Record<Lang, Record<string, string>> = {
     'oneoff.forToday': 'На сегодня',
     'oneoff.empty': 'Разовых задач нет',
     'oneoff.cleaned': 'Удалено {n} завершённых задач (старше 7 дней)',
+    'oneoff.remindTime': 'Напомнить в…',
+    'oneoff.clearTime': 'Очистить время',
 
     'login.tagline': 'Личный помощник по финансам',
     'login.name': 'Ваше имя',
@@ -1440,6 +1442,8 @@ const UI: Record<Lang, Record<string, string>> = {
     'oneoff.forToday': 'Today',
     'oneoff.empty': 'No one-time tasks',
     'oneoff.cleaned': 'Removed {n} completed tasks (older than 7 days)',
+    'oneoff.remindTime': 'Remind at…',
+    'oneoff.clearTime': 'Clear time',
 
     'login.tagline': 'Personal financial assistant',
     'login.name': 'Your name',

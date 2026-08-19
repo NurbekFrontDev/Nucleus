@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
 import DatePicker from './DatePicker'
+import TimePicker, { fmt12 } from './TimePicker'
 import {
   type OneoffTask,
   loadOneoffTasks,
@@ -11,6 +12,7 @@ import {
   cleanupOldOneoff,
 } from '../lib/oneoff'
 import { onSyncEvent } from '../lib/realtimeSync'
+import { cancelOneoffNotification, rescheduleAll } from '../lib/notifications'
 
 // Component that displays one-time tasks on the PlannerToday screen
 export default function OneoffSection({ currentDay }: { currentDay: string }) {
@@ -22,6 +24,7 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
   const [loading, setLoading] = useState(true)
   const [title, setTitle] = useState('')
   const [targetDate, setTargetDate] = useState('')
+  const [reminderTime, setReminderTime] = useState('')
   const [filter, setFilter] = useState<'all' | 'today'>('all')
 
   const inputRef = useRef<HTMLInputElement>(null)
@@ -78,11 +81,19 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
     e.preventDefault()
     if (!user || !title.trim()) return
 
-    const newTask = await addOneoffTask(user.id, title.trim(), undefined, targetDate || undefined)
+    const newTask = await addOneoffTask(
+      user.id,
+      title.trim(),
+      undefined,
+      targetDate || undefined,
+      reminderTime || undefined,
+    )
     if (newTask) {
       setTasks((prev) => [newTask, ...prev])
       setTitle('')
       setTargetDate('')
+      setReminderTime('')
+      if (reminderTime) void rescheduleAll(user.id)
     }
   }
 
@@ -103,14 +114,21 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
         }),
     )
 
+    if (!isDone) {
+      // Отмечается как выполненная — сразу снимаем уведомление
+      void cancelOneoffNotification(task.id)
+    }
     await toggleOneoffDone(user.id, task.id, isDone)
+    void rescheduleAll(user.id)
   }
 
   const handleDelete = async (taskId: string) => {
     if (!user) return
 
     setTasks((prev) => prev.filter((t) => t.id !== taskId))
+    void cancelOneoffNotification(taskId)
     await deleteOneoffTask(user.id, taskId)
+    void rescheduleAll(user.id)
   }
 
   const pendingTasks = tasks.filter((t) => !t.done_at)
@@ -146,10 +164,15 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
         >
           {task.title}
         </p>
-        {task.target_date && (
-          <p className="text-[11px] text-neutral-400">
-            📅 {task.target_date}
-          </p>
+        {(task.target_date || task.reminder_time) && (
+          <div className="mt-0.5 flex flex-wrap items-center gap-2 text-[11px] text-neutral-400">
+            {task.target_date && <span>📅 {task.target_date}</span>}
+            {task.reminder_time && (
+              <span className="inline-flex items-center gap-0.5 font-medium text-emerald-600 dark:text-emerald-400">
+                🔔 {fmt12(task.reminder_time) || task.reminder_time}
+              </span>
+            )}
+          </div>
         )}
       </div>
       <button
@@ -202,7 +225,7 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
 
       {isOpen && (
         <div className="space-y-3">
-          <form onSubmit={handleAdd} className="flex flex-col gap-2 sm:flex-row">
+          <form onSubmit={handleAdd} className="flex flex-col gap-2">
             <input
               ref={inputRef}
               type="text"
@@ -214,10 +237,10 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
                 }, 300)
               }}
               placeholder={t('oneoff.placeholder')}
-              className="w-full flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
+              className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
             />
-            <div className="flex items-center gap-2">
-              <div className="flex-1 sm:w-44">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="min-w-[130px] flex-1 sm:max-w-[180px]">
                 <DatePicker
                   value={targetDate}
                   onChange={setTargetDate}
@@ -235,10 +258,27 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
                   ✕
                 </button>
               )}
+              <div className="min-w-[130px] flex-1 sm:max-w-[170px]">
+                <TimePicker
+                  value={reminderTime}
+                  onChange={setReminderTime}
+                  placeholder={t('oneoff.remindTime')}
+                />
+              </div>
+              {reminderTime && (
+                <button
+                  type="button"
+                  onClick={() => setReminderTime('')}
+                  className="rounded-lg p-2 text-xs text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200"
+                  title={t('oneoff.clearTime')}
+                >
+                  ✕
+                </button>
+              )}
               <button
                 type="submit"
                 disabled={!title.trim()}
-                className="shrink-0 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50"
+                className="ml-auto shrink-0 rounded-lg bg-emerald-500 px-4 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50"
               >
                 {t('oneoff.add')}
               </button>

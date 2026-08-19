@@ -35,7 +35,7 @@ function to24(h12: number, min: string, pm: boolean): string {
 }
 
 // '13:05' -> '1:05 PM'
-function fmt12(value: string): string {
+export function fmt12(value: string): string {
   const p = parse12(value)
   if (!p) return ''
   return `${p.h12}:${p.min} ${p.pm ? 'PM' : 'AM'}`

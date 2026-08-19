@@ -75,23 +75,28 @@ export async function saveNotifSettings(userId: string, s: NotifSettings): Promi
   )
 }
 
-// Диапазоны id: дела 100000+, вода 200000+. Так мы отличаем «наши» уведомления
+// Диапазоны id: дела 100000+, вода 200000+, разовые задачи 300000+. Так мы отличаем «наши» уведомления
 // от чужих и снимаем только их при пересборке расписания.
 const TASK_ID_BASE = 100000
 const WATER_ID_BASE = 200000
+const ONEOFF_ID_BASE = 300000
 
 // Стабильный id уведомления по id дела.
-// Раньше id выдавались по порядковому номеру в списке (TASK_ID_BASE + i):
-// один и тот же номер после пересборки мог достаться ДРУГОМУ делу, и точечно
-// снять напоминание по конкретному делу было невозможно. Теперь id считается
-// из id дела, поэтому напоминание можно отменить сразу при отметке
-// «выполнено», не дожидаясь полной пересборки расписания.
 function taskNotifId(itemId: string): number {
   let h = 0
   for (let i = 0; i < itemId.length; i++) {
     h = (h * 31 + itemId.charCodeAt(i)) % 90000
   }
   return TASK_ID_BASE + h
+}
+
+// Стабильный id уведомления для разовой задачи.
+export function oneoffNotifId(taskId: string): number {
+  let h = 0
+  for (let i = 0; i < taskId.length; i++) {
+    h = (h * 31 + taskId.charCodeAt(i)) % 90000
+  }
+  return ONEOFF_ID_BASE + h
 }
 
 // Канал напоминаний с нашим звуком (без вибрации — вибрация только у Помодоро).
@@ -181,6 +186,17 @@ export async function cancelItemNotification(itemId: string): Promise<void> {
   }
 }
 
+// Точечно снимает напоминание по разовой задаче.
+export async function cancelOneoffNotification(taskId: string): Promise<void> {
+  if (!Capacitor.isNativePlatform()) return
+  try {
+    const { LocalNotifications } = await import('@capacitor/local-notifications')
+    await LocalNotifications.cancel({ notifications: [{ id: oneoffNotifId(taskId) }] })
+  } catch {
+    // уведомления не критичны
+  }
+}
+
 // Единая точка «статус дела изменился».
 // Вызывается из planner.ts при ЛЮБОЙ отметке (экран «Сегодня», окно дня,
 // окно привычки, дашборд), поэтому напоминание по выполненному делу больше
@@ -197,7 +213,7 @@ export async function onItemStatusChanged(
   await rescheduleAll(userId)
 }
 
-// Пересобирает все локальные уведомления (дела + вода) на сегодня.
+// Пересобирает все локальные уведомления (дела + вода + разовые задачи) на сегодня.
 // Вызывать при старте и после сохранения настроек уведомлений.
 export async function rescheduleAll(userId: string): Promise<void> {
   if (!Capacitor.isNativePlatform()) return
@@ -208,7 +224,7 @@ export async function rescheduleAll(userId: string): Promise<void> {
 
     await ensureReminderChannel()
 
-    // Снимаем ранее запланированные наши уведомления (id из наших диапазонов).
+    // Снимаем ранее запланированные наши уведомления (id из наших диапазонов: 100000+).
     const pending = await LocalNotifications.getPending()
     const toCancel = pending.notifications.filter((n) => n.id >= TASK_ID_BASE)
     if (toCancel.length) {
@@ -252,6 +268,44 @@ export async function rescheduleAll(userId: string): Promise<void> {
       } catch {
         // список дел не критичен для остальных уведомлений
       }
+    }
+
+    // Разовые задачи с установленным временем напоминания (не завершённые)
+    try {
+      const { loadOneoffTasks } = await import('./oneoff')
+      const oneoffTasks = await loadOneoffTasks(userId)
+      let oCount = 0
+      for (const ot of oneoffTasks) {
+        if (ot.done_at || !ot.reminder_time) continue
+        const taskDate = ot.target_date || todayStr()
+        const [yStr, mStr, dStr] = taskDate.split('-')
+        const [hStr, minStr] = ot.reminder_time.split(':')
+        if (!yStr || !mStr || !dStr || !hStr || !minStr) continue
+        const remDate = new Date(
+          Number(yStr),
+          Number(mStr) - 1,
+          Number(dStr),
+          Number(hStr),
+          Number(minStr),
+          0,
+          0,
+        )
+        if (remDate.getTime() <= now) continue
+
+        notifications.push({
+          id: oneoffNotifId(ot.id),
+          title: `📌 ${ot.title}`,
+          body: 'Напоминание о разовой задаче',
+          schedule: { at: remDate, allowWhileIdle: true },
+          channelId: REMINDER_CHANNEL_ID,
+          sound: REMINDER_SOUND,
+          extra: { kind: 'oneoff', path: '/planner' },
+        })
+        oCount++
+        if (oCount >= 50) break
+      }
+    } catch {
+      // разовые задачи не критичны для остальных уведомлений
     }
 
     // Вода: каждые N часов в окне from..to.
