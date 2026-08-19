@@ -557,6 +557,18 @@ export async function saveWeeklyDaySnapshot(
   items: PlannerItem[],
 ): Promise<PlannerWeeklyDaySnapshot> {
   const weekday = isoWeekday(dateStr)
+
+  // Дедупликация элементов перед сохранением снимка
+  const uniqueItems: PlannerItem[] = []
+  const seenTitles = new Set<string>()
+  for (const it of items) {
+    const key = it.title.trim().toLowerCase()
+    if (!seenTitles.has(key)) {
+      seenTitles.add(key)
+      uniqueItems.push(it)
+    }
+  }
+
   const { data: headerData, error: headerError } = await supabase
     .from('planner_weekly_day_snapshots')
     .insert({ user_id: userId, weekday, effective_from: dateStr, enabled: true })
@@ -574,7 +586,7 @@ export async function saveWeeklyDaySnapshot(
     }),
     created_at: (headerData as { created_at?: string }).created_at ?? new Date().toISOString(),
   }
-  const rows: PlannerWeeklyDaySnapshotItem[] = items.map((item, index) => ({
+  const rows: PlannerWeeklyDaySnapshotItem[] = uniqueItems.map((item, index) => ({
     item_id: item.id,
     title: item.title,
     note: item.note,
@@ -757,15 +769,66 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
   // а прямые правки конкретной даты всё ещё получают высший приоритет.
   if (weeklySnapshot?.enabled) {
     const allById = new Map(all.map((item) => [item.id, item]))
-    const snapshotItemIds = new Set(weeklySnapshot.items.map((item) => item.item_id))
-    const snapshotItems = weeklySnapshot.items
+    const allByTitle = new Map(all.map((item) => [item.title.trim().toLowerCase(), item]))
+
+    // Дедупликация элементов снимка по названию
+    const seenSnapshotTitles = new Set<string>()
+    const uniqueSnapshotItems = weeklySnapshot.items.filter((item) => {
+      const key = item.title.trim().toLowerCase()
+      if (seenSnapshotTitles.has(key)) return false
+      seenSnapshotTitles.add(key)
+      return true
+    })
+
+    const snapshotItemIds = new Set(uniqueSnapshotItems.map((item) => item.item_id))
+    const snapshotTitles = new Set(uniqueSnapshotItems.map((item) => item.title.trim().toLowerCase()))
+
+    const snapshotItems = uniqueSnapshotItems
       .map((snapshotItem) => {
-        const original = allById.get(snapshotItem.item_id)
-        const directOverride = ovMap.get(snapshotItem.item_id)
-        if (!original || directOverride?.hidden) return null
-        if (original.archived && original.repeat_rule !== 'none' && !loggedIds.has(original.id) && !directOverride) return null
+        const original =
+          allById.get(snapshotItem.item_id) ||
+          allByTitle.get(snapshotItem.title.trim().toLowerCase())
+        const directOverride = original ? ovMap.get(original.id) : null
+        if (directOverride?.hidden) return null
+        if (
+          original &&
+          original.archived &&
+          original.repeat_rule !== 'none' &&
+          !loggedIds.has(original.id) &&
+          !directOverride
+        )
+          return null
+
+        const baseItem: PlannerItem = original
+          ? { ...original }
+          : {
+              id: snapshotItem.item_id,
+              user_id: userId,
+              title: snapshotItem.title,
+              note: snapshotItem.note,
+              type: 'task',
+              repeat_rule: 'none',
+              weekdays: [],
+              time_of_day: snapshotItem.time_of_day,
+              at_time_start: snapshotItem.at_time_start,
+              at_time_end: snapshotItem.at_time_end,
+              duration_min: snapshotItem.duration_min,
+              priority: snapshotItem.priority,
+              important: snapshotItem.important,
+              archived: false,
+              start_date: dateStr,
+              icon: snapshotItem.icon,
+              color: null,
+              sort_order: snapshotItem.sort_order,
+              schedule_changed_at: null,
+              cue: null,
+              identity: null,
+              two_min: null,
+              hidden_today: false,
+            }
+
         return applyDateOverride({
-          ...original,
+          ...baseItem,
           title: snapshotItem.title,
           note: snapshotItem.note,
           icon: snapshotItem.icon,
@@ -781,18 +844,33 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
       .filter((item): item is PlannerItem => item !== null)
 
     // Разовые дела, дела с отметками за сегодня или с прямыми правками даты
-    // не должны исчезать при включённом недельном снимке.
+    // не должны исчезать при включённом недельном снимке (если они не входят в снимок ни по id, ни по названию).
     const directExtras = all
       .filter((item) => {
         if (snapshotItemIds.has(item.id)) return false
+        if (snapshotTitles.has(item.title.trim().toLowerCase())) return false
         const ov = ovMap.get(item.id)
         if (ov?.hidden) return false
-        if (ov || loggedIds.has(item.id)) return true
-        if (item.repeat_rule === 'none' && (!item.start_date || item.start_date === dateStr)) return true
+        if (item.repeat_rule === 'none' && (!item.start_date || item.start_date === dateStr))
+          return true
+        if (loggedIds.has(item.id)) return true
         return false
       })
       .map(applyDateOverride)
-    occurring = [...snapshotItems, ...directExtras]
+
+    // Итоговая дедупликация списка дня по названию и id
+    const seenFinalTitles = new Set<string>()
+    const seenFinalIds = new Set<string>()
+    const combined: PlannerItem[] = []
+    for (const it of [...snapshotItems, ...directExtras]) {
+      const tKey = it.title.trim().toLowerCase()
+      if (!seenFinalTitles.has(tKey) && !seenFinalIds.has(it.id)) {
+        seenFinalTitles.add(tKey)
+        seenFinalIds.add(it.id)
+        combined.push(it)
+      }
+    }
+    occurring = combined
   }
 
   // Ручной порядок дня (если задавали перетаскиванием) имеет приоритет.

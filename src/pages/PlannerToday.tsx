@@ -369,6 +369,7 @@ export default function PlannerToday() {
   const saveAsWeeklyDay = async () => {
     if (!user || weeklySaving) return
     setWeeklySaving(true)
+    setWeeklyDialog(null)
     try {
       const snapshot = await saveWeeklyDaySnapshot(user.id, date, items)
       setWeeklySnapshot(snapshot)
@@ -379,9 +380,6 @@ export default function PlannerToday() {
         sections,
         weeklySnapshot: snapshot,
       })
-      setWeeklyDialog(null)
-      // Если меняли именно сегодня, напоминания должны немедленно получить
-      // новый состав/время дел, а не ждать следующего входа в приложение.
       if (date === today) void rescheduleAll(user.id)
     } catch (e) {
       setError((e as Error).message)
@@ -393,10 +391,10 @@ export default function PlannerToday() {
   const clearWeeklyDay = async () => {
     if (!user || weeklySaving) return
     setWeeklySaving(true)
+    setWeeklyDialog(null)
     try {
       await clearWeeklyDaySnapshot(user.id, date)
       setWeeklySnapshot(null)
-      setWeeklyDialog(null)
       await reload()
       if (date === today) void rescheduleAll(user.id)
     } catch (e) {
