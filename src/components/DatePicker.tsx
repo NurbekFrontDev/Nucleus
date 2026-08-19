@@ -11,7 +11,7 @@ type Props = {
 }
 
 const triggerCls =
-  'flex w-full items-center justify-between gap-2 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-left text-sm outline-none transition hover:border-emerald-500 focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
+  'flex w-full items-center justify-between gap-1.5 rounded-lg border border-neutral-300 bg-white px-2.5 py-1.5 text-left text-xs sm:text-sm outline-none transition hover:border-emerald-500 focus-within:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
 
 const WEEKDAYS_RU = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const WEEKDAYS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -61,7 +61,7 @@ export default function DatePicker({ value, onChange, placeholder, placement = '
       }
       setPopupStyle({
         left: `${leftOffset}px`,
-        maxWidth: 'calc(100vw - 16px)',
+        width: `${popWidth}px`,
       })
     } else {
       if (placement === 'top') setOpenUpwards(true)
@@ -98,12 +98,35 @@ export default function DatePicker({ value, onChange, placeholder, placement = '
 
   return (
     <div ref={ref} className="relative">
-      <button type="button" onClick={openCal} className={triggerCls}>
-        <span className={value ? '' : 'text-neutral-400'}>
-          {value ? formatDateHuman(value) : placeholder ?? t('date.select')}
-        </span>
-        <span className="shrink-0 text-neutral-400">📅</span>
-      </button>
+      <div className={triggerCls}>
+        <button
+          type="button"
+          onClick={openCal}
+          className="flex min-w-0 flex-1 items-center gap-1.5 text-left outline-none"
+        >
+          <span className="shrink-0 text-xs text-neutral-400">📅</span>
+          <span
+            className={`min-w-0 flex-1 truncate whitespace-nowrap ${
+              value ? 'font-medium text-neutral-800 dark:text-neutral-100' : 'text-neutral-400'
+            }`}
+          >
+            {value ? formatDateHuman(value) : placeholder ?? t('date.select')}
+          </span>
+        </button>
+        {value && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation()
+              onChange('')
+            }}
+            className="shrink-0 rounded p-0.5 text-xs text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+            title="Очистить"
+          >
+            ✕
+          </button>
+        )}
+      </div>
       {show && (
         <div
           style={popupStyle}
