@@ -185,8 +185,8 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
             className="w-full rounded-lg border border-neutral-300 bg-white px-3 py-1.5 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
             autoFocus
           />
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="min-w-[130px] flex-1 sm:w-40">
+          <div className="grid grid-cols-2 gap-2 md:flex md:items-center md:gap-2">
+            <div className="min-w-0 md:w-52">
               <DatePicker
                 value={editDate}
                 onChange={setEditDate}
@@ -194,19 +194,19 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
                 placement="top"
               />
             </div>
-            <div className="min-w-[130px] flex-1 sm:w-36">
+            <div className="min-w-0 md:w-32">
               <TimePicker
                 value={editTime}
                 onChange={setEditTime}
                 placeholder={t('oneoff.remindTime')}
               />
             </div>
-            <div className="ml-auto flex items-center gap-1.5">
+            <div className="col-span-2 flex items-center justify-end gap-1.5 md:col-span-1 md:ml-auto">
               <button
                 type="button"
                 onClick={() => handleSaveEdit(task.id)}
                 disabled={!editTitle.trim()}
-                className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50"
+                className="flex-1 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50 md:flex-initial"
               >
                 ✓ {t('common.save')}
               </button>
@@ -339,8 +339,8 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
               placeholder={t('oneoff.placeholder')}
               className="w-full flex-1 rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950"
             />
-            <div className="flex items-center gap-1.5 sm:gap-2">
-              <div className="min-w-0 flex-1 sm:w-44">
+            <div className="grid grid-cols-2 gap-2 md:flex md:items-center md:gap-2">
+              <div className="min-w-0 md:w-52">
                 <DatePicker
                   value={targetDate}
                   onChange={setTargetDate}
@@ -348,21 +348,21 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
                   placement="top"
                 />
               </div>
-              <div className="min-w-0 flex-1 sm:w-36">
+              <div className="min-w-0 md:w-32">
                 <TimePicker
                   value={reminderTime}
                   onChange={setReminderTime}
                   placeholder={t('oneoff.remindTime')}
                 />
               </div>
-              <button
-                type="submit"
-                disabled={!title.trim()}
-                className="shrink-0 rounded-lg bg-emerald-500 px-3.5 py-2 text-xs font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50 sm:text-sm"
-              >
-                {t('oneoff.add')}
-              </button>
             </div>
+            <button
+              type="submit"
+              disabled={!title.trim()}
+              className="w-full rounded-lg bg-emerald-500 py-2 text-sm font-medium text-neutral-950 transition hover:bg-emerald-400 disabled:opacity-50 md:w-auto md:shrink-0 md:px-4"
+            >
+              {t('oneoff.add')}
+            </button>
           </form>
 
           {loading ? (
