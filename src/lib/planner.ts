@@ -720,8 +720,22 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
 
   // Отбираем дела дня и накладываем правки поверх шаблона.
   // Порядок приоритета: шаблон -> правка дня недели -> правка конкретной даты.
+  // Защита от дубликатов: если в дне уже есть активное повторяющееся дело с таким названием,
+  // исключаем дублирующее разовое дело с тем же названием.
+  const recurringTitlesInDay = new Set(
+    all
+      .filter((it) => it.repeat_rule !== 'none' && keepInDay(it))
+      .map((it) => it.title.trim().toLowerCase()),
+  )
+
   let occurring = all
-    .filter(keepInDay)
+    .filter((it) => {
+      if (!keepInDay(it)) return false
+      if (it.repeat_rule === 'none' && recurringTitlesInDay.has(it.title.trim().toLowerCase())) {
+        return false
+      }
+      return true
+    })
     .map((it) => {
       const wd = wdMap.get(it.id)
       const base = wd
@@ -1204,47 +1218,39 @@ export type ItemInput = {
 
 // Загружает все НЕ архивированные дела пользователя (для списка «Мои дела»).
 export async function loadAllItems(userId: string): Promise<PlannerItem[]> {
-  // Одноразовый фикс v0.1.21 → v0.1.22: заархивировать обратно разовые дела,
-  // которые были ошибочно разархивированы массовым авто-восстановлением.
-  // Такое дело считается «неправильно восстановленным», если:
-  //   - repeat_rule = 'none', archived = false
-  //   - start_date < сегодня  (старое завершённое дело, не нужно в списке)
-  //   - по нему есть лог done за его start_date (т.е. оно было выполнено)
-  // Если у дела нет лога — значит пользователь его действительно хочет видеть.
-  const FIX_KEY = 'nucleus_fix_rearchive_oneoffs_v1'
+  // Авто-очистка дубликатов, созданных старой версией шаблонов:
+  // Если есть разовое дело (repeat_rule='none'), у которого название совпадает с
+  // существующей активной повторяющейся привычкой/делом (repeat_rule!='none'):
+  // архивируем такой дубликат, чтобы он не засорял «Мои дела» и «Сегодня».
   try {
-    if (!localStorage.getItem(FIX_KEY)) {
-      localStorage.setItem(FIX_KEY, '1')
-      const today = todayStr()
-      // Найти все разовые дела, у которых start_date < сегодня и archived = false
-      const { data: staleOneoffs } = await supabase
-        .from('planner_items')
-        .select('id, start_date')
-        .eq('user_id', userId)
-        .eq('repeat_rule', 'none')
-        .eq('archived', false)
-        .lt('start_date', today)
-      if (staleOneoffs && staleOneoffs.length > 0) {
-        // Проверить, у каких из них есть лог «done» за их start_date
-        const ids = staleOneoffs.map((o) => o.id)
-        const { data: logs } = await supabase
-          .from('planner_logs')
-          .select('item_id')
-          .eq('user_id', userId)
-          .eq('status', 'done')
-          .in('item_id', ids)
-        const loggedIds = new Set((logs ?? []).map((l) => l.item_id))
-        // Архивируем те, у которых есть лог (значит они были выполнены)
-        const toArchive = staleOneoffs.filter((o) => loggedIds.has(o.id)).map((o) => o.id)
-        if (toArchive.length > 0) {
-          await supabase
-            .from('planner_items')
-            .update({ archived: true })
-            .in('id', toArchive)
-        }
+    const { data: allItems } = await supabase
+      .from('planner_items')
+      .select('id, title, repeat_rule, archived')
+      .eq('user_id', userId)
+      .eq('archived', false)
+    if (allItems && allItems.length > 0) {
+      const recurringTitles = new Set(
+        allItems
+          .filter((i) => i.repeat_rule && i.repeat_rule !== 'none')
+          .map((i) => i.title.trim().toLowerCase()),
+      )
+      const duplicateIds = allItems
+        .filter(
+          (i) =>
+            i.repeat_rule === 'none' &&
+            recurringTitles.has(i.title.trim().toLowerCase()),
+        )
+        .map((i) => i.id)
+      if (duplicateIds.length > 0) {
+        await supabase
+          .from('planner_items')
+          .update({ archived: true })
+          .in('id', duplicateIds)
       }
     }
-  } catch {}
+  } catch (e) {
+    console.warn('Deduplication cleanup error:', e)
+  }
 
   const { data, error } = await safePlannerItemsQuery((cols) =>
     supabase
@@ -2459,8 +2465,9 @@ export async function saveDayTemplate(
   }
 }
 
-// Применяет шаблон к дате: ЗАМЕНЯЕТ все разовые дела этого дня на дела
-// из шаблона. Повторяющиеся привычки не трогаются.
+// Применяет шаблон к дате: настраивает конкретный день (planner_day_overrides и planner_day_order)
+// так, чтобы на этот день отображался ровно тот набор дел с тем временем и порядком,
+// который сохранён в шаблоне. НЕ создаёт дубликатов и НЕ трогает «Мои дела».
 export async function applyDayTemplate(
   userId: string,
   templateId: string,
@@ -2478,76 +2485,145 @@ export async function applyDayTemplate(
   const tItems = (data ?? []) as DayTemplateItem[]
   if (tItems.length === 0) return 0
 
-  // Архивируем все разовые задачи на этот день (они были добавлены
-  // из предыдущего шаблона или вручную как разовые).
-  // Используем .update({ archived: true }), так как на удаление (DELETE) RLS политики могут быть ограничены.
-  const { error: delErr } = await supabase
+  // 1. Загружаем все не архивированные дела пользователя из planner_items
+  const { data: itemsData, error: itemsErr } = await safePlannerItemsQuery((cols) =>
+    supabase
+      .from('planner_items')
+      .select(cols)
+      .eq('user_id', userId)
+      .eq('archived', false),
+  )
+  if (itemsErr) throw itemsErr
+  const allMasterItems = (itemsData ?? []) as unknown as PlannerItem[]
+
+  // Индекс активных мастер-дел по названию
+  const masterByTitle = new Map<string, PlannerItem>()
+  for (const m of allMasterItems) {
+    masterByTitle.set(m.title.trim().toLowerCase(), m)
+  }
+
+  // 2. Очищаем старые персональные правки и ручной порядок именно для этого дня
+  await Promise.all([
+    supabase.from('planner_day_overrides').delete().eq('user_id', userId).eq('date', dateStr),
+    supabase.from('planner_day_order').delete().eq('user_id', userId).eq('date', dateStr),
+  ])
+
+  // Архивируем любые старые разовые дубликаты, которые могли быть созданы старой версией
+  await supabase
     .from('planner_items')
     .update({ archived: true })
     .eq('user_id', userId)
     .eq('start_date', dateStr)
     .eq('repeat_rule', 'none')
-    .eq('archived', false)
-  if (delErr) throw delErr
 
-  const rows = tItems.map((it) => ({
-    user_id: userId,
-    title: it.title,
-    note: it.note,
-    type: 'task' as PlannerType,
-    repeat_rule: 'none' as RepeatRule,
-    weekdays: [] as number[],
-    time_of_day: it.time_of_day,
-    at_time_start: it.at_time_start,
-    at_time_end: it.at_time_end,
-    duration_min: it.duration_min,
-    priority: it.priority,
-    start_date: dateStr,
-    icon: it.icon,
-    important: it.important,
-    cue: null,
-    identity: null,
-    two_min: null,
-    sort_order: it.sort_order,
-  }))
-  const { error: insErr } = await supabase.from('planner_items').insert(rows)
-  if (insErr) throw insErr
-  return rows.length
+  // 3. Формируем списки overrides и порядка
+  const matchedMasterIds = new Set<string>()
+  const overridesToInsert: Record<string, unknown>[] = []
+  const ordersToInsert: { user_id: string; item_id: string; date: string; sort_order: number }[] = []
+
+  for (let i = 0; i < tItems.length; i++) {
+    const tItem = tItems[i]
+    const key = tItem.title.trim().toLowerCase()
+    let master = masterByTitle.get(key)
+
+    // Если дело не найдено среди активных мастер-дел (например, было удалено) —
+    // создаём разовое дело для этой даты
+    if (!master) {
+      const { data: newMaster, error: newErr } = await supabase
+        .from('planner_items')
+        .insert({
+          user_id: userId,
+          title: tItem.title,
+          note: tItem.note,
+          icon: tItem.icon,
+          type: 'task',
+          repeat_rule: 'none',
+          weekdays: [],
+          time_of_day: tItem.time_of_day,
+          at_time_start: tItem.at_time_start,
+          at_time_end: tItem.at_time_end,
+          duration_min: tItem.duration_min,
+          priority: tItem.priority,
+          important: tItem.important,
+          start_date: dateStr,
+          sort_order: i + 1,
+        })
+        .select(ITEM_COLS)
+        .single()
+      if (!newErr && newMaster) {
+        master = newMaster as unknown as PlannerItem
+        masterByTitle.set(key, master)
+      }
+    }
+
+    if (master) {
+      matchedMasterIds.add(master.id)
+
+      overridesToInsert.push({
+        user_id: userId,
+        item_id: master.id,
+        date: dateStr,
+        title: tItem.title,
+        icon: tItem.icon,
+        time_of_day: tItem.time_of_day,
+        at_time_start: tItem.at_time_start,
+        at_time_end: tItem.at_time_end,
+        duration_min: tItem.duration_min,
+        priority: tItem.priority,
+        note: tItem.note,
+        frozen: false,
+        hidden: false,
+        updated_at: new Date().toISOString(),
+      })
+
+      ordersToInsert.push({
+        user_id: userId,
+        item_id: master.id,
+        date: dateStr,
+        sort_order: i + 1,
+      })
+    }
+  }
+
+  // 4. Для всех остальных активных дел, которые НЕ вошли в шаблон,
+  // ставим hidden = true только на этот день (чтобы не отображались на эту дату)
+  for (const m of allMasterItems) {
+    if (!matchedMasterIds.has(m.id)) {
+      overridesToInsert.push({
+        user_id: userId,
+        item_id: m.id,
+        date: dateStr,
+        hidden: true,
+        frozen: false,
+        updated_at: new Date().toISOString(),
+      })
+    }
+  }
+
+  // 5. Записываем overrides и order
+  if (overridesToInsert.length > 0) {
+    const { error: ovErr } = await supabase
+      .from('planner_day_overrides')
+      .upsert(overridesToInsert, { onConflict: 'user_id,item_id,date' })
+    if (ovErr) throw ovErr
+  }
+
+  if (ordersToInsert.length > 0) {
+    const { error: ordErr } = await supabase
+      .from('planner_day_order')
+      .upsert(ordersToInsert, { onConflict: 'user_id,item_id,date' })
+    if (ordErr) throw ordErr
+  }
+
+  return tItems.length
 }
 
-// Удаляет шаблон и архивирует связанные разовые задачи из «Мои дела».
-// Совпадение определяется по title + at_time_start + at_time_end среди
-// разовых задач (repeat_rule='none'). Вручную созданные повторяющиеся
-// задачи не затрагиваются.
+// Удаляет шаблон. НЕ затрагивает дела в «Мои дела» или в днях.
 export async function deleteDayTemplate(userId: string, templateId: string): Promise<void> {
-  // 1. Загружаем задачи шаблона ДО удаления (каскад удалит их).
-  const { data: tplItems } = await supabase
-    .from('planner_day_template_items')
-    .select('title, at_time_start, at_time_end')
-    .eq('user_id', userId)
-    .eq('template_id', templateId)
-
-  // 2. Удаляем сам шаблон (каскад удалит planner_day_template_items).
   const { error } = await supabase
     .from('planner_day_templates')
     .delete()
     .eq('user_id', userId)
     .eq('id', templateId)
   if (error) throw error
-
-  // 3. Архивируем совпадающие разовые задачи из planner_items.
-  if (tplItems && tplItems.length > 0) {
-    for (const ti of tplItems as { title: string; at_time_start: string | null; at_time_end: string | null }[]) {
-      let q = supabase
-        .from('planner_items')
-        .update({ archived: true })
-        .eq('user_id', userId)
-        .eq('title', ti.title)
-        .eq('repeat_rule', 'none')
-        .eq('archived', false)
-      if (ti.at_time_start) q = q.eq('at_time_start', ti.at_time_start)
-      if (ti.at_time_end) q = q.eq('at_time_end', ti.at_time_end)
-      await q
-    }
-  }
 }
