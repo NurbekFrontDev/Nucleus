@@ -15,7 +15,6 @@ import {
 } from '../lib/oneoff'
 import { onSyncEvent } from '../lib/realtimeSync'
 import { cancelOneoffNotification, rescheduleAll } from '../lib/notifications'
-import { playTaskDoneSound } from '../lib/sound'
 
 // Component that displays one-time tasks on the PlannerToday screen
 export default function OneoffSection({ currentDay }: { currentDay: string }) {
@@ -154,7 +153,6 @@ export default function OneoffSection({ currentDay }: { currentDay: string }) {
     )
 
     if (!isDone) {
-      playTaskDoneSound()
       void cancelOneoffNotification(task.id)
     }
     await toggleOneoffDone(user.id, task.id, isDone)

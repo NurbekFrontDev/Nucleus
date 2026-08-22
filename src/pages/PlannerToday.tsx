@@ -39,7 +39,6 @@ import {
 } from '../lib/planner'
 import EnergyCharacter from '../components/EnergyCharacter'
 import { hapticTap } from '../lib/native'
-import { playTaskDoneSound } from '../lib/sound'
 import { rescheduleAll } from '../lib/notifications'
 import ConfirmDialog from '../components/ConfirmDialog'
 import OneoffSection from '../components/OneoffSection'
@@ -486,9 +485,6 @@ export default function PlannerToday() {
     if (!user) return
     void hapticTap()
     const currentlyDone = isDone(item.id)
-    if (!currentlyDone) {
-      playTaskDoneSound()
-    }
     const optimistic: PlannerLog = {
       id: 'tmp',
       item_id: item.id,

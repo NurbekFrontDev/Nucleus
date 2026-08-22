@@ -292,7 +292,7 @@ export default function DayTemplateSheet({ userId, date, items, onClose, onAppli
                           {ru ? 'В шаблоне нет дел' : 'No items'}
                         </p>
                       ) : (
-                        <div className="space-y-1.5">
+                        <div className="space-y-2">
                           {cached.map((ci, cidx) => {
                             const dur = formatDuration(ci.duration_min, lang === 'en' ? 'en' : 'ru')
                             const tme = timeLabel(ci)
@@ -300,21 +300,46 @@ export default function DayTemplateSheet({ userId, date, items, onClose, onAppli
                             return (
                               <div
                                 key={cidx}
-                                className="flex items-center justify-between gap-2 rounded-lg bg-white px-2.5 py-1.5 text-xs shadow-2xs dark:bg-neutral-900"
+                                className="flex flex-col gap-1.5 rounded-xl border border-neutral-200/70 bg-white p-2.5 shadow-2xs dark:border-neutral-800/80 dark:bg-neutral-900"
                               >
-                                <div className="flex min-w-0 items-center gap-1.5">
-                                  <span className="text-[10px] text-neutral-400">#{cidx + 1}</span>
-                                  {ci.icon && <span>{ci.icon}</span>}
-                                  <span className="truncate font-medium text-neutral-800 dark:text-neutral-200">
+                                {/* Строка 1: Номер, иконка и полное название задачи */}
+                                <div className="flex items-start gap-2">
+                                  <span className="mt-0.5 shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400">
+                                    #{cidx + 1}
+                                  </span>
+                                  {ci.icon && (
+                                    <span className="shrink-0 text-sm leading-none">{ci.icon}</span>
+                                  )}
+                                  <span className="flex-1 break-words text-sm font-medium text-neutral-800 dark:text-neutral-100">
                                     {ci.title}
                                   </span>
                                 </div>
-                                <div className="flex shrink-0 items-center gap-1.5 text-[10px] text-neutral-400">
-                                  {tme && <span>🕒 {tme}</span>}
-                                  {dur && <span>⏱️ {dur}</span>}
-                                  <span className="rounded bg-neutral-100 px-1 py-0.5 dark:bg-neutral-800">
+
+                                {/* Строка 2: Время, длительность, секция и атрибуты */}
+                                <div className="flex flex-wrap items-center gap-1.5 pl-7 text-[11px] text-neutral-500 dark:text-neutral-400">
+                                  {tme && (
+                                    <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100/90 px-1.5 py-0.5 font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
+                                      🕒 {tme}
+                                    </span>
+                                  )}
+                                  {dur && (
+                                    <span className="inline-flex items-center gap-1 rounded-md bg-neutral-100/90 px-1.5 py-0.5 font-medium text-neutral-700 dark:bg-neutral-800 dark:text-neutral-300">
+                                      ⏱️ {dur}
+                                    </span>
+                                  )}
+                                  <span className="inline-flex items-center rounded-md bg-neutral-100/80 px-1.5 py-0.5 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
                                     {sectionLabel(ci.time_of_day)}
                                   </span>
+                                  {ci.important && (
+                                    <span className="inline-flex items-center gap-0.5 text-amber-500" title="Важно">
+                                      ⭐
+                                    </span>
+                                  )}
+                                  {ci.note && (
+                                    <span className="w-full break-words text-[11px] italic text-neutral-400 dark:text-neutral-500">
+                                      💬 {ci.note}
+                                    </span>
+                                  )}
                                 </div>
                               </div>
                             )
