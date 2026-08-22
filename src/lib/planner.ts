@@ -2509,6 +2509,23 @@ export async function loadDayTemplates(userId: string): Promise<DayTemplate[]> {
   )
 }
 
+// Загружает элементы конкретного шаблона дня с их свойствами и порядком.
+export async function loadDayTemplateItems(
+  userId: string,
+  templateId: string,
+): Promise<DayTemplateItem[]> {
+  const { data, error } = await supabase
+    .from('planner_day_template_items')
+    .select(
+      'title, note, icon, time_of_day, at_time_start, at_time_end, duration_min, priority, important, sort_order',
+    )
+    .eq('user_id', userId)
+    .eq('template_id', templateId)
+    .order('sort_order', { ascending: true })
+  if (error) throw error
+  return (data ?? []) as DayTemplateItem[]
+}
+
 // Сохраняет текущий день как шаблон: снимок переданных дел (название/
 // иконка/секция/время/важность/заметка). Отметки выполнения не входят.
 export async function saveDayTemplate(
