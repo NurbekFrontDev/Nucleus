@@ -15,6 +15,7 @@ import {
   type PlannerDayOverride,
 } from '../lib/planner'
 import { rescheduleAll } from '../lib/notifications'
+import { playTaskDoneSound } from '../lib/sound'
 
 // Окно одного дня (П-6). Открывается по нажатию на день в календаре.
 // Снизу на телефоне, по центру на компьютере. Показывает прогресс дня и
@@ -87,6 +88,9 @@ export default function DayPanel({ userId, date, onClose, onChanged }: Props) {
   // Отметить/снять выполнение задачи (оптимистично, с откатом при ошибке).
   const onToggle = async (item: PlannerItem) => {
     const currentlyDone = isDone(item.id)
+    if (!currentlyDone) {
+      playTaskDoneSound()
+    }
     setLogs((prev) => {
       const next = { ...prev }
       if (currentlyDone) delete next[item.id]
