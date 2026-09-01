@@ -11,7 +11,7 @@ type AuthContextType = {
   isOffline: boolean
   loading: boolean
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
-  signUp: (email: string, password: string) => Promise<{ error: string | null }>
+  signUp: (email: string, password: string, name?: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
 }
 
@@ -94,14 +94,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setOfflineUserFallback(null)
           
           const pendingName = localStorage.getItem('nucleus:pendingName')
-          if (pendingName) {
+          const metaName =
+            (newSession.user.user_metadata?.user_name as string | undefined) ||
+            (newSession.user.user_metadata?.full_name as string | undefined) ||
+            (newSession.user.user_metadata?.name as string | undefined)
+          const resolvedName =
+            (pendingName && pendingName.trim()) || (metaName && metaName.trim()) || null
+
+          if (resolvedName) {
             void (async () => {
               try {
                 await supabase.from('app_settings').upsert(
-                  { user_id: newSession.user.id, user_name: pendingName, updated_at: new Date().toISOString() },
-                  { onConflict: 'user_id' }
+                  { user_id: newSession.user.id, user_name: resolvedName, updated_at: new Date().toISOString() },
+                  { onConflict: 'user_id' },
                 )
-                localStorage.removeItem('nucleus:pendingName')
+                if (pendingName) localStorage.removeItem('nucleus:pendingName')
               } catch {
                 // не критично
               }
@@ -157,8 +164,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error?.message ?? null }
   }
 
-  const signUp = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signUp({ email, password })
+  const signUp = async (email: string, password: string, name?: string) => {
+    const { data, error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: {
+        data: name ? { user_name: name, full_name: name, name } : undefined,
+      },
+    })
+    if (!error && data.user && name) {
+      try {
+        await supabase.from('app_settings').upsert(
+          { user_id: data.user.id, user_name: name, updated_at: new Date().toISOString() },
+          { onConflict: 'user_id' },
+        )
+      } catch {
+        // не критично
+      }
+    }
     return { error: error?.message ?? null }
   }
 

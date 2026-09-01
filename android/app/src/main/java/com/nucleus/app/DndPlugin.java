@@ -78,10 +78,9 @@ public class DndPlugin extends Plugin {
         }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                // Разрешаем звонки (в т.ч. повторные) от кого угодно. На Android 9+
-                // дополнительно оставляем системные звуки (громкость и сигналы самого
-                // телефона), будильники и медиа — их DND не приглушает. Молчат только
-                // уведомления и сообщения.
+                // Разрешаем звонки (в т.ч. повторные) от кого угодно, а также VoIP звонки
+                // мессенджеров (WhatsApp, Telegram и др.). На Android 9+ оставляем системные
+                // звуки, будильники и медиа. На Android 11+ разрешаем приоритетные разговоры.
                 int categories = NotificationManager.Policy.PRIORITY_CATEGORY_CALLS
                         | NotificationManager.Policy.PRIORITY_CATEGORY_REPEAT_CALLERS;
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -89,10 +88,30 @@ public class DndPlugin extends Plugin {
                             | NotificationManager.Policy.PRIORITY_CATEGORY_MEDIA
                             | NotificationManager.Policy.PRIORITY_CATEGORY_SYSTEM;
                 }
-                NotificationManager.Policy policy = new NotificationManager.Policy(
-                        categories,
-                        NotificationManager.Policy.PRIORITY_SENDERS_ANY,
-                        0);
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    categories |= NotificationManager.Policy.PRIORITY_CATEGORY_CONVERSATIONS;
+                }
+
+                NotificationManager.Policy policy;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    policy = new NotificationManager.Policy(
+                            categories,
+                            NotificationManager.Policy.PRIORITY_SENDERS_ANY,
+                            NotificationManager.Policy.PRIORITY_SENDERS_ANY,
+                            0,
+                            NotificationManager.Policy.CONVERSATION_SENDERS_ANYONE);
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                    policy = new NotificationManager.Policy(
+                            categories,
+                            NotificationManager.Policy.PRIORITY_SENDERS_ANY,
+                            NotificationManager.Policy.PRIORITY_SENDERS_ANY,
+                            0);
+                } else {
+                    policy = new NotificationManager.Policy(
+                            categories,
+                            NotificationManager.Policy.PRIORITY_SENDERS_ANY,
+                            NotificationManager.Policy.PRIORITY_SENDERS_ANY);
+                }
                 n.setNotificationPolicy(policy);
             }
             n.setInterruptionFilter(NotificationManager.INTERRUPTION_FILTER_PRIORITY);

@@ -43,6 +43,7 @@ import { rescheduleAll } from '../lib/notifications'
 import ConfirmDialog from '../components/ConfirmDialog'
 import OneoffSection from '../components/OneoffSection'
 import { onSyncEvent } from '../lib/realtimeSync'
+import { playTaskCompleteSound } from '../lib/sound'
 
 // Экран «Сегодня» (П-3 + П-6): один экран с переключателем вида в правом
 // верхнем углу — Сегодня / Неделя / Месяц / Год (как в TickTick).
@@ -229,7 +230,7 @@ export default function PlannerToday() {
           loadDaySections(user.id),
           loadDayMood(user.id, date),
         ])
-        const streaks = await loadHabitStreaks(user.id, day.items)
+        const streaks = await loadHabitStreaks(user.id, day.items, date)
         if (!active) return
         setItems(day.items)
         setLogs(day.logs)
@@ -330,7 +331,7 @@ export default function PlannerToday() {
         loadDay(user.id, date),
         loadDayMood(user.id, date),
       ])
-      const streaks = await loadHabitStreaks(user.id, day.items)
+      const streaks = await loadHabitStreaks(user.id, day.items, date)
       setItems(day.items)
       setLogs(day.logs)
       setOverrides(day.overrides)
@@ -485,6 +486,9 @@ export default function PlannerToday() {
     if (!user) return
     void hapticTap()
     const currentlyDone = isDone(item.id)
+    if (!currentlyDone) {
+      playTaskCompleteSound()
+    }
     const optimistic: PlannerLog = {
       id: 'tmp',
       item_id: item.id,
@@ -499,13 +503,18 @@ export default function PlannerToday() {
       else next[item.id] = optimistic
       return next
     })
-      if (item.repeat_rule !== 'none') {
-        setHabitStreaks((prev) => {
+    if (item.repeat_rule !== 'none') {
+      setHabitStreaks((prev) => {
+        const next = { ...prev }
+        if (currentlyDone) {
+          delete next[item.id]
+        } else {
           const cur = prev[item.id] || 0
-          const next = currentlyDone ? Math.max(0, cur - 1) : cur + 1
-          return { ...prev, [item.id]: next }
-        })
-      }
+          next[item.id] = cur + 1
+        }
+        return next
+      })
+    }
     try {
       const newLog = await toggleDone(user.id, item.id, date, currentlyDone)
       setLogs((prev) => {
@@ -514,6 +523,16 @@ export default function PlannerToday() {
         else delete next[item.id]
         return next
       })
+      if (item.repeat_rule !== 'none') {
+        void loadHabitStreaks(user.id, [item], date).then((s) => {
+          setHabitStreaks((prev) => {
+            const next = { ...prev }
+            if (s[item.id]) next[item.id] = s[item.id]
+            else delete next[item.id]
+            return next
+          })
+        })
+      }
       // Отметка выполнения влияет на напоминания: пересобираем расписание,
       // чтобы по выполненному делу уведомление не приходило (и вернулось,
       // если снять галочку). Актуально только для сегодняшнего дня.
@@ -528,9 +547,13 @@ export default function PlannerToday() {
       })
       if (item.repeat_rule !== 'none') {
         setHabitStreaks((prev) => {
-          const cur = prev[item.id] || 0
-          const next = currentlyDone ? cur + 1 : Math.max(0, cur - 1)
-          return { ...prev, [item.id]: next }
+          const next = { ...prev }
+          if (currentlyDone) {
+            next[item.id] = (prev[item.id] || 0) + 1
+          } else {
+            delete next[item.id]
+          }
+          return next
         })
       }
       setError((e as Error).message)
@@ -728,7 +751,7 @@ export default function PlannerToday() {
             {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
           </div>
         </div>
-        {item.repeat_rule !== 'none' && (habitStreaks[item.id] ?? 0) > 0 && (
+        {item.repeat_rule !== 'none' && isDone(item.id) && (habitStreaks[item.id] ?? 0) > 0 && (
           <span className="shrink-0 rounded-full bg-orange-50 px-2 py-0.5 text-xs font-bold text-orange-600 dark:bg-orange-950/40 dark:text-orange-400">
             🔥 {habitStreaks[item.id]}
           </span>

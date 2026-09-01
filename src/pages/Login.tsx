@@ -22,17 +22,23 @@ export default function Login() {
     setError(null)
     setInfo(null)
     setBusy(true)
-    const fn = mode === 'signin' ? signIn : signUp
-    const { error } = await fn(email, password)
-    setBusy(false)
-    if (error) {
-      setError(error)
-      return
-    }
     if (mode === 'signup') {
       localStorage.setItem('nucleus:pendingName', name)
+      const { error } = await signUp(email, password, name)
+      setBusy(false)
+      if (error) {
+        setError(error)
+        return
+      }
       setInfo(t('login.created'))
       setMode('signin')
+    } else {
+      const { error } = await signIn(email, password)
+      setBusy(false)
+      if (error) {
+        setError(error)
+        return
+      }
     }
   }
 

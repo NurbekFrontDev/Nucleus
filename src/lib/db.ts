@@ -61,12 +61,28 @@ export async function saveDisplayCurrencyToCloud(userId: string, code: string): 
 }
 
 export async function loadUserName(userId: string): Promise<string | null> {
-  const { data } = await supabase
-    .from('app_settings')
-    .select('user_name')
-    .eq('user_id', userId)
-    .maybeSingle()
-  return (data as { user_name?: string } | null)?.user_name ?? null
+  try {
+    const { data } = await supabase
+      .from('app_settings')
+      .select('user_name')
+      .eq('user_id', userId)
+      .maybeSingle()
+    const name = (data as { user_name?: string } | null)?.user_name
+    if (name && name.trim()) return name.trim()
+
+    // Если в app_settings имени ещё нет, проверяем auth user metadata
+    const { data: authData } = await supabase.auth.getUser()
+    const meta = authData?.user?.user_metadata
+    const metaName = meta?.user_name || meta?.full_name || meta?.name
+    if (typeof metaName === 'string' && metaName.trim()) {
+      const clean = metaName.trim()
+      void saveUserName(userId, clean).catch(() => {})
+      return clean
+    }
+  } catch {
+    // не критично
+  }
+  return null
 }
 
 export async function saveUserName(userId: string, name: string): Promise<void> {

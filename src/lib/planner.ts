@@ -790,6 +790,7 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
           allByTitle.get(snapshotItem.title.trim().toLowerCase())
         const directOverride = original ? ovMap.get(original.id) : null
         if (directOverride?.hidden) return null
+        if (original && isItemHiddenOnDate(original, dateStr)) return null
         if (
           original &&
           original.archived &&
@@ -849,6 +850,7 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
       .filter((item) => {
         if (snapshotItemIds.has(item.id)) return false
         if (snapshotTitles.has(item.title.trim().toLowerCase())) return false
+        if (isItemHiddenOnDate(item, dateStr)) return false
         const ov = ovMap.get(item.id)
         if (ov?.hidden) return false
         if (item.repeat_rule === 'none' && (!item.start_date || item.start_date === dateStr))
@@ -1683,15 +1685,48 @@ export async function loadHabits(userId: string): Promise<HabitStats[]> {
   return habits.map((h) => computeHabitStats(h, byItem.get(h.id) ?? {}))
 }
 
-// Загружает текущий стрик для всех активных дел и привычек.
+// Считает исторический стрик привычки строго на указанную дату (asOfDate).
+// Если на asOfDate отметки 'done' нет (или пропуск/не отмечено) — возвращает 0.
+// Если на asOfDate дело выполнено — считает непрерывную цепочку выполненных дней назад от asOfDate.
+export function computeHabitStreakAsOfDate(
+  item: PlannerItem,
+  statusByDate: Record<string, LogStatus>,
+  asOfDate: string,
+): number {
+  if (statusByDate[asOfDate] !== 'done') {
+    return 0
+  }
+
+  const dates = scheduledDatesDesc(item, asOfDate, 400) // даты от asOfDate назад
+  let streak = 0
+
+  for (const date of dates) {
+    const st = statusByDate[date]
+    if (st === 'done') {
+      streak++
+      continue
+    }
+    if (st === 'skip') {
+      // Заморозка сохраняет текущую серию
+      continue
+    }
+    // Первый же пропущенный или невыполненный день прерывает серию назад
+    break
+  }
+
+  return streak
+}
+
+// Загружает стрик для всех активных дел и привычек строго на указанную дату (по умолчанию сегодня).
 export async function loadHabitStreaks(
   userId: string,
   items: PlannerItem[],
+  asOfDate: string = todayStr(),
 ): Promise<Record<string, number>> {
   const activeItems = items.filter((i) => !i.archived && i.repeat_rule !== 'none')
   if (activeItems.length === 0) return {}
 
-  const cutoff = addDays(todayStr(), -400)
+  const cutoff = addDays(asOfDate, -400)
   const itemIds = activeItems.map((h) => h.id)
 
   const { data: logs, error } = await supabase
@@ -1700,6 +1735,7 @@ export async function loadHabitStreaks(
     .eq('user_id', userId)
     .in('item_id', itemIds)
     .gte('date', cutoff)
+    .lte('date', asOfDate)
 
   if (error) throw error
 
@@ -1715,9 +1751,9 @@ export async function loadHabitStreaks(
 
   const result: Record<string, number> = {}
   for (const it of activeItems) {
-    const stats = computeHabitStats(it, byItem.get(it.id) ?? {})
-    if (stats.current > 0) {
-      result[it.id] = stats.current
+    const streak = computeHabitStreakAsOfDate(it, byItem.get(it.id) ?? {}, asOfDate)
+    if (streak > 0) {
+      result[it.id] = streak
     }
   }
   return result
@@ -2031,7 +2067,7 @@ function resolveSummaryDayItems(
     .map((snapshotItem) => {
       const original = allById.get(snapshotItem.item_id)
       const override = overrides.get(snapshotItem.item_id)
-      if (!original || original.archived || override?.hidden) return null
+      if (!original || original.archived || override?.hidden || isItemHiddenOnDate(original, dateStr)) return null
       return applyDatePriority({
         ...original,
         priority: snapshotItem.priority,
@@ -2043,7 +2079,13 @@ function resolveSummaryDayItems(
 
   // Прямая правка даты намеренно может добавить дело поверх недельного снимка.
   const directExtras = all
-    .filter((item) => !snapshotItemIds.has(item.id) && !!overrides.get(item.id) && !overrides.get(item.id)?.hidden)
+    .filter(
+      (item) =>
+        !snapshotItemIds.has(item.id) &&
+        !isItemHiddenOnDate(item, dateStr) &&
+        !!overrides.get(item.id) &&
+        !overrides.get(item.id)?.hidden,
+    )
     .map(applyDatePriority)
   return [...snapshotItems, ...directExtras]
 }
