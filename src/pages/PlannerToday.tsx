@@ -43,7 +43,6 @@ import { rescheduleAll } from '../lib/notifications'
 import ConfirmDialog from '../components/ConfirmDialog'
 import OneoffSection from '../components/OneoffSection'
 import { onSyncEvent } from '../lib/realtimeSync'
-import { playTaskCompleteSound } from '../lib/sound'
 
 // Экран «Сегодня» (П-3 + П-6): один экран с переключателем вида в правом
 // верхнем углу — Сегодня / Неделя / Месяц / Год (как в TickTick).
@@ -135,6 +134,7 @@ export default function PlannerToday() {
   const [weeklySaving, setWeeklySaving] = useState(false)
   const [overrides, setOverrides] = useState<Record<string, PlannerDayOverride>>(cachedDay?.overrides ?? {})
   const [habitStreaks, setHabitStreaks] = useState<Record<string, number>>(cachedDay?.streaks ?? {})
+  const [habitNextStreaks, setHabitNextStreaks] = useState<Record<string, number>>({})
   const [stripSummaries, setStripSummaries] = useState<Record<string, DaySummary>>({})
   const [mood, setMood] = useState<DayMood | null>(cachedDay?.mood ?? null)
   const [moodNote, setMoodNote] = useState<string | null>(cachedDay?.moodNote ?? null)
@@ -237,7 +237,8 @@ export default function PlannerToday() {
         setOverrides(day.overrides)
         setSections(sec)
         setWeeklySnapshot(day.weeklySnapshot)
-        setHabitStreaks(streaks)
+        setHabitStreaks(streaks.current)
+        setHabitNextStreaks(streaks.nextIfDone)
         setMood(m?.mood ?? null)
         setMoodNote(m?.note ?? null)
         setError(null)
@@ -249,7 +250,7 @@ export default function PlannerToday() {
           weeklySnapshot: day.weeklySnapshot,
           mood: m?.mood ?? null,
           moodNote: m?.note ?? null,
-          streaks,
+          streaks: streaks.current,
         })
       } catch (e) {
         if (active) setError((e as Error).message)
@@ -336,7 +337,8 @@ export default function PlannerToday() {
       setLogs(day.logs)
       setOverrides(day.overrides)
       setWeeklySnapshot(day.weeklySnapshot)
-      setHabitStreaks(streaks)
+      setHabitStreaks(streaks.current)
+      setHabitNextStreaks(streaks.nextIfDone)
       setMood(m?.mood ?? null)
       setMoodNote(m?.note ?? null)
       writeCache(`planday:${user.id}:${date}`, {
@@ -347,7 +349,7 @@ export default function PlannerToday() {
         weeklySnapshot: day.weeklySnapshot,
         mood: m?.mood ?? null,
         moodNote: m?.note ?? null,
-        streaks,
+        streaks: streaks.current,
       })
     } catch (e) {
       setError((e as Error).message)
@@ -486,9 +488,6 @@ export default function PlannerToday() {
     if (!user) return
     void hapticTap()
     const currentlyDone = isDone(item.id)
-    if (!currentlyDone) {
-      playTaskCompleteSound()
-    }
     const optimistic: PlannerLog = {
       id: 'tmp',
       item_id: item.id,
@@ -509,8 +508,8 @@ export default function PlannerToday() {
         if (currentlyDone) {
           delete next[item.id]
         } else {
-          const cur = prev[item.id] || 0
-          next[item.id] = cur + 1
+          // Мгновенно отображаем точный расчетный стрик (например, 21), без промежуточных 1
+          next[item.id] = habitNextStreaks[item.id] || 1
         }
         return next
       })
@@ -527,10 +526,11 @@ export default function PlannerToday() {
         void loadHabitStreaks(user.id, [item], date).then((s) => {
           setHabitStreaks((prev) => {
             const next = { ...prev }
-            if (s[item.id]) next[item.id] = s[item.id]
+            if (s.current[item.id]) next[item.id] = s.current[item.id]
             else delete next[item.id]
             return next
           })
+          setHabitNextStreaks((prev) => ({ ...prev, ...s.nextIfDone }))
         })
       }
       // Отметка выполнения влияет на напоминания: пересобираем расписание,
@@ -549,7 +549,7 @@ export default function PlannerToday() {
         setHabitStreaks((prev) => {
           const next = { ...prev }
           if (currentlyDone) {
-            next[item.id] = (prev[item.id] || 0) + 1
+            next[item.id] = habitNextStreaks[item.id] || 1
           } else {
             delete next[item.id]
           }

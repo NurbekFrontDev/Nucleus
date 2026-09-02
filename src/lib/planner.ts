@@ -1685,46 +1685,62 @@ export async function loadHabits(userId: string): Promise<HabitStats[]> {
   return habits.map((h) => computeHabitStats(h, byItem.get(h.id) ?? {}))
 }
 
-// Считает исторический стрик привычки строго на указанную дату (asOfDate).
-// Если на asOfDate отметки 'done' нет (или пропуск/не отмечено) — возвращает 0.
-// Если на asOfDate дело выполнено — считает непрерывную цепочку выполненных дней назад от asOfDate.
-export function computeHabitStreakAsOfDate(
+export type HabitStreakData = {
+  current: Record<string, number>
+  nextIfDone: Record<string, number>
+}
+
+// Считает детальную информацию о стрике:
+// - current: фактический стрик на asOfDate (0 если дело не выполнено в этот день).
+// - nextIfDone: стрик, который моментально отображается при отметке выполнения (например, 21 если вчера было 20 дней подряд, или 1 если был перерыв).
+export function computeHabitStreakInfo(
   item: PlannerItem,
   statusByDate: Record<string, LogStatus>,
   asOfDate: string,
-): number {
-  if (statusByDate[asOfDate] !== 'done') {
-    return 0
-  }
+): { current: number; nextIfDone: number } {
+  const isDoneToday = statusByDate[asOfDate] === 'done'
 
-  const dates = scheduledDatesDesc(item, asOfDate, 400) // даты от asOfDate назад
-  let streak = 0
-
-  for (const date of dates) {
-    const st = statusByDate[date]
+  // allDates[0] — это сам asOfDate, allDates[1..] — предыдущие запланированные дни назад
+  const allDates = scheduledDatesDesc(item, asOfDate, 400)
+  let prevStreak = 0
+  for (let i = 1; i < allDates.length; i++) {
+    const d = allDates[i]
+    const st = statusByDate[d]
     if (st === 'done') {
-      streak++
+      prevStreak++
       continue
     }
     if (st === 'skip') {
       // Заморозка сохраняет текущую серию
       continue
     }
-    // Первый же пропущенный или невыполненный день прерывает серию назад
+    // Первый же пропуск прерывает стрик назад
     break
   }
 
-  return streak
+  const nextIfDone = prevStreak + 1
+  const current = isDoneToday ? nextIfDone : 0
+
+  return { current, nextIfDone }
 }
 
-// Загружает стрик для всех активных дел и привычек строго на указанную дату (по умолчанию сегодня).
+// Считает исторический стрик привычки строго на указанную дату (asOfDate).
+export function computeHabitStreakAsOfDate(
+  item: PlannerItem,
+  statusByDate: Record<string, LogStatus>,
+  asOfDate: string,
+): number {
+  return computeHabitStreakInfo(item, statusByDate, asOfDate).current
+}
+
+// Загружает стрики (текущий и предиктивный nextIfDone) для всех активных привычек на указанную дату.
 export async function loadHabitStreaks(
   userId: string,
   items: PlannerItem[],
   asOfDate: string = todayStr(),
-): Promise<Record<string, number>> {
+): Promise<HabitStreakData> {
   const activeItems = items.filter((i) => !i.archived && i.repeat_rule !== 'none')
-  if (activeItems.length === 0) return {}
+  if (activeItems.length === 0) return { current: {}, nextIfDone: {} }
 
   const cutoff = addDays(asOfDate, -400)
   const itemIds = activeItems.map((h) => h.id)
@@ -1749,14 +1765,14 @@ export async function loadHabitStreaks(
     m[l.date] = l.status
   }
 
-  const result: Record<string, number> = {}
+  const current: Record<string, number> = {}
+  const nextIfDone: Record<string, number> = {}
   for (const it of activeItems) {
-    const streak = computeHabitStreakAsOfDate(it, byItem.get(it.id) ?? {}, asOfDate)
-    if (streak > 0) {
-      result[it.id] = streak
-    }
+    const info = computeHabitStreakInfo(it, byItem.get(it.id) ?? {}, asOfDate)
+    if (info.current > 0) current[it.id] = info.current
+    if (info.nextIfDone > 0) nextIfDone[it.id] = info.nextIfDone
   }
-  return result
+  return { current, nextIfDone }
 }
 
 // Ставит/снимает статус привычки за день (done/skip); null -> убрать отметку.
