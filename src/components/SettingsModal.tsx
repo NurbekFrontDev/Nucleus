@@ -37,8 +37,14 @@ export default function SettingsModal({ onClose }: Props) {
   const onDesktop = isDesktop()
   const canPickDir = supportsFsAccess()
 
-  const [userName, setUserName] = useState('')
-  const [initialName, setInitialName] = useState('')
+  const [userName, setUserName] = useState(() => {
+    const uid = user?.id || (typeof localStorage !== 'undefined' ? localStorage.getItem('nucleus:offlineUserId') : null)
+    return uid && typeof localStorage !== 'undefined' ? localStorage.getItem('nucleus:userName:' + uid) || '' : ''
+  })
+  const [initialName, setInitialName] = useState(() => {
+    const uid = user?.id || (typeof localStorage !== 'undefined' ? localStorage.getItem('nucleus:offlineUserId') : null)
+    return uid && typeof localStorage !== 'undefined' ? localStorage.getItem('nucleus:userName:' + uid) || '' : ''
+  })
   const [nameSaving, setNameSaving] = useState(false)
   const [autostart, setAutostartState] = useState(false)
   const [backupAuto, setBackupAuto] = useState(false)

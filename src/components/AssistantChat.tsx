@@ -46,7 +46,10 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
   const { t, lang } = useLang()
 
   const [messages, setMessages] = useState<AiMessage[]>([])
-  const [userName, setUserName] = useState<string | null>(null)
+  const [userName, setUserName] = useState<string | null>(() => {
+    const uid = user?.id || (typeof localStorage !== 'undefined' ? localStorage.getItem('nucleus:offlineUserId') : null)
+    return uid && typeof localStorage !== 'undefined' ? localStorage.getItem('nucleus:userName:' + uid) : null
+  })
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [sending, setSending] = useState(false)
@@ -88,6 +91,13 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
   useEffect(() => {
     if (!user) return
     let active = true
+
+    // Мгновенная синхронная подгрузка из кэша
+    const cached = localStorage.getItem('nucleus:userName:' + user.id)
+    if (cached && active) {
+      setUserName(cached)
+    }
+
     ;(async () => {
       try {
         setLoading(true)
@@ -97,7 +107,7 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
         ])
         if (active) {
           setMessages(rows)
-          setUserName(name)
+          if (name) setUserName(name)
         }
       } catch (e) {
         if (active) setError((e as Error).message)

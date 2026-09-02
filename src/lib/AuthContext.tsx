@@ -94,26 +94,39 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setOfflineUserFallback(null)
           
           const pendingName = localStorage.getItem('nucleus:pendingName')
-          const metaName =
-            (newSession.user.user_metadata?.user_name as string | undefined) ||
-            (newSession.user.user_metadata?.full_name as string | undefined) ||
-            (newSession.user.user_metadata?.name as string | undefined)
-          const resolvedName =
-            (pendingName && pendingName.trim()) || (metaName && metaName.trim()) || null
-
-          if (resolvedName) {
-            localStorage.setItem('nucleus:userName:' + newSession.user.id, resolvedName)
+          if (pendingName && pendingName.trim()) {
+            const cleanPending = pendingName.trim()
+            localStorage.setItem('nucleus:userName:' + newSession.user.id, cleanPending)
+            localStorage.removeItem('nucleus:pendingName')
             void (async () => {
               try {
+                await supabase.auth.updateUser({
+                  data: {
+                    user_name: cleanPending,
+                    full_name: cleanPending,
+                    name: cleanPending,
+                  },
+                })
                 await supabase.from('app_settings').upsert(
-                  { user_id: newSession.user.id, user_name: resolvedName, updated_at: new Date().toISOString() },
+                  { user_id: newSession.user.id, user_name: cleanPending, updated_at: new Date().toISOString() },
                   { onConflict: 'user_id' },
                 )
-                if (pendingName) localStorage.removeItem('nucleus:pendingName')
               } catch {
                 // не критично
               }
             })()
+          } else {
+            // Если у пользователя ещё нет локально сохраненного имени, подтягиваем из метаданных
+            const currentSaved = localStorage.getItem('nucleus:userName:' + newSession.user.id)
+            if (!currentSaved || !currentSaved.trim()) {
+              const metaName =
+                (newSession.user.user_metadata?.user_name as string | undefined) ||
+                (newSession.user.user_metadata?.full_name as string | undefined) ||
+                (newSession.user.user_metadata?.name as string | undefined)
+              if (metaName && metaName.trim()) {
+                localStorage.setItem('nucleus:userName:' + newSession.user.id, metaName.trim())
+              }
+            }
           }
         }
         setLoading(false)
