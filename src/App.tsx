@@ -18,6 +18,7 @@ import UpdateDialog from './components/UpdateDialog'
 import { initPomoSync, type PomoSyncMessage } from './lib/pomoSync'
 import { startRealtimeSync, stopRealtimeSync, onSyncEvent } from './lib/realtimeSync'
 import { enableFocusDnd, disableFocusDnd } from './lib/dnd'
+import { syncUserNameFromCloud } from './lib/db'
 
 // Код-сплиттинг (А-9, шаг 3): страницы грузятся отдельными чанками по мере
 // перехода на них, а не одним большим бандлом при старте — это ускоряет первый
@@ -154,23 +155,36 @@ function App() {
     }
   }, [userId, navigate])
 
-  // Синхронизация пути в реальном времени при навигации на другом устройстве.
+  // Фоновая синхронизация имени пользователя при старте приложения
+  useEffect(() => {
+    if (!userId) return
+    void syncUserNameFromCloud(userId).catch(() => {})
+  }, [userId])
+
+  // Синхронизация пути и настроек в реальном времени при изменении на другом устройстве.
   // Только обновляем localStorage, НЕ навигируем автоматически (чтобы не мешать
   // текущей работе пользователя на этом устройстве). При следующем запуске —
   // приложение откроется на актуальном пути.
   useEffect(() => {
     return onSyncEvent(['app_settings'], (evt) => {
       if (evt.table === 'app_settings' && evt.new) {
-        const newPath = (evt.new as { last_path?: string }).last_path
-        if (newPath && typeof newPath === 'string' && newPath !== '/login' && newPath !== '/index.html' && newPath !== '/') {
-          setLastPath(newPath)
+        const d = evt.new as { last_path?: string; user_name?: string }
+        if (d.last_path && typeof d.last_path === 'string' && d.last_path !== '/login' && d.last_path !== '/index.html' && d.last_path !== '/') {
+          setLastPath(d.last_path)
           try {
-            localStorage.setItem(LAST_PATH_KEY, newPath)
+            localStorage.setItem(LAST_PATH_KEY, d.last_path)
           } catch {}
+        }
+        if (d.user_name && typeof d.user_name === 'string' && d.user_name.trim() && userId) {
+          const clean = d.user_name.trim()
+          try {
+            localStorage.setItem('nucleus:userName:' + userId, clean)
+          } catch {}
+          window.dispatchEvent(new CustomEvent('nucleus:userNameChanged', { detail: clean }))
         }
       }
     })
-  }, [])
+  }, [userId])
 
   // Сохраняем текущую страницу локально и синхронизируем в БД.
   // Пропускаем дефолтный '/' — это промежуточный маршрут при переключении вкладок,

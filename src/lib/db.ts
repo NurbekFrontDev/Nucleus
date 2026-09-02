@@ -62,35 +62,53 @@ export async function saveDisplayCurrencyToCloud(userId: string, code: string): 
 
 const USER_NAME_KEY_PREFIX = 'nucleus:userName:'
 
-/** Синхронизирует имя пользователя из облака (Auth user_metadata и app_settings). */
+/** Синхронизирует имя пользователя из облака (app_settings и Auth user_metadata). */
 export async function syncUserNameFromCloud(userId: string): Promise<string | null> {
-  try {
-    // 1. Проверяем Supabase Auth User Metadata (надежный глобальный синк)
-    const { data: authData } = await supabase.auth.getUser()
-    const meta = authData?.user?.user_metadata
-    const metaName = meta?.user_name || meta?.full_name || meta?.name
-    if (typeof metaName === 'string' && metaName.trim()) {
-      const clean = metaName.trim()
-      localStorage.setItem(USER_NAME_KEY_PREFIX + userId, clean)
-      return clean
-    }
+  let cloudName: string | null = null
 
-    // 2. Проверяем таблицу app_settings
+  // 1. Проверяем таблицу app_settings (прямой источник правды с CDC Realtime)
+  try {
     const { data } = await supabase
       .from('app_settings')
       .select('user_name')
       .eq('user_id', userId)
       .maybeSingle()
     const name = (data as { user_name?: string } | null)?.user_name
-    if (name && name.trim()) {
-      const clean = name.trim()
-      localStorage.setItem(USER_NAME_KEY_PREFIX + userId, clean)
-      return clean
+    if (name && typeof name === 'string' && name.trim()) {
+      cloudName = name.trim()
     }
   } catch {
     // не критично
   }
-  return localStorage.getItem(USER_NAME_KEY_PREFIX + userId) || null
+
+  // 2. Если в app_settings пусто, проверяем Supabase Auth User Metadata
+  if (!cloudName) {
+    try {
+      const { data: authData } = await supabase.auth.getUser()
+      const meta = authData?.user?.user_metadata
+      const metaName = meta?.user_name || meta?.full_name || meta?.name
+      if (typeof metaName === 'string' && metaName.trim()) {
+        cloudName = metaName.trim()
+      }
+    } catch {
+      // не критично
+    }
+  }
+
+  if (cloudName) {
+    const current = typeof localStorage !== 'undefined' ? localStorage.getItem(USER_NAME_KEY_PREFIX + userId) : null
+    if (current !== cloudName) {
+      if (typeof localStorage !== 'undefined') {
+        localStorage.setItem(USER_NAME_KEY_PREFIX + userId, cloudName)
+      }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('nucleus:userNameChanged', { detail: cloudName }))
+      }
+    }
+    return cloudName
+  }
+
+  return (typeof localStorage !== 'undefined' ? localStorage.getItem(USER_NAME_KEY_PREFIX + userId) : null) || null
 }
 
 /** Загружает имя пользователя: мгновенно из локального хранилища, затем из облака. */
