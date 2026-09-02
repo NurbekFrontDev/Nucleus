@@ -105,8 +105,18 @@ export default function AssistantChat({ onClose }: { onClose?: () => void }) {
         if (active) setLoading(false)
       }
     })()
+
+    const onNameChanged = (e: Event) => {
+      const custom = e as CustomEvent<string>
+      if (active && custom.detail) {
+        setUserName(custom.detail)
+      }
+    }
+    window.addEventListener('nucleus:userNameChanged', onNameChanged)
+
     return () => {
       active = false
+      window.removeEventListener('nucleus:userNameChanged', onNameChanged)
     }
   }, [user])
 

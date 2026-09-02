@@ -102,6 +102,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             (pendingName && pendingName.trim()) || (metaName && metaName.trim()) || null
 
           if (resolvedName) {
+            localStorage.setItem('nucleus:userName:' + newSession.user.id, resolvedName)
             void (async () => {
               try {
                 await supabase.from('app_settings').upsert(

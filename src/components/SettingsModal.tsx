@@ -70,8 +70,19 @@ export default function SettingsModal({ onClose }: Props) {
         setInitialName(name)
       }
     })
+
+    const onNameChanged = (e: Event) => {
+      const custom = e as CustomEvent<string>
+      if (active && custom.detail) {
+        setUserName(custom.detail)
+        setInitialName(custom.detail)
+      }
+    }
+    window.addEventListener('nucleus:userNameChanged', onNameChanged)
+
     return () => {
       active = false
+      window.removeEventListener('nucleus:userNameChanged', onNameChanged)
     }
   }, [user])
 
@@ -79,9 +90,10 @@ export default function SettingsModal({ onClose }: Props) {
     if (!user || !userName.trim()) return
     setNameSaving(true)
     try {
-      await saveUserName(user.id, userName.trim())
+      const clean = userName.trim()
+      await saveUserName(user.id, clean)
+      setInitialName(clean)
       showToast(lang === 'en' ? 'Name saved' : 'Имя сохранено')
-      setInitialName(userName.trim())
     } catch {
       showToast(lang === 'en' ? 'Failed to save name' : 'Ошибка сохранения')
     } finally {

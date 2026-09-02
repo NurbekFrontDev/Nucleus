@@ -60,36 +60,86 @@ export async function saveDisplayCurrencyToCloud(userId: string, code: string): 
   } catch { /* не критично */ }
 }
 
-export async function loadUserName(userId: string): Promise<string | null> {
+const USER_NAME_KEY_PREFIX = 'nucleus:userName:'
+
+/** Синхронизирует имя пользователя из облака (Auth user_metadata и app_settings). */
+export async function syncUserNameFromCloud(userId: string): Promise<string | null> {
   try {
+    // 1. Проверяем Supabase Auth User Metadata (надежный глобальный синк)
+    const { data: authData } = await supabase.auth.getUser()
+    const meta = authData?.user?.user_metadata
+    const metaName = meta?.user_name || meta?.full_name || meta?.name
+    if (typeof metaName === 'string' && metaName.trim()) {
+      const clean = metaName.trim()
+      localStorage.setItem(USER_NAME_KEY_PREFIX + userId, clean)
+      return clean
+    }
+
+    // 2. Проверяем таблицу app_settings
     const { data } = await supabase
       .from('app_settings')
       .select('user_name')
       .eq('user_id', userId)
       .maybeSingle()
     const name = (data as { user_name?: string } | null)?.user_name
-    if (name && name.trim()) return name.trim()
-
-    // Если в app_settings имени ещё нет, проверяем auth user metadata
-    const { data: authData } = await supabase.auth.getUser()
-    const meta = authData?.user?.user_metadata
-    const metaName = meta?.user_name || meta?.full_name || meta?.name
-    if (typeof metaName === 'string' && metaName.trim()) {
-      const clean = metaName.trim()
-      void saveUserName(userId, clean).catch(() => {})
+    if (name && name.trim()) {
+      const clean = name.trim()
+      localStorage.setItem(USER_NAME_KEY_PREFIX + userId, clean)
       return clean
     }
   } catch {
     // не критично
   }
-  return null
+  return localStorage.getItem(USER_NAME_KEY_PREFIX + userId) || null
 }
 
+/** Загружает имя пользователя: мгновенно из локального хранилища, затем из облака. */
+export async function loadUserName(userId: string): Promise<string | null> {
+  // Offline-first: моментальное чтение из localStorage (0мс)
+  const cached = localStorage.getItem(USER_NAME_KEY_PREFIX + userId)
+  if (cached && cached.trim()) {
+    void syncUserNameFromCloud(userId).catch(() => {})
+    return cached.trim()
+  }
+
+  return await syncUserNameFromCloud(userId)
+}
+
+/** Надежно сохраняет имя пользователя локально, в Auth Metadata и app_settings. */
 export async function saveUserName(userId: string, name: string): Promise<void> {
-  await supabase.from('app_settings').upsert(
-    { user_id: userId, user_name: name, updated_at: new Date().toISOString() },
-    { onConflict: 'user_id' }
-  )
+  const clean = name.trim()
+  if (!clean) return
+
+  // 1. Моментальное локальное сохранение (гарантия выживания при перезапуске)
+  localStorage.setItem(USER_NAME_KEY_PREFIX + userId, clean)
+
+  // 2. Обновляем метаданные текущего пользователя Supabase Auth
+  try {
+    await supabase.auth.updateUser({
+      data: {
+        user_name: clean,
+        full_name: clean,
+        name: clean,
+      },
+    })
+  } catch (e) {
+    console.warn('Failed to update auth user metadata', e)
+  }
+
+  // 3. Сохраняем в таблицу app_settings (best effort)
+  try {
+    await supabase.from('app_settings').upsert(
+      { user_id: userId, user_name: clean, updated_at: new Date().toISOString() },
+      { onConflict: 'user_id' },
+    )
+  } catch (e) {
+    console.warn('Failed to upsert to app_settings', e)
+  }
+
+  // 4. Оповещаем все открытые компоненты в приложении
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(new CustomEvent('nucleus:userNameChanged', { detail: clean }))
+  }
 }
 
 /** Загружает валюту отображения из облака. */
