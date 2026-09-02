@@ -31,7 +31,7 @@
 // ====================================================================
 
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
 import { fileURLToPath } from 'node:url'
@@ -184,6 +184,30 @@ if (!skipBuild) {
 if (!existsSync(exePath)) {
   console.error(`Не найден установщик: ${exePath}`)
   process.exit(1)
+}
+
+// ---------- Сохранение в постоянную папку releases/ ----------
+const releasesDir = join(root, 'releases')
+if (!existsSync(releasesDir)) {
+  mkdirSync(releasesDir, { recursive: true })
+}
+const destExePath = join(releasesDir, exeName)
+try {
+  copyFileSync(exePath, destExePath)
+  console.log(`Установочный файл Windows скопирован в: releases/${exeName}`)
+} catch (e) {
+  console.warn(`Не удалось скопировать EXE в releases/: ${e.message}`)
+}
+
+const apkSource = join(root, 'android', 'app', 'build', 'outputs', 'apk', 'release', 'app-release.apk')
+if (existsSync(apkSource)) {
+  const apkDest = join(releasesDir, `Nucleus_${version}.apk`)
+  try {
+    copyFileSync(apkSource, apkDest)
+    console.log(`Android APK скопирован в: releases/Nucleus_${version}.apk`)
+  } catch (e) {
+    console.warn(`Не удалось скопировать APK в releases/: ${e.message}`)
+  }
 }
 
 // ---------- публикация в бакет ----------

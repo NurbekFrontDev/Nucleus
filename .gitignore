@@ -31,3 +31,6 @@ dist-ssr
 backup.cmd
 backup.ps1
 finlit-backup*.sql
+
+# Локальные сборки и релизы (бинарники .exe и .apk)
+releases/
