@@ -327,20 +327,20 @@ export function formatDuration(durationMin: number | null | undefined, lang: 'ru
 
 // Попадает ли дело в указанный день (с учётом правила повторения и старта).
 export function isItemOnDate(item: PlannerItem, dateStr: string): boolean {
-  if (item.archived && item.repeat_rule !== 'none') return false
+  if (item.archived) return false
   // До даты начала дело ещё "не существует".
   if (item.start_date && dateStr < item.start_date) return false
   const wd = isoWeekday(dateStr)
   switch (item.repeat_rule) {
     case 'daily':
-      return !item.archived
+      return true
     case 'weekdays':
-      return !item.archived && wd >= 1 && wd <= 5
+      return wd >= 1 && wd <= 5
     case 'weekly':
-      return !item.archived && Array.isArray(item.weekdays) && item.weekdays.includes(wd)
+      return Array.isArray(item.weekdays) && item.weekdays.includes(wd)
     case 'none':
     default:
-      // Разовое: показываем в его собственный день (даже если архивировано после выполнения).
+      // Разовое: показываем в его собственный день (только пока не выполнено / не архивировано).
       return !item.start_date || item.start_date === dateStr
   }
 }
@@ -558,10 +558,12 @@ export async function saveWeeklyDaySnapshot(
 ): Promise<PlannerWeeklyDaySnapshot> {
   const weekday = isoWeekday(dateStr)
 
-  // Дедупликация элементов перед сохранением снимка
+  // Дедупликация элементов перед сохранением снимка + исключение выполненных разовых дел
   const uniqueItems: PlannerItem[] = []
   const seenTitles = new Set<string>()
   for (const it of items) {
+    // Разовые дела, которые уже архивированы (выполнены), не должны дублироваться на будущие недели
+    if (it.repeat_rule === 'none' && it.archived) continue
     const key = it.title.trim().toLowerCase()
     if (!seenTitles.has(key)) {
       seenTitles.add(key)
@@ -694,14 +696,9 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
     // Убрано вручную только из этого дня — выше всех остальных правил.
     if (ov?.hidden) return false
     if (ov || loggedIds.has(it.id)) return true
-    // Если дело архивировано, оно остаётся в дне если есть отметка (лог), правка дня,
-    // либо если это разовое дело, дата которого совпадает с этой датой (или не задана).
-    if (it.archived) {
-      if (it.repeat_rule === 'none' && (!it.start_date || it.start_date === dateStr)) {
-        return true
-      }
-      return false
-    }
+    // Если дело архивировано (выполненное разовое дело или удалённое),
+    // оно остаётся в дне ТОЛЬКО если по нему есть фактическая отметка (лог) или правка на этот день.
+    if (it.archived) return false
     if (it.schedule_changed_at && dateStr < it.schedule_changed_at) return false
     return isItemOnDate(it, dateStr)
   }
@@ -791,10 +788,15 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
         const directOverride = original ? ovMap.get(original.id) : null
         if (directOverride?.hidden) return null
         if (original && isItemHiddenOnDate(original, dateStr)) return null
+        // Если оригинал дела удалён из базы и на эту дату нет отметки/правки — не показываем его
+        if (!original && !loggedIds.has(snapshotItem.item_id) && !directOverride) return null
+        // Если дело архивировано (выполненное разовое дело или удалённое)
+        // и на эту дату нет отметки о выполнении и нет персональной правки дня —
+        // оно исключается из дня. Разовые дела после выполнения исчезают из «Мои дела»
+        // и со всех последующих недель снимка (приоритет исчезновения выше сохранения дня).
         if (
           original &&
           original.archived &&
-          original.repeat_rule !== 'none' &&
           !loggedIds.has(original.id) &&
           !directOverride
         )
@@ -853,6 +855,8 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
         if (isItemHiddenOnDate(item, dateStr)) return false
         const ov = ovMap.get(item.id)
         if (ov?.hidden) return false
+        // Если дело архивировано, оно остаётся в дне ТОЛЬКО при наличии отметки или прямой правки
+        if (item.archived && !loggedIds.has(item.id) && !ov) return false
         if (item.repeat_rule === 'none' && (!item.start_date || item.start_date === dateStr))
           return true
         if (loggedIds.has(item.id)) return true
@@ -2070,6 +2074,7 @@ function resolveSummaryDayItems(
     const override = overrides.get(item.id)
     if (override?.hidden) return false
     if (override || dayLogs[item.id]) return true
+    if (item.archived) return false
     if (item.schedule_changed_at && dateStr < item.schedule_changed_at) return false
     return isItemOnDate(item, dateStr)
   }
@@ -2083,7 +2088,13 @@ function resolveSummaryDayItems(
     .map((snapshotItem) => {
       const original = allById.get(snapshotItem.item_id)
       const override = overrides.get(snapshotItem.item_id)
-      if (!original || original.archived || override?.hidden || isItemHiddenOnDate(original, dateStr)) return null
+      if (
+        !original ||
+        (original.archived && !dayLogs[snapshotItem.item_id] && !override) ||
+        override?.hidden ||
+        isItemHiddenOnDate(original, dateStr)
+      )
+        return null
       return applyDatePriority({
         ...original,
         priority: snapshotItem.priority,
