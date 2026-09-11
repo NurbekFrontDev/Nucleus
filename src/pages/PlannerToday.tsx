@@ -1939,10 +1939,14 @@ export default function PlannerToday() {
         title={t('tpl.rollbackConfirmTitle')}
         message={t('tpl.rollbackConfirmMsg', { name: templateRollback?.template_name ?? '' })}
         confirmLabel={t('tpl.rollback')}
+        loadingLabel={t('tpl.reverting')}
+        loading={rollingBack}
         cancelLabel={t('common.cancel')}
         danger
         onConfirm={handleRollbackDayTemplate}
-        onCancel={() => setRollbackConfirmOpen(false)}
+        onCancel={() => {
+          if (!rollingBack) setRollbackConfirmOpen(false)
+        }}
       />
 
       <ConfirmDialog

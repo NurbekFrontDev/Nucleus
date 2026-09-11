@@ -485,10 +485,14 @@ export default function DayTemplateSheet({ userId, date, items, onClose, onAppli
         title={t('tpl.rollbackConfirmTitle')}
         message={t('tpl.rollbackConfirmMsg', { name: rollbackSnap?.template_name ?? '' })}
         confirmLabel={t('tpl.rollback')}
+        loadingLabel={t('tpl.reverting')}
+        loading={rollingBack}
         cancelLabel={t('common.cancel')}
         danger
         onConfirm={doRollback}
-        onCancel={() => setConfirmRollback(false)}
+        onCancel={() => {
+          if (!rollingBack) setConfirmRollback(false)
+        }}
       />
 
       <ConfirmDialog
