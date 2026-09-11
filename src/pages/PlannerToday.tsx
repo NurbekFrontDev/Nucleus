@@ -7,6 +7,7 @@ import HabitSheet from '../components/HabitSheet'
 import DayPanel from '../components/DayPanel'
 import DayEditSheet from '../components/DayEditSheet'
 import DayTemplateSheet from '../components/DayTemplateSheet'
+import { showToast } from '../lib/toast'
 import {
   loadDay,
   toggleDone,
@@ -22,6 +23,8 @@ import {
   hideItemForDay,
   saveWeeklyDaySnapshot,
   clearWeeklyDaySnapshot,
+  loadTemplateRollback,
+  rollbackDayTemplate,
   formatDuration,
   loadHabitStreaks,
   type PlannerItem,
@@ -31,11 +34,19 @@ import {
   type DayMark,
   type PlannerDayOverride,
   type PlannerWeeklyDaySnapshot,
+  type DayTemplateRollbackSnapshot,
   type DayMood,
   loadDayMood,
   setDayMood,
   clearDayMood,
   loadDayMoods,
+  toggleItemStep,
+  addItemStep,
+  updateItemSteps,
+  deleteItemStep,
+  toggleAllItemSteps,
+  getItemStepsProgress,
+  isStepDone,
 } from '../lib/planner'
 import EnergyCharacter from '../components/EnergyCharacter'
 import { hapticTap } from '../lib/native'
@@ -106,6 +117,7 @@ export default function PlannerToday() {
     overrides: Record<string, PlannerDayOverride>
     sections: boolean
     weeklySnapshot?: PlannerWeeklyDaySnapshot | null
+    templateRollback?: DayTemplateRollbackSnapshot | null
     mood?: DayMood | null
     moodNote?: string | null
     streaks?: Record<string, number>
@@ -125,6 +137,12 @@ export default function PlannerToday() {
   const [delItem, setDelItem] = useState<PlannerItem | null>(null)
   // Окно «Шаблоны дня»: сохранить текущий день / применить шаблон.
   const [templatesOpen, setTemplatesOpen] = useState(false)
+  // Откат применённого шаблона дня к прежнему состоянию.
+  const [templateRollback, setTemplateRollback] = useState<DayTemplateRollbackSnapshot | null>(
+    cachedDay?.templateRollback ?? null,
+  )
+  const [rollbackConfirmOpen, setRollbackConfirmOpen] = useState(false)
+  const [rollingBack, setRollingBack] = useState(false)
   // Полный снимок этого дня недели. Он local-first и меняет только будущие
   // совпадающие дни, начиная с текущей даты.
   const [weeklySnapshot, setWeeklySnapshot] = useState<PlannerWeeklyDaySnapshot | null>(
@@ -138,8 +156,18 @@ export default function PlannerToday() {
   const [stripSummaries, setStripSummaries] = useState<Record<string, DaySummary>>({})
   const [mood, setMood] = useState<DayMood | null>(cachedDay?.mood ?? null)
   const [moodNote, setMoodNote] = useState<string | null>(cachedDay?.moodNote ?? null)
+  const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({})
+  const [inlineStepInput, setInlineStepInput] = useState<Record<string, string>>({})
   const [moodMenuOpen, setMoodMenuOpen] = useState(false)
+  const [stepNonce, setStepNonce] = useState(0)
+  void stepNonce
   const menuContainerRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const onStep = () => setStepNonce((n) => n + 1)
+    window.addEventListener('nucleus:stepToggle', onStep)
+    return () => window.removeEventListener('nucleus:stepToggle', onStep)
+  }, [])
 
   useEffect(() => {
     if (!moodMenuOpen) return
@@ -210,6 +238,7 @@ export default function PlannerToday() {
       setOverrides(cached.overrides)
       setSections(cached.sections)
       setWeeklySnapshot(cached.weeklySnapshot ?? null)
+      setTemplateRollback(cached.templateRollback ?? null)
       setHabitStreaks(cached.streaks ?? {})
       setMood(cached.mood ?? null)
       setMoodNote(cached.moodNote ?? null)
@@ -218,6 +247,7 @@ export default function PlannerToday() {
       setItems([])
       setLogs({})
       setWeeklySnapshot(null)
+      setTemplateRollback(null)
       setHabitStreaks({})
       setMood(null)
       setMoodNote(null)
@@ -225,10 +255,11 @@ export default function PlannerToday() {
     }
     ;(async () => {
       try {
-        const [day, sec, m] = await Promise.all([
+        const [day, sec, m, rollSnap] = await Promise.all([
           loadDay(user.id, date),
           loadDaySections(user.id),
           loadDayMood(user.id, date),
+          loadTemplateRollback(user.id, date),
         ])
         const streaks = await loadHabitStreaks(user.id, day.items, date)
         if (!active) return
@@ -237,6 +268,7 @@ export default function PlannerToday() {
         setOverrides(day.overrides)
         setSections(sec)
         setWeeklySnapshot(day.weeklySnapshot)
+        setTemplateRollback(rollSnap)
         setHabitStreaks(streaks.current)
         setHabitNextStreaks(streaks.nextIfDone)
         setMood(m?.mood ?? null)
@@ -248,6 +280,7 @@ export default function PlannerToday() {
           overrides: day.overrides,
           sections: sec,
           weeklySnapshot: day.weeklySnapshot,
+          templateRollback: rollSnap,
           mood: m?.mood ?? null,
           moodNote: m?.note ?? null,
           streaks: streaks.current,
@@ -324,19 +357,21 @@ export default function PlannerToday() {
     }
   }, [user, view, range.start, range.end])
 
-  // Перезагрузка дня (после отметок в окне привычки).
+  // Перезагрузка дня (после отметок в окне привычки или отката шаблона).
   const reload = async () => {
     if (!user) return
     try {
-      const [day, m] = await Promise.all([
+      const [day, m, rollSnap] = await Promise.all([
         loadDay(user.id, date),
         loadDayMood(user.id, date),
+        loadTemplateRollback(user.id, date),
       ])
       const streaks = await loadHabitStreaks(user.id, day.items, date)
       setItems(day.items)
       setLogs(day.logs)
       setOverrides(day.overrides)
       setWeeklySnapshot(day.weeklySnapshot)
+      setTemplateRollback(rollSnap)
       setHabitStreaks(streaks.current)
       setHabitNextStreaks(streaks.nextIfDone)
       setMood(m?.mood ?? null)
@@ -347,6 +382,7 @@ export default function PlannerToday() {
         overrides: day.overrides,
         sections,
         weeklySnapshot: day.weeklySnapshot,
+        templateRollback: rollSnap,
         mood: m?.mood ?? null,
         moodNote: m?.note ?? null,
         streaks: streaks.current,
@@ -356,11 +392,52 @@ export default function PlannerToday() {
     }
   }
 
+  // Откат шаблона дня к исходному состоянию
+  const handleRollbackDayTemplate = async () => {
+    if (!user || rollingBack) return
+    setRollingBack(true)
+    try {
+      const res = await rollbackDayTemplate(user.id, date)
+      const tName = res.templateName || templateRollback?.template_name || ''
+      showToast(t('tpl.rollbackSuccess', { name: tName }))
+      setRollbackConfirmOpen(false)
+      setTemplateRollback(null)
+      await reload()
+      if (date === today) void rescheduleAll(user.id)
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setRollingBack(false)
+    }
+  }
+
+  // Перезагрузка сводок (после отметок в окне дня).
+  const reloadSummaries = async () => {
+    if (!user) return
+    try {
+      const [s, m] = await Promise.all([
+        loadDaySummaries(user.id, range.start, range.end),
+        loadDayMoods(user.id, range.start, range.end),
+      ])
+      setSummaries(s)
+      setMoods(m)
+    } catch (e) {
+      setError((e as Error).message)
+    }
+  }
+
   // Мгновенная синхронизация: при изменении дел или отметок на других устройствах перегружаем данные
   useEffect(() => {
     if (!user) return
     const unsub = onSyncEvent(
-      ['planner_items', 'planner_logs', 'planner_day_moods', 'planner_day_overrides', 'planner_day_order'],
+      [
+        'planner_items',
+        'planner_logs',
+        'planner_day_moods',
+        'planner_day_overrides',
+        'planner_day_order',
+        'planner_day_template_rollbacks',
+      ],
       () => {
         if (view === 'today') void reload()
         else void reloadSummaries()
@@ -419,21 +496,6 @@ export default function PlannerToday() {
       await reload()
       // Состав дня поменялся -> пересобираем напоминания.
       if (date === today) void rescheduleAll(user.id)
-    } catch (e) {
-      setError((e as Error).message)
-    }
-  }
-
-  // Перезагрузка сводок (после отметок в окне дня).
-  const reloadSummaries = async () => {
-    if (!user) return
-    try {
-      const [s, m] = await Promise.all([
-        loadDaySummaries(user.id, range.start, range.end),
-        loadDayMoods(user.id, range.start, range.end),
-      ])
-      setSummaries(s)
-      setMoods(m)
     } catch (e) {
       setError((e as Error).message)
     }
@@ -533,6 +595,15 @@ export default function PlannerToday() {
           setHabitNextStreaks((prev) => ({ ...prev, ...s.nextIfDone }))
         })
       }
+
+      if (item.steps && item.steps.length > 0) {
+        void toggleAllItemSteps(user.id, item, date, !currentlyDone, newLog).then((res) => {
+          if (res.updatedItem) {
+            setItems((prev) => prev.map((it) => (it.id === item.id ? res.updatedItem : it)))
+          }
+        })
+      }
+
       // Отметка выполнения влияет на напоминания: пересобираем расписание,
       // чтобы по выполненному делу уведомление не приходило (и вернулось,
       // если снять галочку). Актуально только для сегодняшнего дня.
@@ -557,6 +628,107 @@ export default function PlannerToday() {
         })
       }
       setError((e as Error).message)
+    }
+  }
+
+  const onToggleStep = async (e: React.MouseEvent, item: PlannerItem, stepId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!user) return
+    hapticTap()
+    setStepNonce((n) => n + 1)
+    const taskDone = isDone(item.id)
+    const currentLog = logs[item.id] ?? null
+
+    try {
+      const res = await toggleItemStep(
+        user.id,
+        item,
+        stepId,
+        date,
+        taskDone,
+        currentLog,
+      )
+
+      if (res.updatedItem) {
+        setItems((prev) => prev.map((it) => (it.id === item.id ? res.updatedItem : it)))
+      }
+
+      setStepNonce((n) => n + 1)
+
+      if (res.taskDoneChanged) {
+        setLogs((prev) => {
+          const next = { ...prev }
+          if (res.newLog) next[item.id] = res.newLog
+          else delete next[item.id]
+          return next
+        })
+
+        if (res.isNowDone) {
+          hapticTap()
+        }
+
+        if (item.repeat_rule !== 'none') {
+          void loadHabitStreaks(user.id, [item], date).then((s) => {
+            setHabitStreaks((prev) => {
+              const next = { ...prev }
+              if (s.current[item.id]) next[item.id] = s.current[item.id]
+              else delete next[item.id]
+              return next
+            })
+            setHabitNextStreaks((prev) => ({ ...prev, ...s.nextIfDone }))
+          })
+        }
+        if (date === today) void rescheduleAll(user.id)
+      } else if (res.newLog) {
+        setLogs((prev) => ({ ...prev, [item.id]: res.newLog! }))
+      }
+    } catch (err) {
+      setError((err as Error).message)
+    }
+  }
+
+  const handleMoveStep = async (e: React.MouseEvent, item: PlannerItem, fromIdx: number, toIdx: number) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!user || !item.steps) return
+    const copy = [...item.steps]
+    const [moved] = copy.splice(fromIdx, 1)
+    copy.splice(toIdx, 0, moved)
+    const updatedItem: PlannerItem = { ...item, steps: copy }
+    setItems((prev) => prev.map((it) => (it.id === item.id ? updatedItem : it)))
+    try {
+      await updateItemSteps(user.id, item, copy)
+    } catch (err) {
+      console.error('Failed to move step:', err)
+    }
+  }
+
+  const handleDeleteStep = async (e: React.MouseEvent, item: PlannerItem, stepId: string) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (!user || !item.steps) return
+    const nextSteps = item.steps.filter((s) => s.id !== stepId)
+    const updatedItem: PlannerItem = { ...item, steps: nextSteps }
+    setItems((prev) => prev.map((it) => (it.id === item.id ? updatedItem : it)))
+    try {
+      await deleteItemStep(user.id, item, stepId)
+    } catch (err) {
+      console.error('Failed to delete step:', err)
+    }
+  }
+
+  const handleAddInlineStep = async (item: PlannerItem) => {
+    if (!user) return
+    const text = inlineStepInput[item.id]?.trim()
+    if (!text) return
+    try {
+      const updated = await addItemStep(user.id, item, text)
+      setItems((prev) => prev.map((it) => (it.id === item.id ? updated : it)))
+      setInlineStepInput((prev) => ({ ...prev, [item.id]: '' }))
+      setExpandedSteps((prev) => ({ ...prev, [item.id]: true }))
+    } catch (err) {
+      setError((err as Error).message)
     }
   }
 
@@ -675,7 +847,7 @@ export default function PlannerToday() {
     </button>
   )
 
-  // Строка дела/привычки: чекбокс, кружок важности, иконка, название, время.
+  // Строка дела/привычки: чекбокс, кружок важности, иконка, название, время, шаги (аккордеон).
   // Привычку можно нажать — откроется окно в стиле Atoms (история, календарь, стрики).
   const renderTask = (item: PlannerItem) => {
     const done = isDone(item.id)
@@ -683,91 +855,268 @@ export default function PlannerToday() {
     const time = timeLabel(item)
     const duration = formatDuration(item.duration_min, lang)
     const isHabit = item.type === 'habit'
+    const hasSteps = !!(item.steps && item.steps.length > 0)
+    const isExpanded = !!expandedSteps[item.id]
+    const stepsProgress = hasSteps ? getItemStepsProgress(item, date, done, logs[item.id], undefined, overrides[item.id]) : null
+
     return (
       <div
         key={item.id}
-        role="button"
-        tabIndex={0}
-        onClick={() => (editDay ? setEditItem(item) : onToggle(item))}
-        aria-label={item.title}
-        className={`flex cursor-pointer items-start justify-between gap-2.5 ${cardCls}${done && !editDay ? ' opacity-60' : ''} transition active:scale-[.99]`}
+        className={`flex flex-col gap-2 ${cardCls}${done && !editDay ? ' opacity-60' : ''}`}
       >
-        <div className="flex items-start gap-2.5 min-w-0 flex-1">
-          {editDay ? (
-            <span
-              aria-hidden
-              className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-emerald-500/50 text-[11px]"
-            >
-              ✏️
-            </span>
-          ) : (
-            <span
-              aria-hidden
-              className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[10px] font-bold transition ${
-                done
-                  ? 'border-emerald-500 bg-emerald-500 text-neutral-950'
-                  : 'border-neutral-300 dark:border-neutral-600'
-              }`}
-            >
-              {done ? '\u2713' : ''}
-            </span>
-          )}
-          {dot && <span className="mt-1 shrink-0 text-xs leading-none">{dot}</span>}
-          {item.important && <span className="mt-1 shrink-0 text-xs leading-none">⭐</span>}
-          {item.icon && <span className="mt-0.5 shrink-0">{item.icon}</span>}
-          <div className="min-w-0 flex-1">
-            <p
-              className={`break-words text-base font-medium ${
-                done ? 'text-neutral-500 line-through dark:text-neutral-400' : ''
-              }`}
-            >
-              <span className="break-words">{item.title}</span>
-              {duration && <span className="font-normal text-neutral-400"> · {duration}</span>}
-              {overrides[item.id] && !overrides[item.id].frozen && (
-                <span
-                  title={t('today.edited')}
-                  className="ml-1 align-middle text-xs text-emerald-600 dark:text-emerald-400"
-                >
-                  ✎
-                </span>
-              )}
-              {isHabit && (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    setSheetItem(item)
-                  }}
-                  title={t('habits.openHint')}
-                  className="ml-1 align-middle text-xs text-neutral-400 transition hover:text-emerald-600 dark:hover:text-emerald-400"
-                >
-                  🔁
-                </button>
-              )}
-            </p>
-            {time && (
-              <p className="mt-0.5 text-[13px] font-medium text-neutral-500 dark:text-neutral-400">{time}</p>
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => {
+            if (editDay) {
+              setEditItem(item)
+            } else if (hasSteps) {
+              setExpandedSteps((prev) => ({ ...prev, [item.id]: !prev[item.id] }))
+            } else {
+              onToggle(item)
+            }
+          }}
+          aria-label={item.title}
+          className="flex items-start justify-between gap-2.5 w-full cursor-pointer transition active:scale-[.995]"
+        >
+          <div className="flex items-start gap-2.5 min-w-0 flex-1">
+            {editDay ? (
+              <span
+                aria-hidden
+                className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-emerald-500/50 text-[11px]"
+              >
+                ✏️
+              </span>
+            ) : (
+              <button
+                type="button"
+                aria-label="Toggle done"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onToggle(item)
+                }}
+                className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md border text-[10px] font-bold transition hover:scale-105 ${
+                  done
+                    ? 'border-emerald-500 bg-emerald-500 text-neutral-950 shadow-sm'
+                    : 'border-neutral-300 dark:border-neutral-600 hover:border-emerald-500'
+                }`}
+              >
+                {done ? '\u2713' : ''}
+              </button>
             )}
-            {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
+            {dot && <span className="mt-1 shrink-0 text-xs leading-none">{dot}</span>}
+            {item.important && <span className="mt-1 shrink-0 text-xs leading-none">⭐</span>}
+            {item.icon && <span className="mt-0.5 shrink-0">{item.icon}</span>}
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <p
+                  className={`break-words text-base font-medium ${
+                    done ? 'text-neutral-500 line-through dark:text-neutral-400' : ''
+                  }`}
+                >
+                  <span className="break-words">{item.title}</span>
+                  {duration && <span className="font-normal text-neutral-400"> · {duration}</span>}
+                  {overrides[item.id] && !overrides[item.id].frozen && (
+                    <span
+                      title={t('today.edited')}
+                      className="ml-1 align-middle text-xs text-emerald-600 dark:text-emerald-400"
+                    >
+                      ✎
+                    </span>
+                  )}
+                  {isHabit && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setSheetItem(item)
+                      }}
+                      title={t('habits.openHint')}
+                      className="ml-1 align-middle text-xs text-neutral-400 transition hover:text-emerald-600 dark:hover:text-emerald-400"
+                    >
+                      🔁
+                    </button>
+                  )}
+                </p>
+                {hasSteps && stepsProgress && (
+                  <span
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setExpandedSteps((prev) => ({ ...prev, [item.id]: !prev[item.id] }))
+                    }}
+                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold transition ${
+                      stepsProgress.allDone
+                        ? 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400'
+                        : stepsProgress.done > 0
+                          ? 'bg-amber-500/15 text-amber-700 dark:text-amber-300'
+                          : 'bg-neutral-100 text-neutral-500 dark:bg-neutral-800 dark:text-neutral-400'
+                    }`}
+                  >
+                    <span>📋 {stepsProgress.done}/{stepsProgress.total}</span>
+                    <span className="text-[9px] opacity-70">{isExpanded ? '▲' : '▼'}</span>
+                  </span>
+                )}
+              </div>
+              {time && (
+                <p className="mt-0.5 text-[13px] font-medium text-neutral-500 dark:text-neutral-400">{time}</p>
+              )}
+              {item.note && !item.note.startsWith('{"done_steps"') && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {item.repeat_rule !== 'none' && isDone(item.id) && (habitStreaks[item.id] ?? 0) > 0 && (
+              <span className="shrink-0 rounded-full bg-orange-50 px-2 py-0.5 text-xs font-bold text-orange-600 dark:bg-orange-950/40 dark:text-orange-400">
+                🔥 {habitStreaks[item.id]}
+              </span>
+            )}
+            {hasSteps && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setExpandedSteps((prev) => ({ ...prev, [item.id]: !prev[item.id] }))
+                }}
+                className="rounded-lg p-1 text-xs text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                title={isExpanded ? 'Свернуть шаги' : 'Раскрыть шаги'}
+              >
+                {isExpanded ? '▲' : '▼'}
+              </button>
+            )}
+            {editDay && (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setDelItem(item)
+                }}
+                title={t('common.delete')}
+                className="shrink-0 rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
+              >
+                🗑
+              </button>
+            )}
           </div>
         </div>
-        {item.repeat_rule !== 'none' && isDone(item.id) && (habitStreaks[item.id] ?? 0) > 0 && (
-          <span className="shrink-0 rounded-full bg-orange-50 px-2 py-0.5 text-xs font-bold text-orange-600 dark:bg-orange-950/40 dark:text-orange-400">
-            🔥 {habitStreaks[item.id]}
-          </span>
-        )}
-        {editDay && (
-          <button
-            type="button"
-            onClick={(e) => {
-              e.stopPropagation()
-              setDelItem(item)
-            }}
-            title={t('common.delete')}
-            className="shrink-0 rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
+
+        {/* Раскрывающийся аккордеон с микро-шагами */}
+        {hasSteps && isExpanded && (
+          <div
+            className="mt-1 flex flex-col gap-1.5 border-t border-neutral-200/60 pt-2.5 pl-7 dark:border-neutral-800/80 animate-pop"
+            onClick={(e) => e.stopPropagation()}
           >
-            🗑
-          </button>
+            {item.steps!.map((st, idx) => {
+              const stDone = isStepDone(item, st.id, date, done, logs[item.id], undefined, overrides[item.id])
+              return (
+                <div
+                  key={st.id}
+                  onClick={(e) => void onToggleStep(e, item, st.id)}
+                  className="group/step flex cursor-pointer items-center justify-between gap-2 rounded-lg py-1 px-1.5 transition hover:bg-neutral-100/70 dark:hover:bg-neutral-800/60"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                    <button
+                      type="button"
+                      onClick={(e) => void onToggleStep(e, item, st.id)}
+                      className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border text-[9px] font-bold transition hover:scale-105 ${
+                        stDone
+                          ? 'border-emerald-500 bg-emerald-500 text-neutral-950 shadow-sm'
+                          : 'border-neutral-300 dark:border-neutral-600 hover:border-emerald-500'
+                      }`}
+                    >
+                      {stDone ? '\u2713' : ''}
+                    </button>
+                    <span
+                      className={`break-words text-xs transition select-none ${
+                        stDone
+                          ? 'text-neutral-400 line-through dark:text-neutral-500'
+                          : 'text-neutral-700 dark:text-neutral-200 font-normal'
+                      }`}
+                    >
+                      {st.title}
+                    </span>
+                  </div>
+
+                  {/* Кнопки управления: Вверх, Вниз, Корзина — на мобилке видны всегда, на ПК при наведении */}
+                  <div
+                    className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover/step:opacity-100 transition-opacity duration-150 shrink-0"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {idx > 0 && (
+                      <button
+                        type="button"
+                        onClick={(e) => void handleMoveStep(e, item, idx, idx - 1)}
+                        className="rounded p-1 text-neutral-400 transition hover:bg-neutral-200/60 hover:text-neutral-700 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+                        title="Вверх"
+                      >
+                        <span className="text-[10px] leading-none">▲</span>
+                      </button>
+                    )}
+                    {idx < item.steps!.length - 1 && (
+                      <button
+                        type="button"
+                        onClick={(e) => void handleMoveStep(e, item, idx, idx + 1)}
+                        className="rounded p-1 text-neutral-400 transition hover:bg-neutral-200/60 hover:text-neutral-700 dark:hover:bg-neutral-700 dark:hover:text-neutral-200"
+                        title="Вниз"
+                      >
+                        <span className="text-[10px] leading-none">▼</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={(e) => void handleDeleteStep(e, item, st.id)}
+                      className="rounded p-1 text-neutral-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
+                      title={t('common.delete')}
+                    >
+                      <svg
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth={2}
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        className="h-3 w-3"
+                        aria-hidden="true"
+                      >
+                        <path d="M3 6h18" />
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                        <path d="M10 11v6M14 11v6" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
+              )
+            })}
+
+            {/* Быстрое добавление нового шага на лету */}
+            <div
+              className="mt-1 flex items-center gap-2 pt-1"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <input
+                type="text"
+                value={inlineStepInput[item.id] || ''}
+                onChange={(e) => setInlineStepInput((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    void handleAddInlineStep(item)
+                  }
+                }}
+                placeholder={t('items.stepAddPh')}
+                className="min-w-0 flex-1 rounded-lg border border-neutral-200 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-900"
+              />
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void handleAddInlineStep(item)
+                }}
+                className="shrink-0 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-neutral-950 transition hover:bg-emerald-400 active:scale-95"
+              >
+                {t('items.stepAddBtn')}
+              </button>
+            </div>
+          </div>
         )}
       </div>
     )
@@ -823,6 +1172,11 @@ export default function PlannerToday() {
             {item.title}
             {duration && <span className="font-normal text-neutral-400"> · {duration}</span>}
             {isHabit && <span className="ml-1 text-xs">🔁</span>}
+            {item.steps && item.steps.length > 0 && (
+              <span className="ml-1.5 rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-semibold text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                📋 {item.steps.length}
+              </span>
+            )}
           </p>
 
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
@@ -836,7 +1190,7 @@ export default function PlannerToday() {
             )}
           </div>
 
-          {item.note && <p className="mt-1 break-words text-xs text-neutral-500">{item.note}</p>}
+          {item.note && !item.note.startsWith('{"done_steps"') && <p className="mt-1 break-words text-xs text-neutral-500">{item.note}</p>}
         </div>
       </div>
     )
@@ -1248,6 +1602,17 @@ export default function PlannerToday() {
                 {lang === 'ru' ? '🔁 Недельный снимок' : '🔁 Weekly snapshot'}
               </span>
             )}
+            {templateRollback && (
+              <button
+                type="button"
+                onClick={() => setRollbackConfirmOpen(true)}
+                className="inline-flex items-center gap-1 rounded-md border border-amber-300/80 bg-amber-50/90 px-2 py-0.5 text-[11px] font-semibold text-amber-900 transition hover:bg-amber-100 dark:border-amber-800/60 dark:bg-amber-950/40 dark:text-amber-200 dark:hover:bg-amber-950/70"
+                title={t('tpl.rollbackHint')}
+              >
+                <span className="truncate max-w-[140px]">📋 {templateRollback.template_name}</span>
+                <span className="text-[10px] opacity-75">↩️</span>
+              </button>
+            )}
             {mood && (
               <span className="text-xs">
                 {mood === 'procrastination' ? '😤 Прокрастинация' : '💥 Выгорание'}
@@ -1310,6 +1675,20 @@ export default function PlannerToday() {
                 >
                   <span>📋 {lang === 'ru' ? 'Шаблоны' : 'Templates'}</span>
                 </button>
+
+                {templateRollback && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMoodMenuOpen(false)
+                      setRollbackConfirmOpen(true)
+                    }}
+                    disabled={rollingBack}
+                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-xs font-medium text-amber-600 transition hover:bg-amber-50 disabled:opacity-60 dark:text-amber-400 dark:hover:bg-amber-950/30"
+                  >
+                    <span>↩️ {t('tpl.rollback')} («{templateRollback.template_name}»)</span>
+                  </button>
+                )}
 
                 {weeklySnapshot?.enabled ? (
                   <button
@@ -1554,6 +1933,17 @@ export default function PlannerToday() {
           onApplied={reload}
         />
       )}
+
+      <ConfirmDialog
+        open={rollbackConfirmOpen}
+        title={t('tpl.rollbackConfirmTitle')}
+        message={t('tpl.rollbackConfirmMsg', { name: templateRollback?.template_name ?? '' })}
+        confirmLabel={t('tpl.rollback')}
+        cancelLabel={t('common.cancel')}
+        danger
+        onConfirm={handleRollbackDayTemplate}
+        onCancel={() => setRollbackConfirmOpen(false)}
+      />
 
       <ConfirmDialog
         open={weeklyDialog === 'apply'}

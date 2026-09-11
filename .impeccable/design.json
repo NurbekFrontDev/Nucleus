@@ -1,0 +1,278 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-09-08T11:35:00.000Z",
+  "title": "Design System: Nucleus",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Emerald Pulse",
+        "canonical": "#10b981",
+        "tonalRamp": [
+          "#022c22",
+          "#064e3b",
+          "#065f46",
+          "#047857",
+          "#059669",
+          "#10b981",
+          "#34d399",
+          "#6ee7b7"
+        ]
+      },
+      "danger": {
+        "role": "danger",
+        "displayName": "Signal Coral",
+        "canonical": "#ef4444",
+        "tonalRamp": [
+          "#450a0a",
+          "#7f1d1d",
+          "#991b1b",
+          "#b91c1c",
+          "#dc2626",
+          "#ef4444",
+          "#f87171",
+          "#fca5a5"
+        ]
+      },
+      "warning": {
+        "role": "warning",
+        "displayName": "Amber Caution",
+        "canonical": "#f59e0b",
+        "tonalRamp": [
+          "#451a03",
+          "#78350f",
+          "#92400e",
+          "#b45309",
+          "#d97706",
+          "#f59e0b",
+          "#fbbf24",
+          "#fcd34d"
+        ]
+      },
+      "bg-dark": {
+        "role": "neutral",
+        "displayName": "Obsidian Void",
+        "canonical": "#0a0a0a",
+        "tonalRamp": [
+          "#050505",
+          "#0a0a0a",
+          "#141416",
+          "#1c1c1f",
+          "#262626",
+          "#404040",
+          "#737373",
+          "#f5f5f5"
+        ]
+      },
+      "surface-dark": {
+        "role": "neutral",
+        "displayName": "Cockpit Surface",
+        "canonical": "#141416",
+        "tonalRamp": [
+          "#0a0a0a",
+          "#141416",
+          "#1f1f22",
+          "#2b2b30",
+          "#3f3f46",
+          "#71717a",
+          "#a1a1aa",
+          "#f4f4f5"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Display",
+        "purpose": "Large balance summaries, hero time readouts, and core cockpit numbers."
+      },
+      "headline": {
+        "displayName": "Headline",
+        "purpose": "Module titles, modal headers, and primary card headlines."
+      },
+      "title": {
+        "displayName": "Title",
+        "purpose": "Section groupings, habit titles, and category labels."
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Transaction details, AI assistant conversations, notes, and general content."
+      },
+      "label": {
+        "displayName": "Label",
+        "purpose": "Micro-telemetry, currency hints, table headers, and status chips."
+      }
+    },
+    "shadows": [
+      {
+        "name": "subtle-surface",
+        "value": "0 1px 3px rgba(0, 0, 0, 0.5)",
+        "purpose": "Inset card distinction or active tab elevation."
+      },
+      {
+        "name": "tactile-popover",
+        "value": "0 10px 15px -3px rgba(0, 0, 0, 0.6), 0 4px 6px -4px rgba(0, 0, 0, 0.6)",
+        "purpose": "Select dropdowns, datepicker flyouts, and profile popups."
+      },
+      {
+        "name": "elevated-modal",
+        "value": "0 20px 25px -5px rgba(0, 0, 0, 0.7), 0 8px 10px -6px rgba(0, 0, 0, 0.7)",
+        "purpose": "ConfirmDialog and Settings modal backdrop lift."
+      }
+    ],
+    "motion": [
+      {
+        "name": "fl-pop",
+        "value": "240ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Dropdown menus, select lists, and flyout datepickers."
+      },
+      {
+        "name": "fl-dialog",
+        "value": "260ms cubic-bezier(0.16, 1, 0.3, 1)",
+        "purpose": "Center modal dialog entrance and exit."
+      },
+      {
+        "name": "fl-tap",
+        "value": "140ms cubic-bezier(0.2, 0, 0, 1)",
+        "purpose": "Physical tactile depression scale(0.96) on button click."
+      },
+      {
+        "name": "fl-fade",
+        "value": "200ms ease-out",
+        "purpose": "Overlay backdrop and toast fade transitions."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      },
+      {
+        "name": "xl",
+        "value": "1280px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Tactile high-contrast primary action target in Emerald Pulse.",
+      "html": "<button class=\"ds-btn-primary\">Сохранить операцию</button>",
+      "css": ".ds-btn-primary { background-color: #10b981; color: #0a0a0a; font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; font-weight: 500; border-radius: 8px; border: none; padding: 8px 16px; cursor: pointer; transition: transform 140ms cubic-bezier(0.2, 0, 0, 1), background-color 140ms ease; } .ds-btn-primary:hover { background-color: #34d399; } .ds-btn-primary:active { transform: scale(0.96); }"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Framed neutral secondary button for passive or cancellation actions.",
+      "html": "<button class=\"ds-btn-secondary\">Отмена</button>",
+      "css": ".ds-btn-secondary { background-color: transparent; color: #f5f5f5; font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; font-weight: 500; border-radius: 8px; border: 1px solid #38383a; padding: 8px 16px; cursor: pointer; transition: transform 140ms cubic-bezier(0.2, 0, 0, 1), background-color 140ms ease; } .ds-btn-secondary:hover { background-color: #1f1f23; } .ds-btn-secondary:active { transform: scale(0.96); }"
+    },
+    {
+      "name": "Danger Button",
+      "kind": "button",
+      "refersTo": "button-danger",
+      "description": "High-urgency destructive trigger for permanent deletion or resets.",
+      "html": "<button class=\"ds-btn-danger\">Удалить запись</button>",
+      "css": ".ds-btn-danger { background-color: #ef4444; color: #ffffff; font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; font-weight: 500; border-radius: 8px; border: none; padding: 8px 16px; cursor: pointer; transition: transform 140ms cubic-bezier(0.2, 0, 0, 1), background-color 140ms ease; } .ds-btn-danger:hover { background-color: #dc2626; } .ds-btn-danger:active { transform: scale(0.96); }"
+    },
+    {
+      "name": "Cockpit Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Clean focused input field with emerald boundary highlight.",
+      "html": "<input type=\"text\" class=\"ds-input\" placeholder=\"Введите сумму...\" value=\"250 000 сум\" />",
+      "css": ".ds-input { background-color: #0a0a0a; color: #f5f5f5; font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; border-radius: 8px; border: 1px solid #262626; padding: 8px 12px; outline: none; width: 100%; box-sizing: border-box; transition: border-color 140ms ease; } .ds-input:focus { border-color: #10b981; } .ds-input::placeholder { color: #525252; }"
+    },
+    {
+      "name": "Metric Card",
+      "kind": "card",
+      "refersTo": "card",
+      "description": "Modular 16px rounded cockpit card with tabular metrics.",
+      "html": "<div class=\"ds-card-metric\"><div class=\"ds-card-metric-label\">Подушка безопасности</div><div class=\"ds-card-metric-value\">62 400 000 сум</div><div class=\"ds-card-metric-sub\">6 месяцев нормы трат</div></div>",
+      "css": ".ds-card-metric { background-color: #141416; border: 1px solid #262626; border-radius: 16px; padding: 16px; font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; flex-direction: column; gap: 4px; } .ds-card-metric-label { font-size: 12px; font-weight: 500; color: #a3a3a3; } .ds-card-metric-value { font-size: 18px; font-weight: 600; color: #f5f5f5; font-variant-numeric: tabular-nums; } .ds-card-metric-sub { font-size: 12px; color: #10b981; }"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "chip-active",
+      "description": "Compact status badge with low-intensity emerald tint.",
+      "html": "<span class=\"ds-chip-active\">Выполнено 🟢</span>",
+      "css": ".ds-chip-active { background-color: rgba(16, 185, 129, 0.15); color: #10b981; font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 12px; font-weight: 500; border-radius: 9999px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 4px; }"
+    },
+    {
+      "name": "Segmented Module Switcher",
+      "kind": "nav",
+      "refersTo": "button-secondary",
+      "description": "Pill-style switcher between FinLit and Planner modules.",
+      "html": "<div class=\"ds-module-switcher\"><button class=\"ds-module-tab ds-tab-active\">💰 FinLit</button><button class=\"ds-module-tab\">⏱️ Планировщик</button></div>",
+      "css": ".ds-module-switcher { background-color: #1c1c1f; border-radius: 12px; padding: 4px; display: flex; gap: 4px; font-family: Inter, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; } .ds-module-tab { flex: 1; border: none; background: transparent; color: #a3a3a3; font-size: 12px; font-weight: 500; border-radius: 8px; padding: 6px 12px; cursor: pointer; transition: all 140ms ease; } .ds-module-tab.ds-tab-active { background-color: #2e2e33; color: #f5f5f5; font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,0.4); }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Atomic Cockpit",
+    "overview": "Nucleus is an uncompromising personal command center built for extreme velocity, atomic discipline, and total data sovereignty. Designed from the inside out as a dark-first tactical cockpit, the interface eliminates cognitive friction, decorative clutter, and sluggish animations. Every screen renders with zero latency, providing instantaneous access to financial allocations, habit tracking, and deep focus sessions.\n\nThe aesthetic philosophy marries Swiss structural minimalism with the focused atmosphere of an aerospace cockpit. The deep obsidian canvas (#0a0a0a) acts as the void, illuminated by high-precision emerald telemetry (#10b981). Information density is calibrated for high scanability: cards are distinctly framed with razor-thin borders (#262626), interactive surfaces compress on physical touch (scale(0.96) at 140ms), and state shifts pop smoothly into view without jarring the user's attention.",
+    "keyCharacteristics": [
+      "Zero-Latency Feel: Instant optimistic updates and tactile button responses (140ms ease) provide immediate feedback before server confirmation.",
+      "Dark-First Immersion: Deep obsidian base (#0a0a0a) optimized for OLED displays, extended coding sessions, and distraction-free operation.",
+      "High-Contrast Telemetry: Emerald Pulse (#10b981) signifies progress, capital growth, and habit completion; warnings and alerts are strictly functional, never decorative.",
+      "Consistent Rounded-2xl Geometry: Uniform 16px card containers create structured visual rhythm across desktop and mobile."
+    ],
+    "rules": [
+      {
+        "name": "The Emerald Signal Rule",
+        "body": "Emerald Pulse is reserved for positive momentum and primary execution. It must never be applied to purely decorative elements, non-interactive badges, or secondary utilities. When Emerald lights up, something has succeeded.",
+        "section": "colors"
+      },
+      {
+        "name": "The Non-Violent Alert Rule",
+        "body": "Uncompleted habits and routine tasks never render in threatening crimson. Neutral grays represent pending potential; red is restricted to critical budget overruns and explicit priority markers.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Precision Rule",
+        "body": "All dynamic financial sums, timers, and crypto counters must render with tabular numbers (tabular-nums) to prevent layout jitter during rapid updates.",
+        "section": "typography"
+      },
+      {
+        "name": "The Single-Thumb Reach Rule",
+        "body": "On mobile viewports, high-frequency actions (adding expenses, checking habits, switching modules) must reside within the bottom thumb zone or top-right profile anchor.",
+        "section": "layout"
+      },
+      {
+        "name": "The Boundary Before Shadow Rule",
+        "body": "Visual separation is achieved first through crisp borders (border-neutral-800) and surface tonal contrast (#0a0a0a vs #141416). Shadows are exclusively used to communicate temporary z-index elevation.",
+        "section": "elevation"
+      },
+      {
+        "name": "The 16px Container Doctrine",
+        "body": "All structural modules, panels, and cards must share the canonical rounded-2xl (16px) corner radius. Nested interactive elements within cards step down to rounded-lg (8px) or rounded-xl (12px).",
+        "section": "shapes"
+      }
+    ],
+    "dos": [
+      "Do wrap every card and primary surface in rounded-2xl border border-neutral-200 dark:border-neutral-800.",
+      "Do apply button:active:not(:disabled) { transform: scale(0.96); } for physical tactile feedback across all interactive triggers.",
+      "Do use tabular-nums on all currency, percentage, and timer readouts.",
+      "Do respect prefers-reduced-motion: reduce by disabling non-essential keyframe animations.",
+      "Do use ConfirmDialog for all destructive confirmations — never invoke browser window.confirm().",
+      "Do keep Emerald Pulse (#10b981) text paired with high-contrast #0a0a0a backgrounds or dark overlays for full accessibility compliance."
+    ],
+    "donts": [
+      "Don't use browser-default form controls (<select>, checkbox checkmarks without custom styling, number spinners).",
+      "Don't introduce heavy decorative drop shadows or blurry glow effects that muddy the dark obsidian plane.",
+      "Don't paint uncompleted habits or regular pending items in alarmist red; use neutral grays until actual negative thresholds are breached.",
+      "Don't mix arbitrary corner radii (e.g. 4px, 10px, 24px) outside the canonical scale (6px, 8px, 12px, 16px, full).",
+      "Don't split the visual source of truth between light and dark themes; dark is the primary master, light is a mirrored clean palette."
+    ]
+  }
+}

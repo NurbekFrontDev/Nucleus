@@ -195,7 +195,7 @@ export default function DayPanel({ userId, date, onClose, onChanged }: Props) {
           {time && (
             <p className="mt-0.5 text-[13px] font-medium text-neutral-500 dark:text-neutral-400">{time}</p>
           )}
-          {item.note && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
+          {item.note && !item.note.startsWith('{"done_steps"') && <p className="break-words text-xs text-neutral-500">{item.note}</p>}
         </div>
       </div>
     )

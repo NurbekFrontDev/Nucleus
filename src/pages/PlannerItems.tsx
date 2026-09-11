@@ -18,11 +18,14 @@ import {
   formatDuration,
   PRIORITY_DOT,
   type PlannerItem,
+  type PlannerStep,
   type PlannerType,
   type RepeatRule,
   type Priority,
   type TimeOfDay,
   type ItemInput,
+  parseItemSteps,
+  updateItemSteps,
 } from '../lib/planner'
 import { readCache, writeCache } from '../lib/offlineCache'
 import { onSyncEvent } from '../lib/realtimeSync'
@@ -58,6 +61,7 @@ type FormState = {
   cue: string
   identity: string
   two_min: string
+  steps: PlannerStep[]
 }
 
 const emptyForm: FormState = {
@@ -77,6 +81,7 @@ const emptyForm: FormState = {
   cue: '',
   identity: '',
   two_min: '',
+  steps: [],
 }
 
 export default function PlannerItems() {
@@ -89,6 +94,7 @@ export default function PlannerItems() {
   const [editId, setEditId] = useState<string | null>(null)
   const [durationUnit, setDurationUnit] = useState<'min' | 'hour'>('min')
   const [form, setForm] = useState<FormState>(emptyForm)
+  const [newStepText, setNewStepText] = useState('')
   const [saving, setSaving] = useState(false)
   const [delItem, setDelItem] = useState<PlannerItem | null>(null)
 
@@ -294,6 +300,7 @@ export default function PlannerItems() {
       savedUnit = useHours ? 'hour' : 'min'
     }
     setDurationUnit(savedUnit)
+    const itemSteps = parseItemSteps(it)
     setForm({
       type: it.type,
       title: it.title,
@@ -311,6 +318,7 @@ export default function PlannerItems() {
       cue: it.cue ?? '',
       identity: it.identity ?? '',
       two_min: it.two_min ?? '',
+      steps: itemSteps.map((s) => ({ ...s })),
     })
     setShowForm(true)
   }
@@ -319,7 +327,59 @@ export default function PlannerItems() {
     setShowForm(false)
     setEditId(null)
     setForm(emptyForm)
+    setNewStepText('')
     setError('')
+  }
+
+  const persistStepsIfEditing = async (nextSteps: PlannerStep[]) => {
+    if (!user || !editId) return
+    const currentItem = items.find((i) => i.id === editId)
+    if (!currentItem) return
+    try {
+      const updated = await updateItemSteps(user.id, currentItem, nextSteps)
+      setItems((prev) => prev.map((i) => (i.id === editId ? updated : i)))
+    } catch (e) {
+      console.error('Failed to auto-save steps in PlannerItems:', e)
+    }
+  }
+
+  const addStep = () => {
+    const trimmed = newStepText.trim()
+    if (!trimmed) return
+    const newStep: PlannerStep = {
+      id: `st_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      title: trimmed,
+      done: false,
+    }
+    const nextSteps = [...form.steps, newStep]
+    setForm((f) => ({ ...f, steps: nextSteps }))
+    setNewStepText('')
+    void persistStepsIfEditing(nextSteps)
+  }
+
+  const deleteStep = (idx: number) => {
+    const nextSteps = form.steps.filter((_, i) => i !== idx)
+    setForm((f) => ({ ...f, steps: nextSteps }))
+    void persistStepsIfEditing(nextSteps)
+  }
+
+  const moveStep = (fromIdx: number, toIdx: number) => {
+    const copy = [...form.steps]
+    const [moved] = copy.splice(fromIdx, 1)
+    copy.splice(toIdx, 0, moved)
+    setForm((f) => ({ ...f, steps: copy }))
+    void persistStepsIfEditing(copy)
+  }
+
+  const updateStepTitle = (idx: number, nextVal: string) => {
+    setForm((f) => ({
+      ...f,
+      steps: f.steps.map((s, i) => (i === idx ? { ...s, title: nextVal } : s)),
+    }))
+  }
+
+  const handleBlurStep = () => {
+    void persistStepsIfEditing(form.steps)
   }
 
   // При смене типа на «Привычка» разовое повторение не подходит — ставим «каждый день».
@@ -371,6 +431,7 @@ export default function PlannerItems() {
         cue: isHabit ? form.cue.trim() || null : null,
         identity: isHabit ? form.identity.trim() || null : null,
         two_min: isHabit ? form.two_min.trim() || null : null,
+        steps: form.steps,
       }
       if (editId) {
         await updateItem(user.id, editId, input)
@@ -382,7 +443,8 @@ export default function PlannerItems() {
         try {
           localStorage.setItem(`nucleus:durationUnit:${created.id}`, durationUnit)
         } catch {}
-      }cancel()
+      }
+      cancel()
       await loadAll()
     } catch (e) {
       setError((e as Error).message || t('common.saveFailed'))
@@ -628,6 +690,115 @@ export default function PlannerItems() {
           onChange={(e) => setForm((f) => ({ ...f, note: e.target.value }))}
           placeholder={t('items.notePh')}
         />
+      </div>
+
+      {/* Шаги / Подзадачи (План действий) */}
+      <div className="rounded-xl border border-neutral-200 bg-neutral-50/70 p-3 dark:border-neutral-800 dark:bg-neutral-900/40">
+        <div className="mb-2 flex items-center justify-between">
+          <div>
+            <label className="text-xs font-semibold text-neutral-800 dark:text-neutral-200">
+              📋 {t('items.stepsTitle')}
+            </label>
+            <p className="text-[11px] text-neutral-500 dark:text-neutral-400">
+              {t('items.stepsSubtitle')}
+            </p>
+          </div>
+          {form.steps.length > 0 && (
+            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[11px] font-bold text-emerald-700 dark:text-emerald-300">
+              {form.steps.length}
+            </span>
+          )}
+        </div>
+
+        {form.steps.length > 0 && (
+          <div className="mb-2.5 flex flex-col gap-1.5">
+            {form.steps.map((st, idx) => (
+              <div
+                key={st.id}
+                className="group flex items-center justify-between gap-2 rounded-lg border border-neutral-200 bg-white p-2 shadow-sm dark:border-neutral-700/80 dark:bg-neutral-950 transition hover:border-neutral-300 dark:hover:border-neutral-600"
+              >
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-neutral-100 text-[10px] font-bold text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                    {idx + 1}
+                  </span>
+                  <input
+                    type="text"
+                    value={st.title}
+                    onChange={(e) => updateStepTitle(idx, e.target.value)}
+                    onBlur={handleBlurStep}
+                    className="min-w-0 flex-1 bg-transparent text-sm outline-none font-medium"
+                    placeholder={t('items.stepAddPh')}
+                  />
+                </div>
+                <div className="flex items-center gap-0.5 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity duration-150 shrink-0">
+                  {idx > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => moveStep(idx, idx - 1)}
+                      className="rounded p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                      title="Вверх"
+                    >
+                      <span className="text-[10px] leading-none">▲</span>
+                    </button>
+                  )}
+                  {idx < form.steps.length - 1 && (
+                    <button
+                      type="button"
+                      onClick={() => moveStep(idx, idx + 1)}
+                      className="rounded p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                      title="Вниз"
+                    >
+                      <span className="text-[10px] leading-none">▼</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => deleteStep(idx)}
+                    className="rounded p-1 text-neutral-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
+                    title={t('common.delete')}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth={2}
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      className="h-3.5 w-3.5"
+                      aria-hidden="true"
+                    >
+                      <path d="M3 6h18" />
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                      <path d="M10 11v6M14 11v6" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <input
+            className={inputCls}
+            value={newStepText}
+            onChange={(e) => setNewStepText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                addStep()
+              }
+            }}
+            placeholder={t('items.stepAddPh')}
+          />
+          <button
+            type="button"
+            onClick={addStep}
+            className="shrink-0 rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-semibold text-neutral-950 transition hover:bg-emerald-400 active:scale-95"
+          >
+            {t('items.stepAddBtn')}
+          </button>
+        </div>
       </div>
 
       <div>
@@ -888,6 +1059,11 @@ export default function PlannerItems() {
                     </p>
                     {it.important && <span className="shrink-0 text-xs">⭐</span>}
                     {isHabitItem && <span className="shrink-0 text-xs">🔁</span>}
+                    {it.steps && it.steps.length > 0 && (
+                      <span className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                        📋 {it.steps.length}
+                      </span>
+                    )}
                   </div>
                   <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">
                     {describeRepeat(it)}
@@ -927,6 +1103,11 @@ export default function PlannerItems() {
                       {isHabitItem && (
                         <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
                           🔁 {t('items.typeHabit')}
+                        </span>
+                      )}
+                      {it.steps && it.steps.length > 0 && (
+                        <span className="shrink-0 rounded bg-neutral-100 px-1.5 py-0.5 text-[10px] font-semibold text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300">
+                          📋 {it.steps.length}
                         </span>
                       )}
                     </div>

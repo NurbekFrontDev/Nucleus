@@ -38,6 +38,12 @@ export type LogStatus = 'done' | 'skip' | 'fail'
 
 export type DayMood = 'procrastination' | 'burnout'
 
+export type PlannerStep = {
+  id: string
+  title: string
+  done?: boolean
+}
+
 export type PlannerItem = {
   id: string
   user_id: string
@@ -66,8 +72,10 @@ export type PlannerItem = {
   cue: string | null
   identity: string | null
   two_min: string | null
+  stack_after?: string | null
   hidden_today: boolean
   hidden_intervals?: HiddenInterval[]
+  steps?: PlannerStep[]
 }
 
 export type PlannerLog = {
@@ -81,16 +89,31 @@ export type PlannerLog = {
 
 // Набор колонок для запросов (держим в одном месте, чтобы не расходились).
 export const ITEM_BASE_COLS =
-  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today'
+  'id, user_id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today, stack_after'
 
 export const ITEM_COLS =
-  'id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today, hidden_intervals'
+  'id, user_id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today, hidden_intervals, stack_after'
 
+export const ITEM_COLS_WITH_STEPS =
+  'id, user_id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today, hidden_intervals, stack_after, steps'
+
+let hasStepsColumn = true
 let hasHiddenIntervalsColumn = true
 
 export async function safePlannerItemsQuery<T = any>(
   queryFn: (cols: string) => PromiseLike<{ data: T | null; error: any }>,
 ): Promise<{ data: T | null; error: any }> {
+  if (hasStepsColumn) {
+    const res = await queryFn(ITEM_COLS_WITH_STEPS)
+    if (!res.error) return res as { data: T | null; error: any }
+    const msg = String(res.error?.message || '')
+    if (msg.includes('steps') || msg.includes('column') || msg.includes('schema')) {
+      hasStepsColumn = false
+    } else {
+      return res as { data: T | null; error: any }
+    }
+  }
+
   if (hasHiddenIntervalsColumn) {
     const res = await queryFn(ITEM_COLS)
     if (!res.error) return res as { data: T | null; error: any }
@@ -901,6 +924,10 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
   const overrides: Record<string, PlannerDayOverride> = {}
   for (const [id, ov] of ovMap) overrides[id] = ov
 
+  for (const it of occurring) {
+    it.steps = parseItemSteps(it)
+  }
+
   return { items: occurring, logs, overrides, weeklySnapshot }
 }
 
@@ -909,13 +936,6 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
 //   isDone=false -> ставим отметку "выполнено" (upsert по уникальному ключу дня)
 // Возвращает новый лог или null (если сняли отметку).
 // Сообщает модулю уведомлений, что статус дела за СЕГОДНЯ изменился.
-// Почему здесь, а не в экранах: раньше пересборка расписания вызывалась только
-// из экрана «Сегодня». Если дело отмечалось в окне дня, окне привычки или на
-// дашборде, расписание не обновлялось и напоминание всё равно прилетало (а при
-// заходе во вкладку «Сегодня» уже показанное уведомление просто исчезало из
-// шторки — так работает cancel). Теперь точка одна и общая для всего приложения.
-// Импорт динамический: notifications.ts сам импортирует planner.ts, и так мы
-// избегаем кругового импорта на уровне модулей.
 function notifyStatusChanged(
   userId: string,
   itemId: string,
@@ -938,6 +958,7 @@ export async function toggleDone(
   itemId: string,
   dateStr: string,
   isDone: boolean,
+  notePayload?: string | null,
 ): Promise<PlannerLog | null> {
   if (isDone) {
     const { error } = await supabase
@@ -967,10 +988,21 @@ export async function toggleDone(
     notifyStatusChanged(userId, itemId, dateStr, false)
     return null
   }
+
+  const upsertData: Record<string, unknown> = {
+    user_id: userId,
+    item_id: itemId,
+    date: dateStr,
+    status: 'done',
+  }
+  if (notePayload !== undefined) {
+    upsertData.note = notePayload
+  }
+
   const { data, error } = await supabase
     .from('planner_logs')
     .upsert(
-      { user_id: userId, item_id: itemId, date: dateStr, status: 'done' },
+      upsertData,
       { onConflict: 'user_id,item_id,date' },
     )
     .select(LOG_COLS)
@@ -996,6 +1028,352 @@ export async function toggleDone(
   // Дело выполнено -> мгновенно снимаем его напоминание.
   notifyStatusChanged(userId, itemId, dateStr, true)
   return data as PlannerLog
+}
+
+// ====================================================================
+// Подзадачи и шаги (Action Steps / Checklist / Подцели)
+// ====================================================================
+
+export function parseItemSteps(it: { id?: string; steps?: any; stack_after?: any }): PlannerStep[] {
+  // 1. Если есть явно массив steps
+  if (Array.isArray(it.steps)) {
+    if (it.id) setLocalItemSteps(it.id, it.steps)
+    return it.steps
+  }
+  // 2. Если в базе сохранён JSON шагов в stack_after
+  if (it.stack_after !== undefined && it.stack_after !== null && typeof it.stack_after === 'string') {
+    try {
+      const parsed = JSON.parse(it.stack_after)
+      if (Array.isArray(parsed)) {
+        if (it.id) setLocalItemSteps(it.id, parsed)
+        return parsed
+      }
+    } catch {}
+  }
+  // 3. Если дело пришло из базы с пустым stack_after (null), очищаем localStorage — шаги удалены
+  if (it.id) {
+    if (it.stack_after === null) {
+      setLocalItemSteps(it.id, [])
+      return []
+    }
+    const local = getLocalItemSteps(it.id)
+    if (local && local.length > 0) return local
+  }
+  return []
+}
+
+export function getLocalItemSteps(itemId: string): PlannerStep[] | null {
+  try {
+    const raw = localStorage.getItem(`nucleus:steps:${itemId}`)
+    return raw ? JSON.parse(raw) : null
+  } catch {
+    return null
+  }
+}
+
+export function setLocalItemSteps(itemId: string, steps: PlannerStep[]): void {
+  try {
+    if (!steps || steps.length === 0) {
+      localStorage.removeItem(`nucleus:steps:${itemId}`)
+    } else {
+      localStorage.setItem(`nucleus:steps:${itemId}`, JSON.stringify(steps))
+    }
+  } catch {}
+}
+
+export async function persistItemStepsToCloud(
+  _userId: string,
+  itemId: string,
+  steps: PlannerStep[],
+): Promise<void> {
+  setLocalItemSteps(itemId, steps)
+  const json = JSON.stringify(steps)
+
+  if (hasStepsColumn) {
+    try {
+      const { error } = await supabase
+        .from('planner_items')
+        .update({ stack_after: json, steps })
+        .eq('id', itemId)
+      if (!error) return
+      const msg = String(error?.message || '')
+      if (msg.includes('steps') || msg.includes('column') || msg.includes('schema')) {
+        hasStepsColumn = false
+      }
+    } catch {
+      hasStepsColumn = false
+    }
+  }
+
+  try {
+    const { error } = await supabase
+      .from('planner_items')
+      .update({ stack_after: json })
+      .eq('id', itemId)
+    if (error) {
+      console.warn('[persistItemStepsToCloud] error updating stack_after:', error)
+    }
+  } catch (e) {
+    console.warn('[persistItemStepsToCloud] exception updating stack_after:', e)
+  }
+}
+
+export function getDoneStepIdsForDay(
+  userId: string | undefined,
+  itemId: string,
+  dateStr: string,
+  log?: PlannerLog | null,
+  override?: PlannerDayOverride | null,
+): string[] {
+  if (log?.note) {
+    try {
+      const parsed = JSON.parse(log.note)
+      if (Array.isArray(parsed?.done_steps)) return parsed.done_steps
+    } catch {}
+  }
+  if (override?.note) {
+    try {
+      const parsed = JSON.parse(override.note)
+      if (Array.isArray(parsed?.done_steps)) return parsed.done_steps
+    } catch {}
+  }
+  try {
+    if (userId) {
+      const raw = localStorage.getItem(`nucleus:day_steps:${userId}:${dateStr}:${itemId}`)
+      if (raw) return JSON.parse(raw)
+    }
+    const anyRaw = localStorage.getItem(`nucleus:day_steps:_any:${dateStr}:${itemId}`)
+    if (anyRaw) return JSON.parse(anyRaw)
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i)
+      if (k && k.startsWith('nucleus:day_steps:') && k.endsWith(`:${dateStr}:${itemId}`)) {
+        const raw = localStorage.getItem(k)
+        if (raw) return JSON.parse(raw)
+      }
+    }
+  } catch {}
+  return []
+}
+
+export function setDoneStepIdsForDay(
+  userId: string,
+  itemId: string,
+  dateStr: string,
+  stepIds: string[],
+): void {
+  try {
+    localStorage.setItem(`nucleus:day_steps:${userId}:${dateStr}:${itemId}`, JSON.stringify(stepIds))
+    localStorage.setItem(`nucleus:day_steps:_any:${dateStr}:${itemId}`, JSON.stringify(stepIds))
+    window.dispatchEvent(
+      new CustomEvent('nucleus:stepToggle', {
+        detail: { userId, itemId, dateStr, stepIds },
+      }),
+    )
+  } catch {}
+}
+
+export function isStepDone(
+  item: PlannerItem,
+  stepId: string,
+  dateStr: string,
+  isTaskDone: boolean,
+  log?: PlannerLog | null,
+  overrideDoneIds?: string[],
+  override?: PlannerDayOverride | null,
+): boolean {
+  if (overrideDoneIds) return overrideDoneIds.includes(stepId)
+  if (item.repeat_rule === 'none') {
+    const s = item.steps?.find((st) => st.id === stepId)
+    return s?.done ?? false
+  }
+  if (isTaskDone) return true
+  const doneIds = getDoneStepIdsForDay(item.user_id, item.id, dateStr, log, override)
+  return doneIds.includes(stepId)
+}
+
+export function getItemStepsProgress(
+  item: PlannerItem,
+  dateStr: string,
+  isTaskDone: boolean,
+  log?: PlannerLog | null,
+  overrideDoneIds?: string[],
+  override?: PlannerDayOverride | null,
+): { done: number; total: number; allDone: boolean; pct: number } {
+  const steps = item.steps ?? []
+  const total = steps.length
+  if (total === 0) {
+    return { done: isTaskDone ? 1 : 0, total: 0, allDone: isTaskDone, pct: isTaskDone ? 100 : 0 }
+  }
+  let done = 0
+  for (const st of steps) {
+    if (isStepDone(item, st.id, dateStr, isTaskDone, log, overrideDoneIds, override)) done++
+  }
+  const allDone = done === total
+  const pct = Math.round((done / total) * 100)
+  return { done, total, allDone, pct }
+}
+
+export async function toggleItemStep(
+  userId: string,
+  item: PlannerItem,
+  stepId: string,
+  dateStr: string,
+  isTaskCurrentlyDone: boolean,
+  log?: PlannerLog | null,
+): Promise<{
+  updatedItem: PlannerItem
+  newLog: PlannerLog | null
+  taskDoneChanged: boolean
+  isNowDone: boolean
+  doneStepIds?: string[]
+}> {
+  const isOneTime = item.repeat_rule === 'none'
+  const currentSteps = parseItemSteps(item)
+
+  if (isOneTime) {
+    let stepNowDone = false
+    const nextSteps = currentSteps.map((st) => {
+      if (st.id === stepId) {
+        stepNowDone = !st.done
+        return { ...st, done: stepNowDone }
+      }
+      return st
+    })
+    const updatedItem: PlannerItem = { ...item, steps: nextSteps, stack_after: JSON.stringify(nextSteps) }
+    void persistItemStepsToCloud(userId, item.id, nextSteps)
+
+    const allDone = nextSteps.length > 0 && nextSteps.every((s) => s.done)
+    let newLog: PlannerLog | null = log ?? null
+    let taskDoneChanged = false
+
+    if (allDone && !isTaskCurrentlyDone) {
+      newLog = await toggleDone(userId, item.id, dateStr, false)
+      taskDoneChanged = true
+    } else if (!allDone && isTaskCurrentlyDone) {
+      newLog = await toggleDone(userId, item.id, dateStr, true)
+      taskDoneChanged = true
+    }
+
+    return { updatedItem, newLog, taskDoneChanged, isNowDone: allDone }
+  } else {
+    let doneIds = getDoneStepIdsForDay(userId, item.id, dateStr, log)
+    if (isTaskCurrentlyDone && doneIds.length === 0 && currentSteps.length > 0) {
+      doneIds = currentSteps.map((s) => s.id)
+    }
+
+    const exists = doneIds.includes(stepId)
+    const nextDoneIds = exists ? doneIds.filter((id) => id !== stepId) : [...doneIds, stepId]
+    setDoneStepIdsForDay(userId, item.id, dateStr, nextDoneIds)
+
+    const allDone = currentSteps.length > 0 && currentSteps.every((s) => nextDoneIds.includes(s.id))
+    let newLog: PlannerLog | null = log ?? null
+    let taskDoneChanged = false
+
+    const notePayload = JSON.stringify({ done_steps: nextDoneIds })
+
+    if (allDone && !isTaskCurrentlyDone) {
+      newLog = await toggleDone(userId, item.id, dateStr, false, notePayload)
+      taskDoneChanged = true
+      try {
+        await supabase
+          .from('planner_day_overrides')
+          .delete()
+          .eq('user_id', userId)
+          .eq('item_id', item.id)
+          .eq('date', dateStr)
+      } catch {}
+    } else if (!allDone && isTaskCurrentlyDone) {
+      newLog = await toggleDone(userId, item.id, dateStr, true)
+      taskDoneChanged = true
+      try {
+        await supabase
+          .from('planner_day_overrides')
+          .upsert(
+            { user_id: userId, item_id: item.id, date: dateStr, note: notePayload, updated_at: new Date().toISOString() },
+            { onConflict: 'user_id,item_id,date' },
+          )
+      } catch {}
+    } else if (log) {
+      try {
+        await supabase.from('planner_logs').update({ note: notePayload }).eq('id', log.id)
+        newLog = { ...log, note: notePayload }
+      } catch {}
+    } else {
+      try {
+        await supabase
+          .from('planner_day_overrides')
+          .upsert(
+            { user_id: userId, item_id: item.id, date: dateStr, note: notePayload, updated_at: new Date().toISOString() },
+            { onConflict: 'user_id,item_id,date' },
+          )
+      } catch {}
+    }
+
+    return { updatedItem: item, newLog, taskDoneChanged, isNowDone: allDone, doneStepIds: nextDoneIds }
+  }
+}
+
+export async function toggleAllItemSteps(
+  userId: string,
+  item: PlannerItem,
+  dateStr: string,
+  markAllDone: boolean,
+  log?: PlannerLog | null,
+): Promise<{ updatedItem: PlannerItem; newLog: PlannerLog | null; doneStepIds?: string[] }> {
+  const currentSteps = parseItemSteps(item)
+  const isOneTime = item.repeat_rule === 'none'
+
+  if (isOneTime) {
+    const nextSteps = currentSteps.map((st) => ({ ...st, done: markAllDone }))
+    const updatedItem: PlannerItem = { ...item, steps: nextSteps, stack_after: JSON.stringify(nextSteps) }
+    void persistItemStepsToCloud(userId, item.id, nextSteps)
+    return { updatedItem, newLog: log ?? null }
+  } else {
+    const nextDoneIds = markAllDone ? currentSteps.map((s) => s.id) : []
+    setDoneStepIdsForDay(userId, item.id, dateStr, nextDoneIds)
+    return { updatedItem: item, newLog: log ?? null, doneStepIds: nextDoneIds }
+  }
+}
+
+export async function addItemStep(
+  userId: string,
+  item: PlannerItem,
+  stepTitle: string,
+): Promise<PlannerItem> {
+  const trimmed = stepTitle.trim()
+  if (!trimmed) return item
+  const currentSteps = parseItemSteps(item)
+  const newStep: PlannerStep = {
+    id: `st_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+    title: trimmed,
+    done: false,
+  }
+  const nextSteps = [...currentSteps, newStep]
+  const updatedItem: PlannerItem = { ...item, steps: nextSteps, stack_after: JSON.stringify(nextSteps) }
+  await persistItemStepsToCloud(userId, item.id, nextSteps)
+  return updatedItem
+}
+
+export async function deleteItemStep(
+  userId: string,
+  item: PlannerItem,
+  stepId: string,
+): Promise<PlannerItem> {
+  const currentSteps = parseItemSteps(item)
+  const nextSteps = currentSteps.filter((st) => st.id !== stepId)
+  const updatedItem: PlannerItem = { ...item, steps: nextSteps, stack_after: JSON.stringify(nextSteps) }
+  await persistItemStepsToCloud(userId, item.id, nextSteps)
+  return updatedItem
+}
+
+export async function updateItemSteps(
+  userId: string,
+  item: PlannerItem,
+  steps: PlannerStep[],
+): Promise<PlannerItem> {
+  const updatedItem: PlannerItem = { ...item, steps, stack_after: JSON.stringify(steps) }
+  await persistItemStepsToCloud(userId, item.id, steps)
+  return updatedItem
 }
 
 export async function loadDayMood(userId: string, date: string): Promise<{ mood: DayMood; note: string | null } | null> {
@@ -1298,6 +1676,8 @@ export type ItemInput = {
   cue?: string | null
   identity?: string | null
   two_min?: string | null
+  stack_after?: string | null
+  steps?: PlannerStep[]
 }
 
 // Загружает все НЕ архивированные дела пользователя (для списка «Мои дела»).
@@ -1312,7 +1692,7 @@ export async function loadAllItems(userId: string): Promise<PlannerItem[]> {
       .select('id, title, repeat_rule, archived')
       .eq('user_id', userId)
       .eq('archived', false)
-    if (allItems && allItems.length > 0) {
+  if (allItems && allItems.length > 0) {
       const recurringTitles = new Set(
         allItems
           .filter((i) => i.repeat_rule && i.repeat_rule !== 'none')
@@ -1346,12 +1726,19 @@ export async function loadAllItems(userId: string): Promise<PlannerItem[]> {
       .order('created_at', { ascending: true }),
   )
   if (error) throw error
-  return (data ?? []) as unknown as PlannerItem[]
+  const loaded = (data ?? []) as unknown as PlannerItem[]
+  for (const it of loaded) {
+    it.steps = parseItemSteps(it)
+  }
+  return loaded
 }
 
 // Готовит строку для базы. weekdays нужны только для repeat_rule='weekly'.
 function itemRow(input: ItemInput) {
-  return {
+  const stepsJson = Array.isArray(input.steps)
+    ? JSON.stringify(input.steps)
+    : (input.stack_after !== undefined ? input.stack_after : null)
+  const base = {
     title: input.title,
     note: input.note,
     type: input.type,
@@ -1369,20 +1756,42 @@ function itemRow(input: ItemInput) {
     cue: input.cue ?? null,
     identity: input.identity ?? null,
     two_min: input.two_min ?? null,
+    stack_after: stepsJson ?? input.stack_after ?? null,
   }
+  return hasStepsColumn ? { ...base, steps: input.steps ?? [] } : base
 }
 
 // Создаёт новое дело и возвращает его.
 export async function createItem(userId: string, input: ItemInput): Promise<PlannerItem> {
-  const { data, error } = await safePlannerItemsQuery((cols) =>
+  const row = itemRow(input)
+  let { data, error } = await safePlannerItemsQuery((cols) =>
     supabase
       .from('planner_items')
-      .insert({ user_id: userId, ...itemRow(input) })
+      .insert({ user_id: userId, ...row })
       .select(cols)
       .single(),
   )
+  if (error && (String(error?.message).includes('steps') || String(error?.message).includes('column'))) {
+    hasStepsColumn = false
+    const { steps: _, ...fallbackRow } = row as any
+    const retry = await safePlannerItemsQuery((cols) =>
+      supabase
+        .from('planner_items')
+        .insert({ user_id: userId, ...fallbackRow })
+        .select(cols)
+        .single(),
+    )
+    data = retry.data
+    error = retry.error
+  }
   if (error) throw error
-  return data as unknown as PlannerItem
+  const item = data as unknown as PlannerItem
+  if (input.steps && input.steps.length > 0) {
+    setLocalItemSteps(item.id, input.steps)
+    item.steps = input.steps
+    void persistItemStepsToCloud(userId, item.id, input.steps)
+  }
+  return item
 }
 
 // Обновляет существующее дело и возвращает его.
@@ -1423,7 +1832,7 @@ export async function updateItem(
       (old.start_date ?? null) !== (row.start_date ?? null))
 
   // 2) Обновляем шаблон — это затронет только сегодня и будущие дни.
-  const { data, error } = await safePlannerItemsQuery((cols) =>
+  let { data, error } = await safePlannerItemsQuery((cols) =>
     supabase
       .from('planner_items')
       .update(scheduleChanged ? { ...row, schedule_changed_at: todayStr() } : row)
@@ -1432,8 +1841,29 @@ export async function updateItem(
       .select(cols)
       .single(),
   )
+  if (error && (String(error?.message).includes('steps') || String(error?.message).includes('column'))) {
+    hasStepsColumn = false
+    const { steps: _, ...fallbackRow } = row as any
+    const retry = await safePlannerItemsQuery((cols) =>
+      supabase
+        .from('planner_items')
+        .update(scheduleChanged ? { ...fallbackRow, schedule_changed_at: todayStr() } : fallbackRow)
+        .eq('user_id', userId)
+        .eq('id', id)
+        .select(cols)
+        .single(),
+    )
+    data = retry.data
+    error = retry.error
+  }
   if (error) throw error
-  return data as unknown as PlannerItem
+  const item = data as unknown as PlannerItem
+  if (input.steps) {
+    setLocalItemSteps(id, input.steps)
+    item.steps = input.steps
+    void persistItemStepsToCloud(userId, id, input.steps)
+  }
+  return item
 }
 
 // «Замораживает» прошлые дни дела: для каждой прошедшей даты (от старта дела,
@@ -2552,6 +2982,186 @@ export type DayTemplateItem = {
   sort_order: number
 }
 
+// Снимок состояния дня перед применением шаблона (для надёжного отката к прошлому состоянию)
+export type DayTemplateRollbackSnapshot = {
+  template_id: string
+  template_name: string
+  date: string
+  applied_at: string
+  previous_overrides: Array<{
+    item_id: string
+    title?: string | null
+    icon?: string | null
+    time_of_day?: TimeOfDay | null
+    at_time_start?: string | null
+    at_time_end?: string | null
+    duration_min?: number | null
+    priority?: Priority
+    note?: string | null
+    frozen?: boolean
+    hidden?: boolean
+  }>
+  previous_orders: Array<{
+    item_id: string
+    sort_order: number
+  }>
+  archived_oneoff_ids: string[]
+  created_oneoff_ids: string[]
+}
+
+export const templateRollbackCacheKey = (userId: string, dateStr: string) =>
+  `planner_template_rollback:${userId}:${dateStr}`
+
+export async function loadTemplateRollback(
+  userId: string,
+  dateStr: string,
+): Promise<DayTemplateRollbackSnapshot | null> {
+  const local = readCache<DayTemplateRollbackSnapshot | null>(
+    templateRollbackCacheKey(userId, dateStr),
+  )
+  try {
+    const { data, error } = await supabase
+      .from('planner_day_template_rollbacks')
+      .select('template_id, template_name, date, applied_at, previous_overrides, previous_orders, archived_oneoff_ids, created_oneoff_ids')
+      .eq('user_id', userId)
+      .eq('date', dateStr)
+      .maybeSingle()
+    if (!error && data) {
+      const snap: DayTemplateRollbackSnapshot = {
+        template_id: data.template_id,
+        template_name: data.template_name,
+        date: data.date,
+        applied_at: data.applied_at,
+        previous_overrides: data.previous_overrides ?? [],
+        previous_orders: data.previous_orders ?? [],
+        archived_oneoff_ids: data.archived_oneoff_ids ?? [],
+        created_oneoff_ids: data.created_oneoff_ids ?? [],
+      }
+      writeCache(templateRollbackCacheKey(userId, dateStr), snap)
+      return snap
+    }
+  } catch {
+    // офлайн либо таблица ещё не создана в Supabase
+  }
+  return local ?? null
+}
+
+export async function saveTemplateRollback(
+  userId: string,
+  snapshot: DayTemplateRollbackSnapshot,
+): Promise<void> {
+  writeCache(templateRollbackCacheKey(userId, snapshot.date), snapshot)
+  try {
+    await supabase.from('planner_day_template_rollbacks').upsert(
+      {
+        user_id: userId,
+        date: snapshot.date,
+        template_id: snapshot.template_id || null,
+        template_name: snapshot.template_name,
+        applied_at: snapshot.applied_at,
+        previous_overrides: snapshot.previous_overrides,
+        previous_orders: snapshot.previous_orders,
+        archived_oneoff_ids: snapshot.archived_oneoff_ids,
+        created_oneoff_ids: snapshot.created_oneoff_ids,
+      },
+      { onConflict: 'user_id,date' },
+    )
+  } catch {
+    // офлайн либо таблица ещё не создана в Supabase
+  }
+}
+
+export async function clearTemplateRollback(
+  userId: string,
+  dateStr: string,
+): Promise<void> {
+  writeCache(templateRollbackCacheKey(userId, dateStr), null)
+  try {
+    await supabase
+      .from('planner_day_template_rollbacks')
+      .delete()
+      .eq('user_id', userId)
+      .eq('date', dateStr)
+  } catch {
+    // офлайн
+  }
+}
+
+export async function rollbackDayTemplate(
+  userId: string,
+  dateStr: string,
+): Promise<{ success: boolean; templateName?: string }> {
+  const snapshot = await loadTemplateRollback(userId, dateStr)
+
+  // 1. Если был снимок с созданными разовыми делами шаблона — удаляем/архивируем их
+  if (snapshot?.created_oneoff_ids && snapshot.created_oneoff_ids.length > 0) {
+    try {
+      await supabase
+        .from('planner_items')
+        .delete()
+        .eq('user_id', userId)
+        .in('id', snapshot.created_oneoff_ids)
+    } catch {
+      await supabase
+        .from('planner_items')
+        .update({ archived: true })
+        .eq('user_id', userId)
+        .in('id', snapshot.created_oneoff_ids)
+    }
+  }
+
+  // 2. Если какие-то разовые дела были заархивированы при применении шаблона — разархивируем их
+  if (snapshot?.archived_oneoff_ids && snapshot.archived_oneoff_ids.length > 0) {
+    await supabase
+      .from('planner_items')
+      .update({ archived: false })
+      .eq('user_id', userId)
+      .in('id', snapshot.archived_oneoff_ids)
+  }
+
+  // 3. Очищаем текущие overrides и порядок дня
+  await Promise.all([
+    supabase.from('planner_day_overrides').delete().eq('user_id', userId).eq('date', dateStr),
+    supabase.from('planner_day_order').delete().eq('user_id', userId).eq('date', dateStr),
+  ])
+
+  // 4. Восстанавливаем сохранённые до шаблона overrides (если были)
+  if (snapshot?.previous_overrides && snapshot.previous_overrides.length > 0) {
+    const rows = snapshot.previous_overrides.map((o) => ({
+      ...o,
+      user_id: userId,
+      date: dateStr,
+      updated_at: new Date().toISOString(),
+    }))
+    const { error: ovErr } = await supabase
+      .from('planner_day_overrides')
+      .upsert(rows, { onConflict: 'user_id,item_id,date' })
+    if (ovErr) console.warn('Failed restoring previous overrides:', ovErr)
+  }
+
+  // 5. Восстанавливаем сохранённый порядок (если был)
+  if (snapshot?.previous_orders && snapshot.previous_orders.length > 0) {
+    const ordRows = snapshot.previous_orders.map((o) => ({
+      user_id: userId,
+      item_id: o.item_id,
+      date: dateStr,
+      sort_order: o.sort_order,
+    }))
+    const { error: ordErr } = await supabase
+      .from('planner_day_order')
+      .upsert(ordRows, { onConflict: 'user_id,item_id,date' })
+    if (ordErr) console.warn('Failed restoring previous order:', ordErr)
+  }
+
+  // 6. Очищаем снимок отката
+  await clearTemplateRollback(userId, dateStr)
+
+  return {
+    success: true,
+    templateName: snapshot?.template_name,
+  }
+}
+
 // Загружает шаблоны дней пользователя вместе с числом дел в каждом.
 export async function loadDayTemplates(userId: string): Promise<DayTemplate[]> {
   const [tplRes, itemRes] = await Promise.all([
@@ -2637,17 +3247,52 @@ export async function applyDayTemplate(
   templateId: string,
   dateStr: string,
 ): Promise<number> {
-  const { data, error } = await supabase
-    .from('planner_day_template_items')
-    .select(
-      'title, note, icon, time_of_day, at_time_start, at_time_end, duration_min, priority, important, sort_order',
-    )
-    .eq('user_id', userId)
-    .eq('template_id', templateId)
-    .order('sort_order', { ascending: true })
-  if (error) throw error
-  const tItems = (data ?? []) as DayTemplateItem[]
+  const [tplHeaderRes, itemsRes] = await Promise.all([
+    supabase
+      .from('planner_day_templates')
+      .select('id, name, icon')
+      .eq('user_id', userId)
+      .eq('id', templateId)
+      .maybeSingle(),
+    supabase
+      .from('planner_day_template_items')
+      .select(
+        'title, note, icon, time_of_day, at_time_start, at_time_end, duration_min, priority, important, sort_order',
+      )
+      .eq('user_id', userId)
+      .eq('template_id', templateId)
+      .order('sort_order', { ascending: true }),
+  ])
+  if (itemsRes.error) throw itemsRes.error
+  const tItems = (itemsRes.data ?? []) as DayTemplateItem[]
   if (tItems.length === 0) return 0
+  const templateName = (tplHeaderRes.data as { name: string } | null)?.name || 'Шаблон'
+
+  // 0. Снимок текущего состояния дня ДО применения шаблона для безопасного отката (Rollback)
+  const [prevOverridesRes, prevOrdersRes, prevOneoffsRes] = await Promise.all([
+    supabase
+      .from('planner_day_overrides')
+      .select('item_id, title, icon, time_of_day, at_time_start, at_time_end, duration_min, priority, note, frozen, hidden')
+      .eq('user_id', userId)
+      .eq('date', dateStr),
+    supabase
+      .from('planner_day_order')
+      .select('item_id, sort_order')
+      .eq('user_id', userId)
+      .eq('date', dateStr),
+    supabase
+      .from('planner_items')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('start_date', dateStr)
+      .eq('repeat_rule', 'none')
+      .eq('archived', false),
+  ])
+
+  const prevOverrides = (prevOverridesRes.data ?? []) as DayTemplateRollbackSnapshot['previous_overrides']
+  const prevOrders = (prevOrdersRes.data ?? []) as DayTemplateRollbackSnapshot['previous_orders']
+  const archivedOneoffIds = ((prevOneoffsRes.data ?? []) as { id: string }[]).map((r) => r.id)
+  const createdOneoffIds: string[] = []
 
   // 1. Загружаем все не архивированные дела пользователя из planner_items
   const { data: itemsData, error: itemsErr } = await safePlannerItemsQuery((cols) =>
@@ -2717,6 +3362,7 @@ export async function applyDayTemplate(
       if (!newErr && newMaster) {
         master = newMaster as unknown as PlannerItem
         masterByTitle.set(key, master)
+        createdOneoffIds.push(master.id)
       }
     }
 
@@ -2778,6 +3424,19 @@ export async function applyDayTemplate(
       .upsert(ordersToInsert, { onConflict: 'user_id,item_id,date' })
     if (ordErr) throw ordErr
   }
+
+  // 6. Сохраняем снимок отката (в локальный кэш и БД)
+  const rollbackSnap: DayTemplateRollbackSnapshot = {
+    template_id: templateId,
+    template_name: templateName,
+    date: dateStr,
+    applied_at: new Date().toISOString(),
+    previous_overrides: prevOverrides,
+    previous_orders: prevOrders,
+    archived_oneoff_ids: archivedOneoffIds,
+    created_oneoff_ids: createdOneoffIds,
+  }
+  await saveTemplateRollback(userId, rollbackSnap)
 
   return tItems.length
 }

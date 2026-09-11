@@ -11,6 +11,9 @@ import {
   deleteReflection,
   isItemOnDate,
   todayStr,
+  isStepDone,
+  toggleItemStep,
+  getItemStepsProgress,
   type PlannerItem,
   type HabitDetail,
   type LogStatus,
@@ -39,6 +42,11 @@ export default function HabitSheet({ userId, item, date, onClose, onChanged }: P
   const { t, lang } = useLang()
   const [open, setOpen] = useState(true)
   const visible = useAnimatedMount(open, 220)
+
+  const [currentItem, setCurrentItem] = useState<PlannerItem>(item)
+  useEffect(() => {
+    setCurrentItem(item)
+  }, [item])
 
   const [detail, setDetail] = useState<HabitDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -130,6 +138,22 @@ export default function HabitSheet({ userId, item, date, onClose, onChanged }: P
     try {
       await setHabitStatus(userId, item.id, date, next)
       await reload()
+      onChanged()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const onToggleStep = async (stepId: string) => {
+    if (busy) return
+    const isDone = detail?.statusByDate[date] === 'done'
+    setBusy(true)
+    try {
+      const res = await toggleItemStep(userId, currentItem, stepId, date, isDone)
+      setCurrentItem({ ...res.updatedItem })
+      if (res.taskDoneChanged) {
+        await reload()
+      }
       onChanged()
     } finally {
       setBusy(false)
@@ -327,6 +351,62 @@ export default function HabitSheet({ userId, item, date, onClose, onChanged }: P
               <p className="text-sm text-neutral-400">{t('habits.notScheduledDay')}</p>
             )}
           </div>
+
+          {/* Шаги / Подцели привычки */}
+          {currentItem.steps && currentItem.steps.length > 0 && (
+            <div className="mt-4 rounded-xl border border-neutral-200 p-3 dark:border-neutral-800">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
+                  {t('items.stepsTitle')}
+                </p>
+                {(() => {
+                  const isDone = detail?.statusByDate[date] === 'done'
+                  const prog = getItemStepsProgress(currentItem, date, isDone)
+                  return (
+                    <span className="text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
+                      {prog.done}/{prog.total}
+                    </span>
+                  )
+                })()}
+              </div>
+              <div className="space-y-1.5">
+                {currentItem.steps.map((st) => {
+                  const isDone = detail?.statusByDate[date] === 'done'
+                  const done = isStepDone(currentItem, st.id, date, isDone)
+                  return (
+                    <div
+                      key={st.id}
+                      onClick={() => onToggleStep(st.id)}
+                      className="flex cursor-pointer select-none items-center gap-2.5 rounded-lg px-2 py-1.5 transition hover:bg-neutral-50 dark:hover:bg-neutral-800/50"
+                    >
+                      <div
+                        className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition ${
+                          done
+                            ? 'border-emerald-500 bg-emerald-500 text-white'
+                            : 'border-neutral-300 dark:border-neutral-600'
+                        }`}
+                      >
+                        {done && (
+                          <svg className="h-3 w-3 stroke-current stroke-[2.5]" viewBox="0 0 24 24" fill="none">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                        )}
+                      </div>
+                      <span
+                        className={`text-sm ${
+                          done
+                            ? 'text-neutral-400 line-through dark:text-neutral-500'
+                            : 'text-neutral-700 dark:text-neutral-200'
+                        }`}
+                      >
+                        {st.title}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {loading || !detail ? (
             <p className="mt-4 text-sm text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>

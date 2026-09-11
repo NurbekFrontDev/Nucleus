@@ -10,13 +10,17 @@ import {
   saveDayTemplate,
   applyDayTemplate,
   deleteDayTemplate,
+  loadTemplateRollback,
+  rollbackDayTemplate,
   formatDuration,
   todayStr,
   type PlannerItem,
   type DayTemplate,
   type DayTemplateItem,
+  type DayTemplateRollbackSnapshot,
   type TimeOfDay,
 } from '../lib/planner'
+import { showToast } from '../lib/toast'
 
 // Окно «Шаблоны дня» с возможностью быстрого раскрытия состава шаблона (▼ / ▲).
 type Props = {
@@ -50,6 +54,11 @@ export default function DayTemplateSheet({ userId, date, items, onClose, onAppli
   // Подтверждение удаления.
   const [delTpl, setDelTpl] = useState<DayTemplate | null>(null)
 
+  // Снимок применённого шаблона для отката
+  const [rollbackSnap, setRollbackSnap] = useState<DayTemplateRollbackSnapshot | null>(null)
+  const [rollingBack, setRollingBack] = useState(false)
+  const [confirmRollback, setConfirmRollback] = useState(false)
+
   const close = () => setOpen(false)
   useEffect(() => {
     if (!visible) onClose()
@@ -66,8 +75,12 @@ export default function DayTemplateSheet({ userId, date, items, onClose, onAppli
 
   const load = async () => {
     try {
-      const list = await loadDayTemplates(userId)
+      const [list, snap] = await Promise.all([
+        loadDayTemplates(userId),
+        loadTemplateRollback(userId, date),
+      ])
       setTemplates(list)
+      setRollbackSnap(snap)
     } catch (e) {
       setError((e as Error).message)
     } finally {
@@ -127,11 +140,37 @@ export default function DayTemplateSheet({ userId, date, items, onClose, onAppli
     setError('')
     try {
       await applyDayTemplate(userId, tpl.id, date)
+      showToast(
+        ru
+          ? `Шаблон «${tpl.name}» применён к ${dayLabel}`
+          : `Template "${tpl.name}" applied to ${dayLabel}`,
+      )
       onApplied()
       close()
     } catch (e) {
       setError((e as Error).message)
       setBusyId(null)
+    }
+  }
+
+  const doRollback = async () => {
+    if (rollingBack) return
+    setRollingBack(true)
+    setError('')
+    try {
+      const res = await rollbackDayTemplate(userId, date)
+      const tName = res.templateName || rollbackSnap?.template_name || ''
+      showToast(
+        t('tpl.rollbackSuccess', { name: tName }),
+      )
+      setRollbackSnap(null)
+      setConfirmRollback(false)
+      onApplied()
+      close()
+    } catch (e) {
+      setError((e as Error).message)
+    } finally {
+      setRollingBack(false)
     }
   }
 
@@ -199,6 +238,31 @@ export default function DayTemplateSheet({ userId, date, items, onClose, onAppli
             ✕
           </button>
         </div>
+
+        {/* Баннер отката шаблона, если к этому дню применён шаблон */}
+        {rollbackSnap && (
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-2xl border border-amber-300/80 bg-amber-50/90 p-3 shadow-xs dark:border-amber-800/60 dark:bg-amber-950/30">
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-1.5 text-xs font-semibold text-amber-900 dark:text-amber-200">
+                <span className="text-sm">↩️</span>
+                <span className="truncate">
+                  {t('tpl.rollbackApplied', { name: rollbackSnap.template_name })}
+                </span>
+              </div>
+              <p className="mt-0.5 truncate text-[11px] text-amber-700 dark:text-amber-400">
+                {t('tpl.rollbackHint')}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setConfirmRollback(true)}
+              disabled={rollingBack}
+              className="shrink-0 rounded-xl bg-amber-500 px-3 py-1.5 text-xs font-semibold text-neutral-950 shadow-xs transition hover:bg-amber-400 disabled:opacity-60"
+            >
+              {rollingBack ? t('tpl.reverting') : t('tpl.rollback')}
+            </button>
+          </div>
+        )}
 
         {/* Список шаблонов */}
         <div className="mt-4 flex-1 space-y-2.5 overflow-y-auto pr-1">
@@ -415,6 +479,17 @@ export default function DayTemplateSheet({ userId, date, items, onClose, onAppli
           )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmRollback}
+        title={t('tpl.rollbackConfirmTitle')}
+        message={t('tpl.rollbackConfirmMsg', { name: rollbackSnap?.template_name ?? '' })}
+        confirmLabel={t('tpl.rollback')}
+        cancelLabel={t('common.cancel')}
+        danger
+        onConfirm={doRollback}
+        onCancel={() => setConfirmRollback(false)}
+      />
 
       <ConfirmDialog
         open={!!delTpl}
