@@ -2404,6 +2404,7 @@ export type DaySummary = {
   total: number
   done: number
   marks: DayMark[]
+  energy?: number
 }
 
 // Набор полей, нужных календарю и статистике для точной сборки дня.
@@ -2486,8 +2487,7 @@ function weeklySnapshotForDate(
 }
 
 // Собирает состав дня для календаря и статистики теми же правилами, что и loadDay:
-// обычное расписание → weekly-снимок → прямая правка даты. Время здесь не нужно,
-// поэтому подменяем только состав и приоритеты, влияющие на метки/подсчёты.
+// обычное расписание → weekly-снимок → прямая правка даты.
 function resolveSummaryDayItems(
   all: PlannerItem[],
   dateStr: string,
@@ -2501,6 +2501,8 @@ function resolveSummaryDayItems(
   }
 
   const keepInDay = (item: PlannerItem): boolean => {
+    // ВАЖНО: скрытые дела не должны попадать в состав дня (синхронно с loadDay)
+    if (isItemHiddenOnDate(item, dateStr)) return false
     const override = overrides.get(item.id)
     if (override?.hidden) return false
     if (override || dayLogs[item.id]) return true
@@ -2509,24 +2511,88 @@ function resolveSummaryDayItems(
     return isItemOnDate(item, dateStr)
   }
 
+  // Защита от дубликатов: если в дне уже есть активное повторяющееся дело с таким названием,
+  // исключаем дублирующее разовое дело с тем же названием (синхронно с loadDay).
+  const recurringTitlesInDay = new Set(
+    all
+      .filter((it) => it.repeat_rule !== 'none' && keepInDay(it))
+      .map((it) => it.title.trim().toLowerCase()),
+  )
+
+  const filterNonSnapshot = (itemsList: PlannerItem[]) =>
+    itemsList.filter((it) => {
+      if (!keepInDay(it)) return false
+      if (it.repeat_rule === 'none' && recurringTitlesInDay.has(it.title.trim().toLowerCase())) {
+        return false
+      }
+      return true
+    })
+
   const snapshot = weeklySnapshotForDate(snapshots, dateStr)
-  if (!snapshot) return all.filter(keepInDay).map(applyDatePriority)
+  if (!snapshot) return filterNonSnapshot(all).map(applyDatePriority)
 
   const allById = new Map(all.map((item) => [item.id, item]))
-  const snapshotItemIds = new Set(snapshot.items.map((item) => item.item_id))
-  const snapshotItems = snapshot.items
+  const allByTitle = new Map(all.map((item) => [item.title.trim().toLowerCase(), item]))
+
+  // Дедупликация элементов снимка по названию (синхронно с loadDay)
+  const seenSnapshotTitles = new Set<string>()
+  const uniqueSnapshotItems = snapshot.items.filter((item) => {
+    const key = item.title.trim().toLowerCase()
+    if (seenSnapshotTitles.has(key)) return false
+    seenSnapshotTitles.add(key)
+    return true
+  })
+
+  const snapshotItemIds = new Set(uniqueSnapshotItems.map((item) => item.item_id))
+  const snapshotTitles = new Set(uniqueSnapshotItems.map((item) => item.title.trim().toLowerCase()))
+
+  const snapshotItems = uniqueSnapshotItems
     .map((snapshotItem) => {
-      const original = allById.get(snapshotItem.item_id)
-      const override = overrides.get(snapshotItem.item_id)
+      const original =
+        allById.get(snapshotItem.item_id) ||
+        allByTitle.get(snapshotItem.title.trim().toLowerCase())
+      const override = original ? overrides.get(original.id) : overrides.get(snapshotItem.item_id)
+      if (override?.hidden) return null
+      if (original && isItemHiddenOnDate(original, dateStr)) return null
+      if (!original && !dayLogs[snapshotItem.item_id] && !override) return null
       if (
-        !original ||
-        (original.archived && !dayLogs[snapshotItem.item_id] && !override) ||
-        override?.hidden ||
-        isItemHiddenOnDate(original, dateStr)
+        original &&
+        original.archived &&
+        !dayLogs[original.id] &&
+        !override
       )
         return null
+
+      const baseItem: PlannerItem = original
+        ? { ...original }
+        : ({
+            id: snapshotItem.item_id,
+            user_id: '',
+            title: snapshotItem.title,
+            note: snapshotItem.note,
+            icon: snapshotItem.icon,
+            type: 'task',
+            repeat_rule: 'none',
+            weekdays: [],
+            time_of_day: snapshotItem.time_of_day,
+            at_time_start: snapshotItem.at_time_start,
+            at_time_end: snapshotItem.at_time_end,
+            duration_min: snapshotItem.duration_min,
+            priority: snapshotItem.priority,
+            important: snapshotItem.important,
+            archived: false,
+            start_date: dateStr,
+            color: null,
+            sort_order: snapshotItem.sort_order,
+            schedule_changed_at: null,
+            cue: null,
+            identity: null,
+            two_min: null,
+            hidden_today: false,
+          } as unknown as PlannerItem)
+
       return applyDatePriority({
-        ...original,
+        ...baseItem,
         priority: snapshotItem.priority,
         important: snapshotItem.important,
         sort_order: snapshotItem.sort_order,
@@ -2534,17 +2600,34 @@ function resolveSummaryDayItems(
     })
     .filter((item): item is PlannerItem => item !== null)
 
-  // Прямая правка даты намеренно может добавить дело поверх недельного снимка.
+  // Разовые дела, дела с отметками или прямыми правками даты (синхронно с loadDay)
   const directExtras = all
-    .filter(
-      (item) =>
-        !snapshotItemIds.has(item.id) &&
-        !isItemHiddenOnDate(item, dateStr) &&
-        !!overrides.get(item.id) &&
-        !overrides.get(item.id)?.hidden,
-    )
+    .filter((item) => {
+      if (snapshotItemIds.has(item.id)) return false
+      if (snapshotTitles.has(item.title.trim().toLowerCase())) return false
+      if (isItemHiddenOnDate(item, dateStr)) return false
+      const ov = overrides.get(item.id)
+      if (ov?.hidden) return false
+      if (item.archived && !dayLogs[item.id] && !ov) return false
+      if (item.repeat_rule === 'none' && (!item.start_date || item.start_date === dateStr))
+        return true
+      if (dayLogs[item.id]) return true
+      return false
+    })
     .map(applyDatePriority)
-  return [...snapshotItems, ...directExtras]
+
+  const seenFinalTitles = new Set<string>()
+  const seenFinalIds = new Set<string>()
+  const combined: PlannerItem[] = []
+  for (const it of [...snapshotItems, ...directExtras]) {
+    const tKey = it.title.trim().toLowerCase()
+    if (!seenFinalTitles.has(tKey) && !seenFinalIds.has(it.id)) {
+      seenFinalTitles.add(tKey)
+      seenFinalIds.add(it.id)
+      combined.push(it)
+    }
+  }
+  return combined
 }
 
 // Считает сводку по каждому дню в диапазоне [startDate, endDate] включительно.
@@ -2555,7 +2638,7 @@ export async function loadDaySummaries(
   endDate: string,
 ): Promise<Record<string, DaySummary>> {
   const itemsResPromise = safePlannerItemsQuery((cols) =>
-    supabase.from('planner_items').select(cols).eq('user_id', userId).eq('archived', false),
+    supabase.from('planner_items').select(cols).eq('user_id', userId),
   )
   const [itemsRes, logsRes, overrideRes, snapshots] = await Promise.all([
     itemsResPromise,
@@ -2607,12 +2690,26 @@ export async function loadDaySummaries(
     )
     const marks: DayMark[] = []
     let done = 0
+    const logsMap: Record<string, PlannerLog> = {}
     for (const item of dayItems) {
       const isDone = dayLogs[item.id] === 'done'
-      if (isDone) done++
+      if (isDone) {
+        done++
+        logsMap[item.id] = {
+          id: '',
+          item_id: item.id,
+          date: d,
+          status: 'done',
+          value: null,
+          note: null,
+        }
+      }
       marks.push({ priority: item.priority, done: isDone, habit: item.type === 'habit' })
     }
-    if (marks.length > 0) out[d] = { total: marks.length, done, marks }
+    const dayEnergy = calcDayEnergy(dayItems, logsMap)
+    if (marks.length > 0) {
+      out[d] = { total: marks.length, done, marks, energy: dayEnergy.energy }
+    }
     d = addDays(d, 1)
   }
   return out
@@ -2850,7 +2947,7 @@ export async function loadPlannerStats(
   const endIso = new Date(end + 'T23:59:59').toISOString()
 
   const itemsResPromise = safePlannerItemsQuery((cols) =>
-    supabase.from('planner_items').select(cols).eq('user_id', userId).eq('archived', false),
+    supabase.from('planner_items').select(cols).eq('user_id', userId),
   )
   const [itemsRes, logsRes, pomoRes, overrideRes, snapshots] = await Promise.all([
     itemsResPromise,

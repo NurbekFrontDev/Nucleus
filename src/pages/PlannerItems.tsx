@@ -947,6 +947,7 @@ export default function PlannerItems() {
           <TimePicker
             value={form.at_time_end}
             onChange={setEndTime}
+            align="right"
           />
         </div>
       </div>

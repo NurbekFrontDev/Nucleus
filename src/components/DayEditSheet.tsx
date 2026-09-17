@@ -250,7 +250,7 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
       onClick={close}
     >
       <div
-        className={`${open ? 'animate-dialog' : 'animate-dialog-out'} max-h-[90vh] w-full overflow-y-auto overscroll-contain rounded-t-3xl border border-neutral-200 bg-white p-5 shadow-xl dark:border-neutral-800 dark:bg-neutral-900 sm:max-w-lg sm:rounded-2xl`}
+        className={`${open ? 'animate-dialog' : 'animate-dialog-out'} max-h-[90vh] w-full overflow-y-auto overflow-x-hidden overscroll-contain rounded-t-3xl border border-neutral-200 bg-white p-5 shadow-xl dark:border-neutral-800 dark:bg-neutral-900 sm:max-w-lg sm:rounded-2xl`}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Шапка */}
@@ -342,7 +342,7 @@ export default function DayEditSheet({ userId, date, item, hasOverride, existing
           </div>
           <div>
             <p className="mb-1.5 text-sm font-medium">{t('items.timeEnd')}</p>
-            <TimePicker value={end} onChange={setEndWithDuration} />
+            <TimePicker value={end} onChange={setEndWithDuration} align="right" />
           </div>
         </div>
 

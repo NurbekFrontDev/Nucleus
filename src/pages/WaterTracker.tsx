@@ -593,13 +593,13 @@ export default function WaterTracker() {
                         <p className="text-sm text-neutral-600 dark:text-neutral-300">
                           {t('notif.from')}
                         </p>
-                        <TimePicker value={notif.waterFrom} onChange={(v) => updateNotif({ waterFrom: v })} />
+                        <TimePicker value={notif.waterFrom} onChange={(v) => updateNotif({ waterFrom: v })} align="right" />
                       </div>
                       <div className="flex items-center justify-between gap-3">
                         <p className="text-sm text-neutral-600 dark:text-neutral-300">
                           {t('notif.to')}
                         </p>
-                        <TimePicker value={notif.waterTo} onChange={(v) => updateNotif({ waterTo: v })} />
+                        <TimePicker value={notif.waterTo} onChange={(v) => updateNotif({ waterTo: v })} align="right" />
                       </div>
                     </div>
                   )}

@@ -6,6 +6,7 @@ type Props = {
   value: string // 'HH:MM' (24ч, внутренний формат) или ''
   onChange: (v: string) => void
   placeholder?: string
+  align?: 'auto' | 'left' | 'right'
 }
 
 const triggerCls =
@@ -50,7 +51,7 @@ const cellCls = (sel: boolean) =>
 
 // Выбор времени в стиле приложения, 12-часовой формат (часы / минуты / AM·PM).
 // Внутреннее значение остаётся 'HH:MM' (24ч), чтобы не ломать хранение/сортировку.
-export default function TimePicker({ value, onChange, placeholder }: Props) {
+export default function TimePicker({ value, onChange, placeholder, align = 'auto' }: Props) {
   const { lang } = useLang()
   const [open, setOpen] = useState(false)
   const [alignRight, setAlignRight] = useState(false)
@@ -59,16 +60,42 @@ export default function TimePicker({ value, onChange, placeholder }: Props) {
   const ref = useRef<HTMLDivElement>(null)
 
   // При открытии выбираем сторону раскрытия так, чтобы поповер не вылезал за
-  // правый край экрана (важно для поля End time на телефоне — раньше резалось).
+  // правый край экрана или модального окна (важно для поля End time).
   const toggleOpen = () => {
     setOpen((v) => {
       const next = !v
       if (next && ref.current) {
         const r = ref.current.getBoundingClientRect()
-        setAlignRight(r.left + 232 > window.innerWidth - 8)
+        // Ищем границы ближайшего скролл-/модального контейнера
+        let boundaryRight = window.innerWidth - 8
+        let boundaryBottom = window.innerHeight - 8
+        let parent = ref.current.parentElement
+        while (parent && parent !== document.body) {
+          const style = window.getComputedStyle(parent)
+          if (
+            ['auto', 'hidden', 'scroll'].includes(style.overflowX) ||
+            ['auto', 'hidden', 'scroll'].includes(style.overflowY)
+          ) {
+            const pr = parent.getBoundingClientRect()
+            boundaryRight = Math.min(boundaryRight, pr.right - 8)
+            boundaryBottom = Math.min(boundaryBottom, pr.bottom - 8)
+            break
+          }
+          parent = parent.parentElement
+        }
+
+        if (align === 'right') {
+          setAlignRight(true)
+        } else if (align === 'left') {
+          setAlignRight(false)
+        } else {
+          // Автовыравнивание: если поповер шириной 224px не помещается вправо
+          setAlignRight(r.left + 232 > boundaryRight)
+        }
+
         // Если снизу мало места — раскрываем вверх, чтобы колонки времени не
-        // срезались нижним краем экрана и кнопкой ассистента.
-        setAlignTop(r.bottom + 300 > window.innerHeight - 8)
+        // срезались нижним краем экрана/модалки и кнопкой ассистента.
+        setAlignTop(r.bottom + 260 > boundaryBottom)
       }
       return next
     })

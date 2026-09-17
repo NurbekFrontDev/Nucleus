@@ -153,7 +153,8 @@ export default function PlannerToday() {
   const [overrides, setOverrides] = useState<Record<string, PlannerDayOverride>>(cachedDay?.overrides ?? {})
   const [habitStreaks, setHabitStreaks] = useState<Record<string, number>>(cachedDay?.streaks ?? {})
   const [habitNextStreaks, setHabitNextStreaks] = useState<Record<string, number>>({})
-  const [stripSummaries, setStripSummaries] = useState<Record<string, DaySummary>>({})
+  const cachedStrip = user ? readCache<Record<string, DaySummary>>(`nucleus:stripSummaries:${user.id}`) : null
+  const [stripSummaries, setStripSummaries] = useState<Record<string, DaySummary>>(cachedStrip ?? {})
   const [mood, setMood] = useState<DayMood | null>(cachedDay?.mood ?? null)
   const [moodNote, setMoodNote] = useState<string | null>(cachedDay?.moodNote ?? null)
   const [expandedSteps, setExpandedSteps] = useState<Record<string, boolean>>({})
@@ -303,7 +304,13 @@ export default function PlannerToday() {
     ;(async () => {
       try {
         const s = await loadDaySummaries(user.id, addDays(today, -6), today)
-        if (active) setStripSummaries(s)
+        if (active) {
+          setStripSummaries((prev) => {
+            const merged = { ...prev, ...s }
+            writeCache(`nucleus:stripSummaries:${user.id}`, merged)
+            return merged
+          })
+        }
       } catch {
         // некритично для ленты колец
       }
@@ -508,6 +515,27 @@ export default function PlannerToday() {
     [items, logs],
   )
   const pct = dayEnergy.energy
+
+  // Мгновенная синхронизация текущего дня в ленте колец при отметках/изменениях дня (local-first)
+  useEffect(() => {
+    if (!user || items.length === 0) return
+    setStripSummaries((prev) => {
+      const existing = prev[date]
+      const updated: DaySummary = {
+        total: items.length,
+        done: dayEnergy.doneCount,
+        marks: existing?.marks ?? items.map((it) => ({
+          priority: it.priority,
+          done: logs[it.id]?.status === 'done',
+          habit: it.type === 'habit',
+        })),
+        energy: dayEnergy.energy,
+      }
+      const next = { ...prev, [date]: updated }
+      writeCache(`nucleus:stripSummaries:${user.id}`, next)
+      return next
+    })
+  }, [user, date, items, logs, dayEnergy.doneCount, dayEnergy.energy])
   const barColor =
     pct <= 30
       ? 'bg-red-500'
@@ -582,6 +610,11 @@ export default function PlannerToday() {
         const next = { ...prev }
         if (newLog) next[item.id] = newLog
         else delete next[item.id]
+        if (user) {
+          const ck = `planday:${user.id}:${date}`
+          const c = readCache<DayCache>(ck)
+          if (c) writeCache(ck, { ...c, logs: next })
+        }
         return next
       })
       if (item.repeat_rule !== 'none') {
@@ -614,6 +647,11 @@ export default function PlannerToday() {
         const next = { ...prev }
         if (currentlyDone) next[item.id] = optimistic
         else delete next[item.id]
+        if (user) {
+          const ck = `planday:${user.id}:${date}`
+          const c = readCache<DayCache>(ck)
+          if (c) writeCache(ck, { ...c, logs: next })
+        }
         return next
       })
       if (item.repeat_rule !== 'none') {
@@ -1496,12 +1534,25 @@ export default function PlannerToday() {
               const sel = dStr === date
               const isStripToday = dStr === today
               const sum = stripSummaries[dStr]
-              let ringPct = sum && sum.total > 0 ? Math.round((sum.done / sum.total) * 100) : 0
-              // Для выбранного дня берём «энергию» дня, чтобы цвет и заполнение
+              let ringPct =
+                sum && sum.total > 0
+                  ? (sum.energy !== undefined ? sum.energy : Math.round((sum.done / sum.total) * 100))
+                  : 0
+              // Для выбранного дня берём актуальную «энергию» дня, чтобы цвет и заполнение
               // кольца совпадали с прогресс-баром внизу.
-              if (dStr === date && items.length > 0) ringPct = pct
-              const off = STRIP_C * (1 - ringPct / 100)
-              const tone = ringTone(ringPct)
+              if (dStr === date && items.length > 0) {
+                ringPct = pct
+              } else if (user) {
+                // Если день не выбран прямо сейчас, но в локальном кэше есть этот день —
+                // берём точную энергию из кэша (мгновенно и без расхождений).
+                const cached = readCache<DayCache>(`planday:${user.id}:${dStr}`)
+                if (cached && cached.items && cached.items.length > 0) {
+                  ringPct = calcDayEnergy(cached.items, cached.logs).energy
+                }
+              }
+              const clampedPct = Math.min(100, Math.max(0, ringPct))
+              const off = STRIP_C * (1 - clampedPct / 100)
+              const tone = ringTone(clampedPct)
               return (
                 <button
                   key={dStr}
@@ -1518,10 +1569,10 @@ export default function PlannerToday() {
                         r={STRIP_R}
                         fill="none"
                         strokeWidth="3.5"
-                        className={sel && ringPct > 0 ? `${tone} opacity-20` : 'text-neutral-200 dark:text-neutral-800'}
+                        className={sel && clampedPct > 0 ? `${tone} opacity-20` : 'text-neutral-200 dark:text-neutral-800'}
                         stroke="currentColor"
                       />
-                      {ringPct > 0 && (
+                      {clampedPct > 0 && (
                         <circle
                           cx="24"
                           cy="24"
@@ -1539,7 +1590,7 @@ export default function PlannerToday() {
                     <span
                       className={`relative text-[11px] font-bold uppercase tracking-tight sm:text-sm ${
                         sel
-                          ? ringPct > 0
+                          ? clampedPct > 0
                             ? tone
                             : 'text-neutral-600 dark:text-neutral-300'
                           : isStripToday
