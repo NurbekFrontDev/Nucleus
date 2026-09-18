@@ -62,64 +62,73 @@ function App() {
   // не добавляя lang в его зависимости (иначе эффект перезапускался бы).
   const langRef = useRef(lang)
   langRef.current = lang
-  const [lastPath, setLastPath] = useState(() => getLastNavPath())
+  const [lastPath, setLastPath] = useState(() => getLastNavPath('/planner'))
   // Пока идёт первичное решение «куда открыть» — показываем экран загрузки,
   // а не Дашборд. Снимается в useLayoutEffect ниже (мгновенно, до отрисовки).
   const [booting, setBooting] = useState(true)
-  // Редирект «на последнюю вкладку» должен произойти РОВНО ОДИН РАЗ при холодном
-  // старте.
-  const didBoot = useRef(false)
+
+  // Страховочный ref целевого пути при начальном старте:
+  // защищает сохранённую вкладку от перезаписи промежуточным дефолтным маршрутом '/'
+  const initialTargetRef = useRef<string | null>(null)
+  const isRestoredRef = useRef(false)
   const userId = user?.id
 
   // 1. Мгновенное синхронное открытие последней сохранённой вкладки (до первой отрисовки).
-  // Если на старте мы на дефолтном корне '/' или '/index.html', а в локальном кэше устройства
-  // есть сохранённая вкладка — сразу переходим туда через replace, ещё до paint.
-  // Так пользователь не видит вспышку чужого экрана.
+  // Выполняется синхронно на самом первом рендере без задержек и ожидания сети!
   useLayoutEffect(() => {
-    if (didBoot.current) return
-    if (!userId) {
-      setBooting(false)
-      return
-    }
-    didBoot.current = true
+    if (isRestoredRef.current) return
+    isRestoredRef.current = true
+
     try {
-      const target = getLastNavPath()
+      const target = getLastNavPath('/planner')
       const current = window.location.pathname
       const isInitialRoute = current === '/' || current === '/index.html' || current === ''
       if (isInitialRoute && isValidNavPath(target) && target !== current) {
+        initialTargetRef.current = target
         navigate(target, { replace: true })
+      } else {
+        initialTargetRef.current = current
       }
     } catch {
       // кэш недоступен — не критично, останемся на текущем маршруте
     }
     setBooting(false)
-  }, [userId, navigate])
+  }, [navigate])
 
   // 2. Дополнительная сверка с нативным хранилищем Android (Preferences / SharedPreferences).
-  // На телефоне WebView может быть жестко выгружен системой, и native Preferences
+  // На телефоне WebView может быть выгружен системой, и native Preferences
   // является гарантированным источником правды.
   useEffect(() => {
-    if (!userId) return
+    if (!Capacitor.isNativePlatform()) return
     let active = true
-    void loadLastNavPathAsync().then((nativePath) => {
+    void loadLastNavPathAsync('/planner').then((nativePath) => {
       if (!active) return
       const current = window.location.pathname
       const isInitialRoute = current === '/' || current === '/index.html' || current === ''
       if (isInitialRoute && isValidNavPath(nativePath) && nativePath !== current) {
+        initialTargetRef.current = nativePath
         navigate(nativePath, { replace: true })
       }
     })
     return () => {
       active = false
     }
-  }, [userId, navigate])
+  }, [navigate])
 
   // 3. Сохранение последнего маршрута при ЛЮБОМ переходе внутри приложения.
-  // Сохраняются ВСЕ допустимые экраны, включая '/' (FinLit Дашборд) и '/planner' (Сегодня).
-  // Сохранение выполняется СТРОГО ЛОКАЛЬНО на текущем устройстве (localStorage + Preferences на Android),
-  // исключая конфликты между ПК и телефоном.
+  // БЛОКИРУЕМ перезапись, пока React Router переходит со стартового '/' к целевому сохранённому пути!
   useEffect(() => {
     const p = location.pathname
+    if (initialTargetRef.current) {
+      if (p === initialTargetRef.current) {
+        // Достигли целевого сохранённого экрана — снимаем блокировку
+        initialTargetRef.current = null
+      } else {
+        // Мы ещё на промежуточном стартовом маршруте ('/') — НЕ перезаписываем сохранённый путь!
+        return
+      }
+    }
+
     if (isValidNavPath(p)) {
       saveLastNavPath(p)
       setLastPath(p)
@@ -127,8 +136,11 @@ function App() {
   }, [location.pathname])
 
   // 4. Глобальные слушатели жизненного цикла устройства (сворачивание, свайп, блокировка экрана, pagehide)
+  const locationRef = useRef(location.pathname)
+  locationRef.current = location.pathname
+
   useEffect(() => {
-    return initNavLifecycle(() => window.location.pathname)
+    return initNavLifecycle(() => locationRef.current)
   }, [])
 
   // Фоновая синхронизация имени пользователя при старте приложения

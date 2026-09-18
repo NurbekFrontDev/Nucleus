@@ -75,6 +75,7 @@ try {
  */
 export function getLastNavPath(defaultPath = '/planner'): string {
   if (inMemoryPath && isValidNavPath(inMemoryPath)) {
+    console.log('[navStorage] Read from memory:', inMemoryPath)
     return inMemoryPath
   }
   try {
@@ -82,11 +83,13 @@ export function getLastNavPath(defaultPath = '/planner'): string {
     if (isValidNavPath(raw)) {
       const canonical = canonicalizeNavPath(raw)
       inMemoryPath = canonical
+      console.log('[navStorage] Read from localStorage:', canonical)
       return canonical
     }
   } catch {
     // игнорируем ошибки доступа к localStorage
   }
+  console.log('[navStorage] Fallback to defaultPath:', defaultPath)
   return defaultPath
 }
 
@@ -104,6 +107,7 @@ export async function loadLastNavPathAsync(defaultPath = '/planner'): Promise<st
         try {
           localStorage.setItem(LAST_PATH_KEY, canonical)
         } catch {}
+        console.log('[navStorage] Read from native Preferences:', canonical)
         return canonical
       }
     } catch (e) {
@@ -128,6 +132,7 @@ export function saveLastNavPath(path: string): void {
   const canonical = canonicalizeNavPath(path)
 
   inMemoryPath = canonical
+  console.log('[navStorage] Saved path:', canonical)
 
   try {
     localStorage.setItem(LAST_PATH_KEY, canonical)
