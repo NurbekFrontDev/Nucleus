@@ -1,7 +1,6 @@
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
 import { lazy, useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useAuth } from './lib/AuthContext'
-import { supabase } from './lib/supabase'
 import { initNativeAuth, initDesktopAuth, setDesktopDnd } from './lib/native'
 import { initNotifications } from './lib/notifications'
 import { initPush } from './lib/push'
@@ -19,6 +18,13 @@ import { initPomoSync, type PomoSyncMessage } from './lib/pomoSync'
 import { startRealtimeSync, stopRealtimeSync, onSyncEvent } from './lib/realtimeSync'
 import { enableFocusDnd, disableFocusDnd } from './lib/dnd'
 import { syncUserNameFromCloud } from './lib/db'
+import {
+  getLastNavPath,
+  loadLastNavPathAsync,
+  saveLastNavPath,
+  initNavLifecycle,
+  isValidNavPath,
+} from './lib/navStorage'
 
 // Код-сплиттинг (А-9, шаг 3): страницы грузятся отдельными чанками по мере
 // перехода на них, а не одним большим бандлом при старте — это ускоряет первый
@@ -42,14 +48,8 @@ const PlannerStats = lazy(() => import('./pages/PlannerStats'))
 const PlannerSettings = lazy(() => import('./pages/PlannerSettings'))
 const WaterTracker = lazy(() => import('./pages/WaterTracker'))
 
-// Ключ локального кэша последней открытой вкладки. БД (app_settings.last_path)
-// остаётся источником правды для синхронизации между устройствами, а этот кэш
-// нужен, чтобы МГНОВЕННО (ещё до отрисовки) открыть нужную вкладку на старте и
-// не мигать Дашбордом.
-const LAST_PATH_KEY = 'nucleus:lastPath'
-
 function NotFoundRedirect({ fallback }: { fallback: string }) {
-  const to = fallback && fallback !== '/login' ? fallback : '/'
+  const to = isValidNavPath(fallback) ? fallback : '/'
   return <Navigate to={to} replace />
 }
 
@@ -62,34 +62,19 @@ function App() {
   // не добавляя lang в его зависимости (иначе эффект перезапускался бы).
   const langRef = useRef(lang)
   langRef.current = lang
-  const [lastPath, setLastPath] = useState(() => {
-    try {
-      return localStorage.getItem(LAST_PATH_KEY) || '/'
-    } catch {
-      return '/'
-    }
-  })
+  const [lastPath, setLastPath] = useState(() => getLastNavPath())
   // Пока идёт первичное решение «куда открыть» — показываем экран загрузки,
   // а не Дашборд. Снимается в useLayoutEffect ниже (мгновенно, до отрисовки).
   const [booting, setBooting] = useState(true)
-  // Восстановление последней вкладки должно срабатывать ТОЛЬКО один раз при
-  // загрузке. Иначе эффект перезапускается на каждой навигации (navigate из
-  // react-router меняет идентичность при смене маршрута), и любой переход на '/'
-  // (например клик по вкладке FinLit) мгновенно отбрасывает обратно на
-  // сохранённый путь — из-за этого "не переключается".
-  const didRestore = useRef(false)
   // Редирект «на последнюю вкладку» должен произойти РОВНО ОДИН РАЗ при холодном
-  // старте. Иначе эффект ниже повторяется на каждой навигации (navigate из
-  // react-router может менять идентичность) и клик по вкладке FinLit (переход на
-  // '/') мгновенно отбрасывает обратно на сохранённый '/planner' — вкладка
-  // «не переключается».
+  // старте.
   const didBoot = useRef(false)
   const userId = user?.id
 
-  // Мгновенное открытие последней вкладки (до первой отрисовки). Если на старте
-  // мы на корне '/' или '/index.html', а в локальном кэше есть другая последняя вкладка — сразу
-  // уводим туда через replace, ещё до paint. Так пользователь не видит вспышку
-  // Дашборда с последующим перескоком.
+  // 1. Мгновенное синхронное открытие последней сохранённой вкладки (до первой отрисовки).
+  // Если на старте мы на дефолтном корне '/' или '/index.html', а в локальном кэше устройства
+  // есть сохранённая вкладка — сразу переходим туда через replace, ещё до paint.
+  // Так пользователь не видит вспышку чужого экрана.
   useLayoutEffect(() => {
     if (didBoot.current) return
     if (!userId) {
@@ -98,17 +83,11 @@ function App() {
     }
     didBoot.current = true
     try {
-      const cached = localStorage.getItem(LAST_PATH_KEY)
+      const target = getLastNavPath()
       const current = window.location.pathname
       const isInitialRoute = current === '/' || current === '/index.html' || current === ''
-      if (
-        cached &&
-        cached !== '/login' &&
-        cached !== '/' &&
-        cached !== '/index.html' &&
-        isInitialRoute
-      ) {
-        navigate(cached, { replace: true })
+      if (isInitialRoute && isValidNavPath(target) && target !== current) {
+        navigate(target, { replace: true })
       }
     } catch {
       // кэш недоступен — не критично, останемся на текущем маршруте
@@ -116,44 +95,41 @@ function App() {
     setBooting(false)
   }, [userId, navigate])
 
-  // Загрузка last_path из БД и навигация к нему. Выполняется ОДИН РАЗ при старте.
-  // Если в БД есть осмысленный путь, и мы стоим на дефолтном маршруте — переходим.
+  // 2. Дополнительная сверка с нативным хранилищем Android (Preferences / SharedPreferences).
+  // На телефоне WebView может быть жестко выгружен системой, и native Preferences
+  // является гарантированным источником правды.
   useEffect(() => {
     if (!userId) return
-    if (didRestore.current) return
-    didRestore.current = true
     let active = true
-
-    ;(async () => {
-      try {
-        const { data, error } = await supabase
-          .from('app_settings')
-          .select('last_path')
-          .eq('user_id', userId)
-          .maybeSingle()
-        if (error) {
-          console.warn('[last_path] ошибка чтения из БД:', error.message)
-        }
-        const dbPath = (data as { last_path?: string } | null)?.last_path
-        if (active && dbPath && dbPath !== '/login' && dbPath !== '/index.html' && dbPath !== '/') {
-          try {
-            localStorage.setItem(LAST_PATH_KEY, dbPath)
-          } catch {}
-          // Переходим, только если мы на дефолтном/корневом маршруте
-          const current = window.location.pathname
-          if (current === '/' || current === '/index.html' || current === '') {
-            navigate(dbPath, { replace: true })
-          }
-        }
-      } catch (e) {
-        console.warn('[last_path] сбой восстановления:', e)
+    void loadLastNavPathAsync().then((nativePath) => {
+      if (!active) return
+      const current = window.location.pathname
+      const isInitialRoute = current === '/' || current === '/index.html' || current === ''
+      if (isInitialRoute && isValidNavPath(nativePath) && nativePath !== current) {
+        navigate(nativePath, { replace: true })
       }
-    })()
-
+    })
     return () => {
       active = false
     }
   }, [userId, navigate])
+
+  // 3. Сохранение последнего маршрута при ЛЮБОМ переходе внутри приложения.
+  // Сохраняются ВСЕ допустимые экраны, включая '/' (FinLit Дашборд) и '/planner' (Сегодня).
+  // Сохранение выполняется СТРОГО ЛОКАЛЬНО на текущем устройстве (localStorage + Preferences на Android),
+  // исключая конфликты между ПК и телефоном.
+  useEffect(() => {
+    const p = location.pathname
+    if (isValidNavPath(p)) {
+      saveLastNavPath(p)
+      setLastPath(p)
+    }
+  }, [location.pathname])
+
+  // 4. Глобальные слушатели жизненного цикла устройства (сворачивание, свайп, блокировка экрана, pagehide)
+  useEffect(() => {
+    return initNavLifecycle(() => window.location.pathname)
+  }, [])
 
   // Фоновая синхронизация имени пользователя при старте приложения
   useEffect(() => {
@@ -161,20 +137,13 @@ function App() {
     void syncUserNameFromCloud(userId).catch(() => {})
   }, [userId])
 
-  // Синхронизация пути и настроек в реальном времени при изменении на другом устройстве.
-  // Только обновляем localStorage, НЕ навигируем автоматически (чтобы не мешать
-  // текущей работе пользователя на этом устройстве). При следующем запуске —
-  // приложение откроется на актуальном пути.
+  // Синхронизация имени пользователя в реальном времени при изменении на другом устройстве.
+  // Маршруты намеренно НЕ синхронизируются через Realtime, чтобы телефон и ПК сохраняли
+  // своё независимое состояние.
   useEffect(() => {
     return onSyncEvent(['app_settings'], (evt) => {
       if (evt.table === 'app_settings' && evt.new) {
-        const d = evt.new as { last_path?: string; user_name?: string }
-        if (d.last_path && typeof d.last_path === 'string' && d.last_path !== '/login' && d.last_path !== '/index.html' && d.last_path !== '/') {
-          setLastPath(d.last_path)
-          try {
-            localStorage.setItem(LAST_PATH_KEY, d.last_path)
-          } catch {}
-        }
+        const d = evt.new as { user_name?: string }
         if (d.user_name && typeof d.user_name === 'string' && d.user_name.trim() && userId) {
           const clean = d.user_name.trim()
           try {
@@ -185,30 +154,6 @@ function App() {
       }
     })
   }, [userId])
-
-  // Сохраняем текущую страницу локально и синхронизируем в БД.
-  // Пропускаем дефолтный '/' — это промежуточный маршрут при переключении вкладок,
-  // и его запись перезатирает реальный последний путь.
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  useEffect(() => {
-    const p = location.pathname
-    if (!p || p === '/' || p === '/login' || p === '/index.html') return
-    setLastPath(p)
-    try {
-      localStorage.setItem(LAST_PATH_KEY, p)
-    } catch {}
-    // Дебаунс записи в БД — при быстром переключении вкладок
-    // предотвращает лишние запросы и перезапись осмысленного пути.
-    if (userId) {
-      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-      saveTimerRef.current = setTimeout(() => {
-        void supabase.from('app_settings').upsert(
-          { user_id: userId, last_path: p, updated_at: new Date().toISOString() },
-          { onConflict: 'user_id' },
-        )
-      }, 1000)
-    }
-  }, [userId, location.pathname])
 
   // Нативная авторизация: обновление токена при возврате в приложение и
   // обработка возврата из браузера после входа через Google (deep link).
@@ -356,6 +301,7 @@ function App() {
     CapacitorApp.addListener('backButton', () => {
       const path = window.location.pathname
       if (path === '/' || path === '/planner') {
+        saveLastNavPath(path)
         CapacitorApp.minimizeApp()
       } else {
         navigate(-1)
