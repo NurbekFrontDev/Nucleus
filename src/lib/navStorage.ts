@@ -68,6 +68,19 @@ try {
   // localStorage недоступен на этапе загрузки модуля
 }
 
+// На Android синхронизируем SharedPreferences в localStorage в фоне для максимальной надёжности
+if (Capacitor.isNativePlatform()) {
+  void Preferences.get({ key: LAST_PATH_KEY }).then(({ value }) => {
+    if (isValidNavPath(value)) {
+      const canonical = canonicalizeNavPath(value)
+      inMemoryPath = canonical
+      try {
+        localStorage.setItem(LAST_PATH_KEY, canonical)
+      } catch {}
+    }
+  }).catch(() => {})
+}
+
 /**
  * Синхронно возвращает сохранённый последний путь устройства.
  * Используется при старте ДО первой отрисовки (useLayoutEffect / useState),
