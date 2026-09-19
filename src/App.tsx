@@ -2,7 +2,12 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import { lazy, useEffect, useRef, useState } from 'react'
 import { useAuth } from './lib/AuthContext'
 import { initNativeAuth, initDesktopAuth, setDesktopDnd } from './lib/native'
-import { initNotifications } from './lib/notifications'
+import {
+  initNotifications,
+  cancelItemNotification,
+  cancelOneoffNotification,
+  rescheduleAll,
+} from './lib/notifications'
 import { initPush } from './lib/push'
 import { maybeAutoBackup, backupTargetLabel } from './lib/backup'
 import { showToast } from './lib/toast'
@@ -172,6 +177,32 @@ function App() {
     return () => {
       stopRealtimeSync()
     }
+  }, [userId])
+
+  // Мгновенная отмена локальных напоминаний при отметке дел на ПК/другом устройстве в Realtime
+  useEffect(() => {
+    if (!userId || !Capacitor.isNativePlatform()) return
+    return onSyncEvent(['planner_logs', 'planner_oneoff', 'oneoff_tasks', 'planner_items'], (evt) => {
+      if (evt.table === 'planner_logs') {
+        const rec = (evt.new || evt.old) as { item_id?: string; status?: string } | undefined
+        if (rec?.item_id) {
+          if (rec.status === 'done' || rec.status === 'skip') {
+            void cancelItemNotification(rec.item_id)
+          }
+          void rescheduleAll(userId)
+        }
+      } else if (evt.table === 'planner_oneoff' || evt.table === 'oneoff_tasks') {
+        const rec = (evt.new || evt.old) as { id?: string; done_at?: string } | undefined
+        if (rec?.id) {
+          if (rec.done_at) {
+            void cancelOneoffNotification(rec.id)
+          }
+          void rescheduleAll(userId)
+        }
+      } else if (evt.table === 'planner_items') {
+        void rescheduleAll(userId)
+      }
+    })
   }, [userId])
 
   // Локальные уведомления и авто-бэкап (А-6): при запуске планируем уведомления

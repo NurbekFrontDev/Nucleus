@@ -104,6 +104,15 @@ export function initNativeAuth(): () => void {
       window.dispatchEvent(new CustomEvent('nucleus-open-focus'))
       return
     }
+    // Тап по напоминанию задачи или воды — переходим на соответствующий экран.
+    if (url.includes('://planner/water')) {
+      window.dispatchEvent(new CustomEvent('nucleus-push-open', { detail: { route: '/planner/water' } }))
+      return
+    }
+    if (url.includes('://planner')) {
+      window.dispatchEvent(new CustomEvent('nucleus-push-open', { detail: { route: '/planner' } }))
+      return
+    }
     if (!url.includes('login-callback')) return
     try {
       const parsed = new URL(url)

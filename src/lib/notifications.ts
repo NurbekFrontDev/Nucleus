@@ -1,6 +1,32 @@
-import { Capacitor } from '@capacitor/core'
+import { Capacitor, registerPlugin } from '@capacitor/core'
 import { supabase } from './supabase'
 import { loadDay, todayStr } from './planner'
+
+export type ScheduledReminderItem = {
+  id: number
+  type: 'task' | 'oneoff' | 'water'
+  itemId: string
+  date: string
+  title: string
+  body: string
+  triggerAt: number
+  path: string
+}
+
+export interface TaskReminderPluginInterface {
+  scheduleReminders(options: {
+    supabaseUrl: string
+    supabaseAnonKey: string
+    userId: string
+    accessToken?: string
+    reminders: ScheduledReminderItem[]
+  }): Promise<{ count: number }>
+
+  cancelReminder(options: { id?: number; itemId?: string }): Promise<void>
+  cancelAll(): Promise<void>
+}
+
+export const TaskReminder = registerPlugin<TaskReminderPluginInterface>('TaskReminder')
 
 // ===== Локальные уведомления (А-6) =====
 // Планируем уведомления на устройстве через @capacitor/local-notifications:
@@ -174,10 +200,14 @@ function hookVisibility(userId: string): void {
 }
 
 // Точечно снимает напоминание по конкретному делу.
-// Работает мгновенно и без обращения к базе, поэтому уведомление гарантированно
-// не успеет прилететь, пока пересобирается полное расписание.
+// Работает мгновенно: снимает системный будильник в AlarmManager и в LocalNotifications.
 export async function cancelItemNotification(itemId: string): Promise<void> {
   if (!Capacitor.isNativePlatform()) return
+  try {
+    await TaskReminder.cancelReminder({ itemId })
+  } catch {
+    // игнорируем ошибку плагина
+  }
   try {
     const { LocalNotifications } = await import('@capacitor/local-notifications')
     await LocalNotifications.cancel({ notifications: [{ id: taskNotifId(itemId) }] })
@@ -189,6 +219,11 @@ export async function cancelItemNotification(itemId: string): Promise<void> {
 // Точечно снимает напоминание по разовой задаче.
 export async function cancelOneoffNotification(taskId: string): Promise<void> {
   if (!Capacitor.isNativePlatform()) return
+  try {
+    await TaskReminder.cancelReminder({ itemId: taskId })
+  } catch {
+    // игнорируем ошибку плагина
+  }
   try {
     const { LocalNotifications } = await import('@capacitor/local-notifications')
     await LocalNotifications.cancel({ notifications: [{ id: oneoffNotifId(taskId) }] })
@@ -218,22 +253,23 @@ export async function onItemStatusChanged(
 export async function rescheduleAll(userId: string): Promise<void> {
   if (!Capacitor.isNativePlatform()) return
   try {
-    const { LocalNotifications } = await import('@capacitor/local-notifications')
-    const perm = await LocalNotifications.checkPermissions()
-    if (perm.display !== 'granted') return
-
     await ensureReminderChannel()
 
-    // Снимаем ранее запланированные наши уведомления (id из наших диапазонов: 100000+).
-    const pending = await LocalNotifications.getPending()
-    const toCancel = pending.notifications.filter((n) => n.id >= TASK_ID_BASE)
-    if (toCancel.length) {
-      await LocalNotifications.cancel({ notifications: toCancel.map((n) => ({ id: n.id })) })
+    // Снимаем ранее запланированные уведомления из старого плагина LocalNotifications
+    try {
+      const { LocalNotifications } = await import('@capacitor/local-notifications')
+      const pending = await LocalNotifications.getPending()
+      const toCancel = pending.notifications.filter((n) => n.id >= TASK_ID_BASE)
+      if (toCancel.length) {
+        await LocalNotifications.cancel({ notifications: toCancel.map((n) => ({ id: n.id })) })
+      }
+    } catch {
+      // плагин LocalNotifications опционален
     }
 
     const settings = await loadNotifSettings(userId)
     const now = Date.now()
-    const notifications: Array<Record<string, unknown>> = []
+    const reminders: ScheduledReminderItem[] = []
 
     // Дела и привычки на сегодня со временем начала.
     if (settings.tasksEnabled) {
@@ -250,17 +286,19 @@ export async function rescheduleAll(userId: string): Promise<void> {
           if (!base) continue
           const at = new Date(base.getTime() - settings.tasksOffsetMin * 60000)
           if (at.getTime() <= now) continue
-          notifications.push({
+
+          reminders.push({
             id: taskNotifId(it.id),
+            type: 'task',
+            itemId: it.id,
+            date: todayStr(),
             title: it.icon ? `${it.icon} ${it.title}` : it.title,
             body:
               settings.tasksOffsetMin > 0
                 ? `Через ${settings.tasksOffsetMin} мин`
                 : 'Пора начинать',
-            schedule: { at, allowWhileIdle: true },
-            channelId: REMINDER_CHANNEL_ID,
-            sound: REMINDER_SOUND,
-            extra: { kind: 'task', path: '/planner' },
+            triggerAt: at.getTime(),
+            path: '/planner',
           })
           i++
           if (i >= 60) break
@@ -292,14 +330,15 @@ export async function rescheduleAll(userId: string): Promise<void> {
         )
         if (remDate.getTime() <= now) continue
 
-        notifications.push({
+        reminders.push({
           id: oneoffNotifId(ot.id),
+          type: 'oneoff',
+          itemId: ot.id,
+          date: taskDate,
           title: `📌 ${ot.title}`,
           body: 'Напоминание о разовой задаче',
-          schedule: { at: remDate, allowWhileIdle: true },
-          channelId: REMINDER_CHANNEL_ID,
-          sound: REMINDER_SOUND,
-          extra: { kind: 'oneoff', path: '/planner' },
+          triggerAt: remDate.getTime(),
+          path: '/planner',
         })
         oCount++
         if (oCount >= 50) break
@@ -317,14 +356,15 @@ export async function rescheduleAll(userId: string): Promise<void> {
         let i = 0
         for (let t = from.getTime(); t <= to.getTime(); t += stepMs) {
           if (t > now) {
-            notifications.push({
+            reminders.push({
               id: WATER_ID_BASE + i,
+              type: 'water',
+              itemId: `water_${i}`,
+              date: todayStr(),
               title: '💧 Время попить воды',
               body: 'Выпей воды и занеси в приложение',
-              schedule: { at: new Date(t), allowWhileIdle: true },
-              channelId: REMINDER_CHANNEL_ID,
-              sound: REMINDER_SOUND,
-              extra: { kind: 'water', path: '/planner/water' },
+              triggerAt: t,
+              path: '/planner/water',
             })
           }
           i++
@@ -333,9 +373,19 @@ export async function rescheduleAll(userId: string): Promise<void> {
       }
     }
 
-    if (notifications.length) {
-      await LocalNotifications.schedule({ notifications: notifications as never })
-    }
+    // Планируем всё через наш нативный TaskReminder плагин с Pre-Notification Live Sync защитой!
+    const { data: authData } = await supabase.auth.getSession()
+    const accessToken = authData.session?.access_token || ''
+    const supabaseUrl = (import.meta.env.VITE_SUPABASE_URL as string) || ''
+    const supabaseAnonKey = (import.meta.env.VITE_SUPABASE_ANON_KEY as string) || ''
+
+    await TaskReminder.scheduleReminders({
+      supabaseUrl,
+      supabaseAnonKey,
+      userId,
+      accessToken,
+      reminders,
+    })
   } catch {
     // уведомления не критичны для работы приложения — тихо игнорируем
   }

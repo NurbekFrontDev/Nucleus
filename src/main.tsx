@@ -16,7 +16,7 @@ initStatusBar()
 // подменяем pathname в history на сохранённый маршрут ДО инициализации BrowserRouter.
 // Благодаря этому BrowserRouter сразу стартует на нужной вкладке без гонок рендера,
 // промежуточных редиректов и сбоев.
-const APP_VERSION = '0.1.47'
+const APP_VERSION = '0.1.48'
 try {
   const lastVer = localStorage.getItem('nucleus:appVersion')
   if (lastVer !== APP_VERSION) {

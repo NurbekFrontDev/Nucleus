@@ -12,6 +12,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DndPlugin.class);
         registerPlugin(FocusNotifyPlugin.class);
         registerPlugin(BatteryPlugin.class);
+        registerPlugin(TaskReminderPlugin.class);
         super.onCreate(savedInstanceState);
     }
 
