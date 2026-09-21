@@ -2,14 +2,12 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
 import { supabase } from '../lib/supabase'
-import { isAdminEmail } from '../lib/installs'
+import { isAdminEmail, formatDeviceName } from '../lib/installs'
 import { onSyncEvent } from '../lib/realtimeSync'
 
 // Админ-панель (только для аккаунта Нурбека): список всех установок Nucleus
 // на устройствах пользователей — имя, email, платформа (Windows/Android),
-// модель устройства, версии ОС и приложения, активность. Фильтры
-// «Все / Android / Windows». Данные пишет каждая установка при запуске
-// (sendInstallHeartbeat -> app_installs), читаются строки по RLS-политике админа.
+// модель устройства, версии ОС и приложения. Фильтры «Все / Android / Windows».
 
 type InstallRow = {
   id: string
@@ -32,17 +30,15 @@ const cardCls =
 const inputCls =
   'w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-950'
 
-const pad = (n: number) => String(n).padStart(2, '0')
-
-const platformBadge = (p: string, lang: 'ru' | 'en'): string => {
-  if (p === 'windows') return lang === 'ru' ? '🪟 Windows' : '🪟 Windows'
-  if (p === 'android') return lang === 'ru' ? '🤖 Android' : '🤖 Android'
+const platformBadge = (p: string): string => {
+  if (p === 'windows') return '💻 Windows'
+  if (p === 'android') return '📱 Android'
   return '🌐 Web'
 }
 
 export default function AdminPanel() {
   const { user } = useAuth()
-  const { t, lang } = useLang()
+  const { t } = useLang()
   const [rows, setRows] = useState<InstallRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -101,18 +97,6 @@ export default function AdminPanel() {
     [rows],
   )
 
-  // «Активны за неделю» — считаем по строковой дате, без Date.now() в рендере.
-  const weekActive = useMemo(() => {
-    const d = new Date()
-    d.setDate(d.getDate() - 7)
-    const cutoffISO = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-    return rows.filter((r) => (r.last_seen ?? '') >= cutoffISO).length
-  }, [rows])
-
-  // Граница «активен сегодня» — вычисляется один раз (ленивый инициализатор),
-  // чтобы не вызывать Date.now() в теле рендера.
-  const [activeCutoff] = useState(() => Date.now() - 24 * 60 * 60 * 1000)
-
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase()
     return rows.filter((r) => {
@@ -123,35 +107,6 @@ export default function AdminPanel() {
         .some((v) => String(v).toLowerCase().includes(q))
     })
   }, [rows, filter, search])
-
-  // «3 мин назад» / «сегодня в 14:32» / «21.09.2026»
-  const fmtLastSeen = (iso: string): string => {
-    const d = new Date(iso)
-    if (isNaN(d.getTime())) return iso
-    const now = new Date()
-    const diffMin = Math.floor((now.getTime() - d.getTime()) / 60000)
-    const sameDay = d.toDateString() === now.toDateString()
-    const hhmm = `${pad(d.getHours())}:${pad(d.getMinutes())}`
-    if (lang === 'en') {
-      if (diffMin < 1) return 'just now'
-      if (diffMin < 60) return `${diffMin} min ago`
-      if (sameDay) return `today at ${hhmm}`
-      const days = Math.floor(diffMin / 1440)
-      if (days === 1) return 'yesterday'
-      return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`
-    }
-    if (diffMin < 1) return 'только что'
-    if (diffMin < 60) return `${diffMin} мин назад`
-    if (sameDay) return `сегодня в ${hhmm}`
-    const days = Math.floor(diffMin / 1440)
-    if (days === 1) return 'вчера'
-    return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()}`
-  }
-
-  const isActiveRecent = (iso: string): boolean => {
-    const d = new Date(iso)
-    return !isNaN(d.getTime()) && d.getTime() >= activeCutoff
-  }
 
   // Доступ только у админа: вкладка скрыта в навигации, а прямой URL защищён здесь.
   if (!admin) {
@@ -169,8 +124,8 @@ export default function AdminPanel() {
 
   const filters: Array<{ id: Filter; label: string; count: number }> = [
     { id: 'all', label: t('admin.filterAll'), count: counts.all },
-    { id: 'android', label: '🤖 Android', count: counts.android },
-    { id: 'windows', label: '🪟 Windows', count: counts.windows },
+    { id: 'android', label: '📱 Android', count: counts.android },
+    { id: 'windows', label: '💻 Windows', count: counts.windows },
   ]
 
   return (
@@ -178,27 +133,6 @@ export default function AdminPanel() {
       {/* Закреплённая шапка */}
       <div className="sticky top-0 z-20 -mx-4 flex items-center justify-between gap-2 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
         <h1 className="text-xl font-semibold">🛡️ {t('admin.title')}</h1>
-        <span className="rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs font-bold text-emerald-700 dark:text-emerald-300">
-          {t('admin.devicesCount', { n: rows.length })}
-        </span>
-      </div>
-
-      {/* Сводка */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        {[
-          { label: t('admin.statAll'), value: counts.all, icon: '📱' },
-          { label: 'Android', value: counts.android, icon: '🤖' },
-          { label: 'Windows', value: counts.windows, icon: '🪟' },
-          { label: t('admin.statWeek'), value: weekActive, icon: '⚡' },
-        ].map((s) => (
-          <div key={s.label} className={`${cardCls} flex flex-col items-center gap-0.5 py-3 text-center`}>
-            <span className="text-lg leading-none">{s.icon}</span>
-            <span className="text-xl font-bold text-emerald-600 dark:text-emerald-400">{s.value}</span>
-            <span className="text-[11px] leading-tight text-neutral-500 dark:text-neutral-400">
-              {s.label}
-            </span>
-          </div>
-        ))}
       </div>
 
       {/* Поиск + фильтры Все / Android / Windows */}
@@ -241,42 +175,44 @@ export default function AdminPanel() {
         </p>
       ) : (
         <div className="flex flex-col gap-2">
-          {filtered.map((r) => (
-            <div key={r.id} className={`flex items-start gap-3 ${cardCls}`}>
-              <span className="mt-0.5 shrink-0 text-lg leading-none">
-                {r.platform === 'windows' ? '🪟' : r.platform === 'android' ? '🤖' : '🌐'}
-              </span>
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <p className="break-words text-sm font-medium">
-                    {r.user_name || r.email || '—'}
+          {filtered.map((r) => {
+            const isWin = r.platform === 'windows'
+            const isAndroid = r.platform === 'android'
+            // Форматируем модель телефона (например Redmi Note 12)
+            const friendlyDevice = isAndroid ? formatDeviceName(r.device_name) : null
+            // Для Windows нормализуем «Windows 10/11» в «Windows 11»
+            const normalizedOs =
+              isWin && r.os_version?.includes('Windows 10/11') ? 'Windows 11' : r.os_version
+            // Исключаем дублирование Windows (было: Windows 10/11 · Windows 10/11)
+            const displayDevice = isWin ? null : friendlyDevice || r.device_name
+            const specs = [displayDevice, normalizedOs, `v${r.app_version ?? '?'}`]
+              .filter(Boolean)
+              .join(' · ')
+
+            return (
+              <div key={r.id} className={`flex items-start gap-3 ${cardCls}`}>
+                <span className="mt-0.5 shrink-0 text-lg leading-none">
+                  {isWin ? '💻' : isAndroid ? '📱' : '🌐'}
+                </span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <p className="break-words text-sm font-medium">
+                      {r.user_name || r.email || '—'}
+                    </p>
+                    <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
+                      {platformBadge(r.platform)}
+                    </span>
+                  </div>
+                  {r.email && (
+                    <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{r.email}</p>
+                  )}
+                  <p className="mt-0.5 break-words text-xs text-neutral-500 dark:text-neutral-400">
+                    {specs}
                   </p>
-                  <span className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300">
-                    {platformBadge(r.platform, lang)}
-                  </span>
                 </div>
-                {r.email && (
-                  <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">{r.email}</p>
-                )}
-                <p className="mt-0.5 break-words text-xs text-neutral-500 dark:text-neutral-400">
-                  {[r.device_name, r.os_version, `v${r.app_version ?? '?'}`]
-                    .filter(Boolean)
-                    .join(' · ')}
-                </p>
-                <p className="mt-0.5 text-xs">
-                  <span
-                    className={
-                      isActiveRecent(r.last_seen)
-                        ? 'font-medium text-emerald-600 dark:text-emerald-400'
-                        : 'text-neutral-400'
-                    }
-                  >
-                    ⏱ {t('admin.lastSeen')}: {fmtLastSeen(r.last_seen)}
-                  </span>
-                </p>
               </div>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
     </div>

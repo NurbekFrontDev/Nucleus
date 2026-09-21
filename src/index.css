@@ -126,6 +126,19 @@ html.dark body {
   pointer-events: none;
 }
 
+/* Выдвижные панели (сайдбар справа) */
+@keyframes fl-slide-left {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+.animate-slide-left {
+  animation: fl-slide-left 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 /* Лёгкий отклик на нажатие для всех кнопок — единое микро-взаимодействие по всему интерфейсу. */
 button {
   transition:

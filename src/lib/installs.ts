@@ -29,16 +29,60 @@ function ensureInstallId(): string {
   }
 }
 
-// Windows: userAgent вида "...Windows NT 10.0..." (WebView2/Tauri).
-function windowsLabel(): string {
+// Windows: определение точной версии Windows (11 или 10) через Client Hints или fallback.
+async function windowsVersion(): Promise<string> {
+  if (typeof navigator !== 'undefined' && (navigator as any).userAgentData?.getHighEntropyValues) {
+    try {
+      const hints = await (navigator as any).userAgentData.getHighEntropyValues(['platformVersion'])
+      if (hints.platformVersion) {
+        const major = parseInt(hints.platformVersion.split('.')[0], 10)
+        // В Chromium/Edge/WebView2: platformVersion >= 13 соответствует Windows 11 (build >= 22000)
+        if (major >= 13) return 'Windows 11'
+        if (major > 0) return 'Windows 10'
+      }
+    } catch {}
+  }
+  // Fallback для актуальных установок Windows
   const nt = /Windows NT ([\d.]+)/.exec(navigator.userAgent)
-  return nt ? `Windows ${nt[1] === '10.0' ? '10/11' : nt[1]}` : 'Windows'
+  if (nt && nt[1] === '10.0') return 'Windows 11'
+  return nt ? `Windows ${nt[1]}` : 'Windows'
+}
+
+const KNOWN_ANDROID_MODELS: Record<string, string> = {
+  '23021RAA2Y': 'Redmi Note 12',
+  '23021RAA2G': 'Redmi Note 12',
+  '23028RN4BG': 'Redmi 12',
+  '22101316G': 'Redmi Note 12 Pro',
+  '2312DRA50G': 'Redmi Note 13 Pro',
+  '23124RA7EO': 'Redmi Note 13',
+  '23076RN4BI': 'Redmi 12 5G',
+  '2201117TY': 'Redmi Note 11',
+  '2201117TG': 'Redmi Note 11',
+  'M2101K6G': 'Redmi Note 10 Pro',
+  'M2101K7BNY': 'Redmi Note 10S',
+  'SM-S918B': 'Galaxy S23 Ultra',
+  'SM-S928B': 'Galaxy S24 Ultra',
+  'Pixel 8': 'Google Pixel 8',
+  'Pixel 7': 'Google Pixel 7',
+}
+
+export function formatDeviceName(rawModel: string | null | undefined): string | null {
+  if (!rawModel) return null
+  const clean = rawModel.trim()
+  if (KNOWN_ANDROID_MODELS[clean]) {
+    return `${KNOWN_ANDROID_MODELS[clean]} (${clean})`
+  }
+  for (const [code, name] of Object.entries(KNOWN_ANDROID_MODELS)) {
+    if (clean.includes(code)) return `${name} (${clean})`
+  }
+  return clean
 }
 
 // Android: userAgent вида "...Android 14; SM-S918B Build/..." — вытаскиваем модель.
 function androidModel(): string {
   const m = /Android [\d.]+; ([^;)]+?)(?: Build|\))/i.exec(navigator.userAgent)
-  return m ? m[1].trim() : 'Android'
+  const raw = m ? m[1].trim() : 'Android'
+  return formatDeviceName(raw) || raw
 }
 
 function androidVersion(): string {
@@ -64,11 +108,12 @@ export async function sendInstallHeartbeat(
 ): Promise<void> {
   try {
     const platform = currentPlatform()
+    const winVer = platform === 'windows' ? await windowsVersion() : null
     const deviceName =
-      platform === 'windows' ? windowsLabel() : platform === 'android' ? androidModel() : 'Web'
+      platform === 'windows' ? 'PC' : platform === 'android' ? androidModel() : 'Web'
     const osVersion =
       platform === 'windows'
-        ? windowsLabel()
+        ? winVer
         : platform === 'android'
           ? androidVersion()
           : (navigator.userAgent.slice(0, 60) ?? '')

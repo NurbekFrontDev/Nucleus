@@ -24,6 +24,7 @@ const VALID_EXACT_ROUTES = new Set([
   '/planner/stats',
   '/planner/settings',
   '/planner/admin',
+  '/admin',
 ])
 
 // Перенаправления-алиасы: приводим к каноническому адресу
@@ -31,6 +32,7 @@ const ROUTE_ALIASES: Record<string, string> = {
   '/debts': '/expenses',
   '/planner/habits': '/planner/items',
   '/planner/calendar': '/planner',
+  '/planner/admin': '/admin',
 }
 
 /**

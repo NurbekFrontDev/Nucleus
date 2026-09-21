@@ -104,6 +104,7 @@ const UI: Record<Lang, Record<string, string>> = {
     'profile.themeSystem': 'Система',
     'profile.themeLight': 'Светлая',
     'profile.themeDark': 'Тёмная',
+    'common.modules': 'Модули',
 
     'mod.finlit': 'FinLit',
     'mod.planner': 'Планировщик',
@@ -1030,6 +1031,7 @@ const UI: Record<Lang, Record<string, string>> = {
     'profile.themeSystem': 'System',
     'profile.themeLight': 'Light',
     'profile.themeDark': 'Dark',
+    'common.modules': 'Modules',
 
     'mod.finlit': 'FinLit',
     'mod.planner': 'Planner',

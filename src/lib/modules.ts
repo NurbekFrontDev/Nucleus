@@ -4,13 +4,14 @@
 
 export type NavItem = { to: string; key: string; icon: string; end?: boolean; adminOnly?: boolean }
 
-export type ModuleId = 'finlit' | 'planner'
+export type ModuleId = 'finlit' | 'planner' | 'admin'
 
 export type ModuleDef = {
   id: ModuleId
   nameKey: string
   icon: string
   home: string
+  adminOnly?: boolean
   nav: NavItem[]
 }
 
@@ -44,13 +45,22 @@ export const MODULES: ModuleDef[] = [
       { to: '/planner/focus', key: 'pnav.focus', icon: '🍅' },
       { to: '/planner/stats', key: 'pnav.stats', icon: '📊' },
       { to: '/planner/settings', key: 'pnav.settings', icon: '⚙️' },
-      // Видна только аккаунту администратора (фильтруется в Layout по email).
-      { to: '/planner/admin', key: 'pnav.admin', icon: '🛡️', adminOnly: true },
+    ],
+  },
+  {
+    id: 'admin',
+    nameKey: 'pnav.admin',
+    icon: '🛡️',
+    home: '/admin',
+    adminOnly: true,
+    nav: [
+      { to: '/admin', key: 'admin.title', icon: '💻', end: true },
     ],
   },
 ]
 
 export function moduleForPath(pathname: string): ModuleDef {
+  if (pathname === '/admin' || pathname.startsWith('/admin/') || pathname === '/planner/admin') return MODULES[2]
   if (pathname === '/planner' || pathname.startsWith('/planner/')) return MODULES[1]
   return MODULES[0]
 }

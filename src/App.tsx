@@ -358,8 +358,9 @@ function App() {
         <Route path="/planner/stats" element={<PlannerStats />} />
         <Route path="/planner/settings" element={<PlannerSettings />} />
         <Route path="/planner/water" element={<WaterTracker />} />
-        <Route path="/planner/admin" element={<AdminPanel />} />
-          <Route path="*" element={<NotFoundRedirect fallback={lastPath} />} />
+        <Route path="/planner/admin" element={<Navigate to="/admin" replace />} />
+        <Route path="/admin" element={<AdminPanel />} />
+        <Route path="*" element={<NotFoundRedirect fallback={lastPath} />} />
         </Route>
       </Routes>
     </>

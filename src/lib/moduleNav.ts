@@ -13,6 +13,7 @@ const KEY = (id: ModuleId) => `nucleus:moduleLastPath:${id}`
 const memoryModulePaths: Record<ModuleId, string | null> = {
   finlit: null,
   planner: null,
+  admin: null,
 }
 
 // Предварительная инициализация из localStorage
@@ -21,6 +22,8 @@ try {
   if (isValidNavPath(f)) memoryModulePaths.finlit = canonicalizeNavPath(f)
   const p = localStorage.getItem(KEY('planner'))
   if (isValidNavPath(p)) memoryModulePaths.planner = canonicalizeNavPath(p)
+  const a = localStorage.getItem(KEY('admin'))
+  if (isValidNavPath(a)) memoryModulePaths.admin = canonicalizeNavPath(a)
 } catch {}
 
 // Если запущено на Android — подтягиваем из нативного Preferences
@@ -30,6 +33,9 @@ if (Capacitor.isNativePlatform()) {
   })
   void Preferences.get({ key: KEY('planner') }).then(({ value }) => {
     if (isValidNavPath(value)) memoryModulePaths.planner = canonicalizeNavPath(value)
+  })
+  void Preferences.get({ key: KEY('admin') }).then(({ value }) => {
+    if (isValidNavPath(value)) memoryModulePaths.admin = canonicalizeNavPath(value)
   })
 }
 

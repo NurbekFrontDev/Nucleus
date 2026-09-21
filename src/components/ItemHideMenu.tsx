@@ -1,4 +1,5 @@
-import { useMemo, useState } from 'react'
+import { useLayoutEffect, useMemo, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
 import { monthName } from '../lib/db'
@@ -95,20 +96,31 @@ function DayGrid({ onPick }: { onPick: (iso: string) => void }) {
 
 type Props = {
   item: PlannerItem
+  anchorEl?: HTMLElement | null
   onClose: () => void
   onChanged: () => void
 }
 
 // Выпадающее меню глазика: варианты скрытия дела с сохранением истории прошлых дней.
 // «Навсегда» — с сегодняшнего дня и далее; «на сегодня» — один день; «на день» и
-// «на период» — выбор дат в календаре в стиле приложения. Прошлые дни всегда
-// остаются в истории как были.
-export default function ItemHideMenu({ item, onClose, onChanged }: Props) {
+// «на период» — выбор дат в календаре в стиле приложения. Рендерится через Portal,
+// чтобы находиться поверх всех элементов и не наследовать opacity/grayscale родительской карточки.
+export default function ItemHideMenu({ item, anchorEl, onClose, onChanged }: Props) {
   const { user } = useAuth()
   const { t } = useLang()
   const [view, setView] = useState<'menu' | 'date' | 'range'>('menu')
   const [busy, setBusy] = useState(false)
   const status = useMemo(() => getHiddenStatus(item), [item])
+  const [pos, setPos] = useState<{ top: number; right: number } | null>(null)
+
+  useLayoutEffect(() => {
+    if (anchorEl) {
+      const rect = anchorEl.getBoundingClientRect()
+      const top = Math.min(rect.bottom + 6, window.innerHeight - 380)
+      const right = Math.max(12, window.innerWidth - rect.right)
+      setPos({ top: Math.max(12, top), right })
+    }
+  }, [anchorEl])
 
   const act = async (fn: () => Promise<void>) => {
     if (!user || busy) return
@@ -135,11 +147,19 @@ export default function ItemHideMenu({ item, onClose, onChanged }: Props) {
         : ''
     : ''
 
-  return (
+  const menuStyle = pos
+    ? { top: `${pos.top}px`, right: `${pos.right}px` }
+    : { top: '5rem', right: '1rem' }
+
+  return createPortal(
     <>
-      {/* Перехват клика вне меню */}
-      <div className="fixed inset-0 z-40" onClick={onClose} />
-      <div className="absolute right-0 top-9 z-50 w-72 max-w-[calc(100vw-2rem)] animate-pop rounded-xl border border-neutral-200 bg-white p-2 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900">
+      {/* Перехват клика вне меню (полный экран, поверх всех задач и кнопок) */}
+      <div className="fixed inset-0 z-[999] bg-black/10 backdrop-blur-[0.5px]" onClick={onClose} />
+      <div
+        style={menuStyle}
+        onClick={(e) => e.stopPropagation()}
+        className="fixed z-[1000] w-72 max-w-[calc(100vw-2rem)] animate-pop rounded-xl border border-neutral-200 bg-white p-2 opacity-100 shadow-2xl dark:border-neutral-700 dark:bg-neutral-900"
+      >
         {view === 'menu' && (
           <>
             {currentState && (
@@ -209,24 +229,20 @@ export default function ItemHideMenu({ item, onClose, onChanged }: Props) {
         )}
 
         {view === 'range' && (
-          <>
-            <p className="px-2 pb-1 pt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
-              {t('items.hideRangeHint')}
-            </p>
-            <RangeCalendar
-              start=""
-              end=""
-              onChange={(a, b) => {
-                // Прошедшие даты не прячем задним числом: период только с сегодня и позже.
-                const today = todayStr()
-                const from = a < today ? today : a
-                if (b < today) return
-                void act(() => hideItem(user!.id, item.id, { kind: 'range', from, to: b }))
-              }}
-            />
-          </>
+          <RangeCalendar
+            start=""
+            end=""
+            onChange={(a, b) => {
+              // Прошедшие даты не прячем задним числом: период только с сегодня и позже.
+              const today = todayStr()
+              const from = a < today ? today : a
+              if (b < today) return
+              void act(() => hideItem(user!.id, item.id, { kind: 'range', from, to: b }))
+            }}
+          />
         )}
       </div>
-    </>
+    </>,
+    document.body,
   )
 }

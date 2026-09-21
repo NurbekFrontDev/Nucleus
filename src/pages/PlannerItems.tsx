@@ -105,7 +105,7 @@ export default function PlannerItems() {
   const [tab, setTab] = useState<'tasks' | 'archive'>('tasks')
   const [archivedList, setArchivedList] = useState<PlannerItem[]>([])
   // Дело, у которого открыто выпадающее меню глазика (варианты скрытия).
-  const [hideMenuId, setHideMenuId] = useState<string | null>(null)
+  const [hideMenuAnchor, setHideMenuAnchor] = useState<{ id: string; el: HTMLElement } | null>(null)
 
   // Короткая дата «21.09» для подписей архива и скрытия.
   const fmtShort = (iso: string | null | undefined): string => {
@@ -502,7 +502,13 @@ export default function PlannerItems() {
     const s = getHiddenStatus(it)
     if (!s.active) {
       if (s.future.length > 0) {
-        const parts = s.future.map((r) => `${fmtShort(r.from)}–${fmtShort(r.to ? addDays(r.to, -1) : '')}`)
+        const parts = s.future.map((r) => {
+          const toDay = r.to ? addDays(r.to, -1) : ''
+          if (!toDay || r.from === toDay) {
+            return fmtShort(r.from)
+          }
+          return `${fmtShort(r.from)}–${fmtShort(toDay)}`
+        })
         return t('items.hiddenFuture', { v: parts.join(', ') })
       }
       return ''
@@ -1090,9 +1096,6 @@ export default function PlannerItems() {
 
       {tab === 'archive' ? (
         <div className="flex flex-col gap-2">
-          <p className="px-1 text-xs text-neutral-500 dark:text-neutral-400">
-            {t('items.archiveHint')}
-          </p>
           {archivedList.length === 0 ? (
             <p className="rounded-xl border border-dashed border-neutral-300 p-6 text-center text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
               {t('items.archiveEmpty')}
@@ -1254,7 +1257,11 @@ export default function PlannerItems() {
                       <button
                         type="button"
                         title={t('items.hideOptions')}
-                        onClick={() => setHideMenuId((v) => (v === it.id ? null : it.id))}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          const target = e.currentTarget
+                          setHideMenuAnchor((v) => (v?.id === it.id ? null : { id: it.id, el: target }))
+                        }}
                         className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${
                           hs.active
                             ? 'bg-neutral-200/50 text-neutral-500 dark:bg-neutral-800/50 dark:text-neutral-400'
@@ -1266,10 +1273,11 @@ export default function PlannerItems() {
                         </span>
                       </button>
                       {/* Выпадающее меню вариантов скрытия (навсегда / на сегодня / на день / на период). */}
-                      {hideMenuId === it.id && (
+                      {hideMenuAnchor?.id === it.id && (
                         <ItemHideMenu
                           item={it}
-                          onClose={() => setHideMenuId(null)}
+                          anchorEl={hideMenuAnchor.el}
+                          onClose={() => setHideMenuAnchor(null)}
                           onChanged={() => {
                             void loadAll()
                           }}

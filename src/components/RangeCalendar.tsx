@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { monthName } from '../lib/db'
 import { useLang } from '../lib/i18n'
+import { todayStr } from '../lib/planner'
 
 const WEEKDAYS_RU = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс']
 const WEEKDAYS_EN = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -25,6 +26,7 @@ export default function RangeCalendar({
   })
   // selStart — временное начало при незавершённом выборе; '' — ждём первый клик.
   const [selStart, setSelStart] = useState('')
+  const todayISO = todayStr()
 
   const year = view.getFullYear()
   const month = view.getMonth()
@@ -35,6 +37,7 @@ export default function RangeCalendar({
   const hi = selStart ? '' : end
 
   const onPick = (dayISO: string) => {
+    if (dayISO < todayISO) return
     if (!selStart) {
       // начинаем новый диапазон
       setSelStart(dayISO)
@@ -79,6 +82,7 @@ export default function RangeCalendar({
         {cells.map((d, i) => {
           if (d === null) return <div key={`e${i}`} />
           const dayISO = `${year}-${pad(month + 1)}-${pad(d)}`
+          const past = dayISO < todayISO
           const isStart = dayISO === lo
           const isEnd = !!hi && dayISO === hi
           const inRange = !!lo && !!hi && dayISO > lo && dayISO < hi
@@ -87,13 +91,16 @@ export default function RangeCalendar({
             <button
               key={dayISO}
               type="button"
+              disabled={past}
               onClick={() => onPick(dayISO)}
               className={`h-9 rounded-lg text-sm transition ${
                 endpoint
                   ? 'bg-emerald-500 font-medium text-neutral-950'
                   : inRange
                     ? 'bg-emerald-500/15 text-emerald-700 dark:text-emerald-300'
-                    : 'hover:bg-emerald-500/10'
+                    : past
+                      ? 'cursor-not-allowed text-neutral-300 dark:text-neutral-700'
+                      : 'hover:bg-emerald-500/10'
               }`}
             >
               {d}
