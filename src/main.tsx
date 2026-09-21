@@ -16,7 +16,7 @@ initStatusBar()
 // подменяем pathname в history на сохранённый маршрут ДО инициализации BrowserRouter.
 // Благодаря этому BrowserRouter сразу стартует на нужной вкладке без гонок рендера,
 // промежуточных редиректов и сбоев.
-const APP_VERSION = '0.1.48'
+const APP_VERSION = '0.1.51'
 try {
   const lastVer = localStorage.getItem('nucleus:appVersion')
   if (lastVer !== APP_VERSION) {
@@ -25,6 +25,11 @@ try {
     const stale = localStorage.getItem(LAST_PATH_KEY)
     if (!stale || stale === '/' || stale === '/index.html') {
       localStorage.setItem(LAST_PATH_KEY, '/planner')
+    }
+    // Сброс застрявшего /admin из памяти модуля планировщика:
+    const p = localStorage.getItem('nucleus:moduleLastPath:planner')
+    if (p === '/admin' || p === '/planner/admin') {
+      localStorage.setItem('nucleus:moduleLastPath:planner', '/planner')
     }
   }
 

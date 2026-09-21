@@ -1,10 +1,10 @@
-// Память последней подвкладки для каждого модуля (FinLit и Планировщик).
+// Память последней подвкладки для каждого модуля (FinLit, Планировщик, Админка).
 // При переключении между модулями возвращаемся туда, где пользователь был в этом
 // модуле в последний раз. Хранится локально на устройстве (localStorage + Preferences на Android).
 
 import { Capacitor } from '@capacitor/core'
 import { Preferences } from '@capacitor/preferences'
-import type { ModuleId } from './modules'
+import { type ModuleId, moduleForPath } from './modules'
 import { isValidNavPath, canonicalizeNavPath } from './navStorage'
 
 const KEY = (id: ModuleId) => `nucleus:moduleLastPath:${id}`
@@ -16,32 +16,42 @@ const memoryModulePaths: Record<ModuleId, string | null> = {
   admin: null,
 }
 
-// Предварительная инициализация из localStorage
+/** Проверяет, что путь валиден и действительно принадлежит именно данному модулю */
+export function isValidPathForModule(id: ModuleId, path: unknown): path is string {
+  if (!isValidNavPath(path)) return false
+  const canonical = canonicalizeNavPath(path)
+  return moduleForPath(canonical).id === id
+}
+
+// Предварительная инициализация из localStorage с фильтрацией путей чужих модулей
 try {
-  const f = localStorage.getItem(KEY('finlit'))
-  if (isValidNavPath(f)) memoryModulePaths.finlit = canonicalizeNavPath(f)
-  const p = localStorage.getItem(KEY('planner'))
-  if (isValidNavPath(p)) memoryModulePaths.planner = canonicalizeNavPath(p)
-  const a = localStorage.getItem(KEY('admin'))
-  if (isValidNavPath(a)) memoryModulePaths.admin = canonicalizeNavPath(a)
+  for (const id of ['finlit', 'planner', 'admin'] as ModuleId[]) {
+    const raw = localStorage.getItem(KEY(id))
+    if (isValidPathForModule(id, raw)) {
+      memoryModulePaths[id] = canonicalizeNavPath(raw)
+    } else if (raw) {
+      // Очищаем некорректно сохранившийся путь (например, /admin в ключе planner)
+      localStorage.removeItem(KEY(id))
+    }
+  }
 } catch {}
 
 // Если запущено на Android — подтягиваем из нативного Preferences
 if (Capacitor.isNativePlatform()) {
-  void Preferences.get({ key: KEY('finlit') }).then(({ value }) => {
-    if (isValidNavPath(value)) memoryModulePaths.finlit = canonicalizeNavPath(value)
-  })
-  void Preferences.get({ key: KEY('planner') }).then(({ value }) => {
-    if (isValidNavPath(value)) memoryModulePaths.planner = canonicalizeNavPath(value)
-  })
-  void Preferences.get({ key: KEY('admin') }).then(({ value }) => {
-    if (isValidNavPath(value)) memoryModulePaths.admin = canonicalizeNavPath(value)
-  })
+  for (const id of ['finlit', 'planner', 'admin'] as ModuleId[]) {
+    void Preferences.get({ key: KEY(id) }).then(({ value }) => {
+      if (isValidPathForModule(id, value)) {
+        memoryModulePaths[id] = canonicalizeNavPath(value)
+      } else if (value) {
+        void Preferences.remove({ key: KEY(id) }).catch(() => {})
+      }
+    }).catch(() => {})
+  }
 }
 
 /** Запомнить текущий путь как последнюю подвкладку модуля. */
 export function saveModulePath(id: ModuleId, path: string): void {
-  if (!isValidNavPath(path)) return
+  if (!isValidPathForModule(id, path)) return
   const canonical = canonicalizeNavPath(path)
   memoryModulePaths[id] = canonical
 
@@ -56,20 +66,23 @@ export function saveModulePath(id: ModuleId, path: string): void {
   }
 }
 
-/** Последняя подвкладка модуля; если её нет — возвращаем fallback (домашнюю). */
+/** Последняя подвкладка модуля; если её нет или она не от этого модуля — возвращаем fallback (домашнюю). */
 export function loadModulePath(id: ModuleId, fallback: string): string {
   const inMem = memoryModulePaths[id]
-  if (inMem && isValidNavPath(inMem)) return inMem
+  if (isValidPathForModule(id, inMem)) return inMem
 
   try {
     const v = localStorage.getItem(KEY(id))
-    if (isValidNavPath(v)) {
+    if (isValidPathForModule(id, v)) {
       const canonical = canonicalizeNavPath(v)
       memoryModulePaths[id] = canonical
       return canonical
+    } else if (v) {
+      localStorage.removeItem(KEY(id))
     }
   } catch {
     // игнорируем
   }
   return fallback
 }
+
