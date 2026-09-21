@@ -64,6 +64,10 @@ export type PlannerItem = {
   color: string | null
   important: boolean
   archived: boolean
+  // Дата, когда дело положили в архив. Дни ДО неё остаются в истории
+  // (дело там продолжает показываться), со неё и позже — исчезают.
+  // NULL у старых архивированных дел — прежнее поведение (только дни с отметками).
+  archived_at: string | null
   sort_order: number
   // Дата последней смены РАСПИСАНИЯ (правило повтора / дни недели / старт).
   // Дни РАНЬШЕ этой даты считаются историей и не пересчитываются по новому правилу.
@@ -92,19 +96,37 @@ export const ITEM_BASE_COLS =
   'id, user_id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today, stack_after'
 
 export const ITEM_COLS =
-  'id, user_id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today, hidden_intervals, stack_after'
+  'id, user_id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, archived_at, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today, hidden_intervals, stack_after'
 
 export const ITEM_COLS_WITH_STEPS =
-  'id, user_id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today, hidden_intervals, stack_after, steps'
+  'id, user_id, title, note, type, repeat_rule, weekdays, time_of_day, at_time_start, at_time_end, duration_min, priority, start_date, icon, color, important, archived, archived_at, sort_order, cue, identity, two_min, schedule_changed_at, hidden_today, hidden_intervals, stack_after, steps'
 
 let hasStepsColumn = true
 let hasHiddenIntervalsColumn = true
+let hasArchivedAtColumn = true
+
+const withoutArchivedAt = (cols: string) =>
+  cols
+    .split(', ')
+    .filter((c) => c !== 'archived_at')
+    .join(', ')
 
 export async function safePlannerItemsQuery<T = any>(
   queryFn: (cols: string) => PromiseLike<{ data: T | null; error: any }>,
 ): Promise<{ data: T | null; error: any }> {
+  // Если миграция с archived_at ещё не выполнена — повторяем запрос без колонки.
+  const attempt = async (cols: string): Promise<{ data: T | null; error: any }> => {
+    const res = await queryFn(cols)
+    if (!res.error) return res as { data: T | null; error: any }
+    if (hasArchivedAtColumn && String(res.error?.message || '').includes('archived_at')) {
+      hasArchivedAtColumn = false
+      return attempt(withoutArchivedAt(cols))
+    }
+    return res as { data: T | null; error: any }
+  }
+
   if (hasStepsColumn) {
-    const res = await queryFn(ITEM_COLS_WITH_STEPS)
+    const res = await attempt(ITEM_COLS_WITH_STEPS)
     if (!res.error) return res as { data: T | null; error: any }
     const msg = String(res.error?.message || '')
     if (msg.includes('steps') || msg.includes('column') || msg.includes('schema')) {
@@ -115,17 +137,17 @@ export async function safePlannerItemsQuery<T = any>(
   }
 
   if (hasHiddenIntervalsColumn) {
-    const res = await queryFn(ITEM_COLS)
+    const res = await attempt(ITEM_COLS)
     if (!res.error) return res as { data: T | null; error: any }
     const msg = String(res.error?.message || '')
     if (msg.includes('hidden_intervals') || msg.includes('column') || msg.includes('schema')) {
       hasHiddenIntervalsColumn = false
-      const fallbackRes = await queryFn(ITEM_BASE_COLS)
+      const fallbackRes = await attempt(ITEM_BASE_COLS)
       return fallbackRes as { data: T | null; error: any }
     }
     return res as { data: T | null; error: any }
   }
-  const res = await queryFn(ITEM_BASE_COLS)
+  const res = await attempt(ITEM_BASE_COLS)
   return res as { data: T | null; error: any }
 }
 
@@ -349,8 +371,10 @@ export function formatDuration(durationMin: number | null | undefined, lang: 'ru
 }
 
 // Попадает ли дело в указанный день (с учётом правила повторения и старта).
+// Архив с датой (archived_at): дни ДО неё дело «живо» (история), со неё и позже — нет.
 export function isItemOnDate(item: PlannerItem, dateStr: string): boolean {
-  if (item.archived) return false
+  if (item.archived && !item.archived_at) return false
+  if (item.archived && item.archived_at && dateStr >= item.archived_at) return false
   // До даты начала дело ещё "не существует".
   if (item.start_date && dateStr < item.start_date) return false
   const wd = isoWeekday(dateStr)
@@ -718,6 +742,14 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
     const ov = ovMap.get(it.id)
     // Убрано вручную только из этого дня — выше всех остальных правил.
     if (ov?.hidden) return false
+    if (it.archived && it.archived_at) {
+      // Архив с датой: со дня архивации дело исчезает даже из дней с отметками,
+      // а все дни ДО неё остаются в истории как были.
+      if (dateStr >= it.archived_at) return false
+      if (ov || loggedIds.has(it.id)) return true
+      if (it.schedule_changed_at && dateStr < it.schedule_changed_at) return false
+      return isItemOnDate(it, dateStr)
+    }
     if (ov || loggedIds.has(it.id)) return true
     // Если дело архивировано (выполненное разовое дело или удалённое),
     // оно остаётся в дне ТОЛЬКО если по нему есть фактическая отметка (лог) или правка на этот день.
@@ -811,15 +843,19 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
         const directOverride = original ? ovMap.get(original.id) : null
         if (directOverride?.hidden) return null
         if (original && isItemHiddenOnDate(original, dateStr)) return null
+        // Архив с датой: со дня архивации дела нет ни в одном дне, до неё — остаётся по снимку.
+        if (original && original.archived && original.archived_at && dateStr >= original.archived_at)
+          return null
         // Если оригинал дела удалён из базы и на эту дату нет отметки/правки — не показываем его
         if (!original && !loggedIds.has(snapshotItem.item_id) && !directOverride) return null
-        // Если дело архивировано (выполненное разовое дело или удалённое)
+        // Если дело архивировано по-старому (выполненное разовое или удалённое, без даты)
         // и на эту дату нет отметки о выполнении и нет персональной правки дня —
         // оно исключается из дня. Разовые дела после выполнения исчезают из «Мои дела»
         // и со всех последующих недель снимка (приоритет исчезновения выше сохранения дня).
         if (
           original &&
           original.archived &&
+          !original.archived_at &&
           !loggedIds.has(original.id) &&
           !directOverride
         )
@@ -842,6 +878,7 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
               priority: snapshotItem.priority,
               important: snapshotItem.important,
               archived: false,
+              archived_at: null,
               start_date: dateStr,
               icon: snapshotItem.icon,
               color: null,
@@ -878,8 +915,10 @@ export async function loadDay(userId: string, dateStr: string): Promise<DayData>
         if (isItemHiddenOnDate(item, dateStr)) return false
         const ov = ovMap.get(item.id)
         if (ov?.hidden) return false
+        // Архив с датой: со дня архивации дела нет; до неё — как у живого дела.
+        if (item.archived && item.archived_at && dateStr >= item.archived_at) return false
         // Если дело архивировано, оно остаётся в дне ТОЛЬКО при наличии отметки или прямой правки
-        if (item.archived && !loggedIds.has(item.id) && !ov) return false
+        if (item.archived && !item.archived_at && !loggedIds.has(item.id) && !ov) return false
         if (item.repeat_rule === 'none' && (!item.start_date || item.start_date === dateStr))
           return true
         if (loggedIds.has(item.id)) return true
@@ -1461,13 +1500,52 @@ export function isItemHiddenOnDate(it: PlannerItem, dateStr: string): boolean {
   return !!it.hidden_today
 }
 
-// Скрыть/показать дело в экране Сегодня, сохраняя историю прошлых дней.
-// При скрытии фиксируется дата: дело скрывается с этого дня и далее.
-// При возвращении (показе) открытый интервал скрытия закрывается текущей датой.
-export async function toggleHiddenToday(
+// ===== Скрытие дела с сохранением истории прошлых дней =====
+// hidden_intervals хранит периоды скрытия; конец интервала ИСКЛЮЧАЮЩИЙ
+// (to = первый снова видимый день). Открытый интервал (без to) = «навсегда».
+
+export type HideMode =
+  | { kind: 'forever' }
+  | { kind: 'today' }
+  | { kind: 'date'; date: string }
+  | { kind: 'range'; from: string; to: string }
+
+// Итоговое состояние скрытия дела для UI.
+export type HiddenStatus = {
+  active: boolean // скрыт на сегодня
+  forever: boolean // есть открытый интервал («навсегда»)
+  until: string | null // первый день, когда снова виден (для активного ограниченного скрытия)
+  future: HiddenInterval[] // будущие периоды скрытия (сегодня виден, но скрыт позже)
+}
+
+export function getHiddenStatus(it: PlannerItem): HiddenStatus {
+  const today = todayStr()
+  const intervals = Array.isArray(it.hidden_intervals) ? it.hidden_intervals : []
+  if (intervals.length === 0) {
+    return { active: !!it.hidden_today, forever: !!it.hidden_today, until: null, future: [] }
+  }
+  let forever = false
+  let until: string | null = null
+  for (const inv of intervals) {
+    if (inv.from && inv.from <= today && (!inv.to || today < inv.to)) {
+      if (!inv.to) {
+        forever = true
+        until = null
+        break
+      }
+      if (!until || inv.to > until) until = inv.to
+    }
+  }
+  const future = forever ? [] : intervals.filter((i) => i.from > today)
+  return { active: forever || !!until, forever, until, future }
+}
+
+// Скрывает дело по выбранному сценарию. Прошлые дни не затрагиваются:
+// интервал начинается с сегодняшнего дня (или выбранной будущей даты).
+export async function hideItem(
   userId: string,
   itemId: string,
-  hidden: boolean,
+  mode: HideMode,
   dateStr: string = todayStr(),
 ): Promise<void> {
   const { data } = await supabase
@@ -1476,37 +1554,77 @@ export async function toggleHiddenToday(
     .eq('user_id', userId)
     .eq('id', itemId)
     .maybeSingle()
-
   const raw = (data as { hidden_intervals?: HiddenInterval[] } | null)?.hidden_intervals
-  const intervals: HiddenInterval[] = Array.isArray(raw) ? [...raw] : []
+  const existing: HiddenInterval[] = Array.isArray(raw) ? [...raw] : []
 
-  if (hidden) {
-    const openInv = intervals.find((i) => !i.to)
-    if (!openInv) {
-      intervals.push({ from: dateStr })
-    }
-  } else {
-    for (const inv of intervals) {
-      if (!inv.to) {
-        inv.to = dateStr
-      }
-    }
-  }
+  const add: HiddenInterval[] =
+    mode.kind === 'forever'
+      ? [{ from: dateStr }]
+      : mode.kind === 'today'
+        ? [{ from: dateStr, to: addDays(dateStr, 1) }]
+        : mode.kind === 'date'
+          ? [{ from: mode.date, to: addDays(mode.date, 1) }]
+          : [{ from: mode.from, to: addDays(mode.to, 1) }]
 
   const { error } = await supabase
     .from('planner_items')
     .update({
-      hidden_today: hidden,
-      hidden_intervals: intervals,
+      // hidden_today=true только при «навсегда» — для совместимости со старыми версиями
+      // приложения на других устройствах (там нет интервалов).
+      hidden_today: mode.kind === 'forever',
+      hidden_intervals: [...existing, ...add],
     })
     .eq('user_id', userId)
     .eq('id', itemId)
 
   if (error) {
-    // Фоллбэк, если колонка hidden_intervals ещё не создана
+    // Фоллбэк, если колонка hidden_intervals ещё не создана.
     const { error: err2 } = await supabase
       .from('planner_items')
-      .update({ hidden_today: hidden })
+      .update({ hidden_today: mode.kind === 'forever' })
+      .eq('user_id', userId)
+      .eq('id', itemId)
+    if (err2) throw err2
+  }
+}
+
+// Возвращает дело в «Сегодня»: открытые («навсегда») интервалы закрываются
+// сегодняшней датой — остаётся честная история скрытия; будущие интервалы
+// стираются; прошедшие остаются как память о скрытых днях.
+export async function showItem(userId: string, itemId: string): Promise<void> {
+  const today = todayStr()
+  const { data } = await supabase
+    .from('planner_items')
+    .select('hidden_intervals')
+    .eq('user_id', userId)
+    .eq('id', itemId)
+    .maybeSingle()
+  const raw = (data as { hidden_intervals?: HiddenInterval[] } | null)?.hidden_intervals
+  const existing: HiddenInterval[] = Array.isArray(raw) ? [...raw] : []
+
+  const kept: HiddenInterval[] = []
+  for (const inv of existing) {
+    if (!inv.to) {
+      // Открытый интервал («навсегда») — закрываем сегодняшним днём.
+      if (inv.from <= today) kept.push({ from: inv.from, to: today })
+      else kept.push(inv)
+      continue
+    }
+    // Всё, что ещё действует или наступит позже, стираем — дело снова видно.
+    if (inv.to > today) continue
+    kept.push(inv)
+  }
+
+  const { error } = await supabase
+    .from('planner_items')
+    .update({ hidden_today: false, hidden_intervals: kept })
+    .eq('user_id', userId)
+    .eq('id', itemId)
+
+  if (error) {
+    const { error: err2 } = await supabase
+      .from('planner_items')
+      .update({ hidden_today: false })
       .eq('user_id', userId)
       .eq('id', itemId)
     if (err2) throw err2
@@ -1731,6 +1849,78 @@ export async function loadAllItems(userId: string): Promise<PlannerItem[]> {
     it.steps = parseItemSteps(it)
   }
   return loaded
+}
+
+// Загружает вручную заархивированные дела (подвкладка «Архив» в «Мои дела»).
+// Авто-архив (выполненные разовые дела, дубликаты) имеет archived_at=NULL
+// и сюда не попадает — он невидим, как и раньше.
+export async function loadArchivedItems(userId: string): Promise<PlannerItem[]> {
+  if (!hasArchivedAtColumn) return []
+  const { data, error } = await safePlannerItemsQuery((cols) =>
+    supabase
+      .from('planner_items')
+      .select(cols)
+      .eq('user_id', userId)
+      .eq('archived', true)
+      .not('archived_at', 'is', null)
+      .order('archived_at', { ascending: false })
+      .order('created_at', { ascending: false }),
+  )
+  if (error) {
+    // Миграция с archived_at ещё не выполнена — архива просто ещё нет.
+    const msg = String((error as any)?.message || '')
+    if (msg.includes('archived_at')) {
+      hasArchivedAtColumn = false
+      return []
+    }
+    throw error
+  }
+  const loaded = (data ?? []) as unknown as PlannerItem[]
+  for (const it of loaded) {
+    it.steps = parseItemSteps(it)
+  }
+  return loaded
+}
+
+// Положить дело в архив вручную (кнопка корзины в «Мои дела»).
+// Со дня архивации дело исчезает из «Сегодня» и всех будущих дней;
+// все предыдущие дни остаются в истории как были.
+export async function archiveItemFromToday(
+  userId: string,
+  id: string,
+  dateStr: string = todayStr(),
+): Promise<void> {
+  const { error } = await supabase
+    .from('planner_items')
+    .update({ archived: true, archived_at: dateStr })
+    .eq('user_id', userId)
+    .eq('id', id)
+  if (error) {
+    // Колонки archived_at ещё нет — архивируем по-старому (только флаг).
+    const { error: err2 } = await supabase
+      .from('planner_items')
+      .update({ archived: true })
+      .eq('user_id', userId)
+      .eq('id', id)
+    if (err2) throw err2
+  }
+}
+
+// Вернуть дело из архива в активный список «Мои дела».
+export async function restoreItemFromArchive(userId: string, id: string): Promise<void> {
+  const { error } = await supabase
+    .from('planner_items')
+    .update({ archived: false, archived_at: null })
+    .eq('user_id', userId)
+    .eq('id', id)
+  if (error) {
+    const { error: err2 } = await supabase
+      .from('planner_items')
+      .update({ archived: false })
+      .eq('user_id', userId)
+      .eq('id', id)
+    if (err2) throw err2
+  }
 }
 
 // Готовит строку для базы. weekdays нужны только для repeat_rule='weekly'.
@@ -2505,6 +2695,13 @@ function resolveSummaryDayItems(
     if (isItemHiddenOnDate(item, dateStr)) return false
     const override = overrides.get(item.id)
     if (override?.hidden) return false
+    if (item.archived && item.archived_at) {
+      // Архив с датой: со дня архивации дело исчезает, дни до неё — остаются в истории.
+      if (dateStr >= item.archived_at) return false
+      if (override || dayLogs[item.id]) return true
+      if (item.schedule_changed_at && dateStr < item.schedule_changed_at) return false
+      return isItemOnDate(item, dateStr)
+    }
     if (override || dayLogs[item.id]) return true
     if (item.archived) return false
     if (item.schedule_changed_at && dateStr < item.schedule_changed_at) return false
@@ -2554,10 +2751,14 @@ function resolveSummaryDayItems(
       const override = original ? overrides.get(original.id) : overrides.get(snapshotItem.item_id)
       if (override?.hidden) return null
       if (original && isItemHiddenOnDate(original, dateStr)) return null
+      // Архив с датой: со дня архивации дела нет, до неё — остаётся по снимку.
+      if (original && original.archived && original.archived_at && dateStr >= original.archived_at)
+        return null
       if (!original && !dayLogs[snapshotItem.item_id] && !override) return null
       if (
         original &&
         original.archived &&
+        !original.archived_at &&
         !dayLogs[original.id] &&
         !override
       )
@@ -2581,6 +2782,7 @@ function resolveSummaryDayItems(
             priority: snapshotItem.priority,
             important: snapshotItem.important,
             archived: false,
+            archived_at: null,
             start_date: dateStr,
             color: null,
             sort_order: snapshotItem.sort_order,
@@ -2608,7 +2810,9 @@ function resolveSummaryDayItems(
       if (isItemHiddenOnDate(item, dateStr)) return false
       const ov = overrides.get(item.id)
       if (ov?.hidden) return false
-      if (item.archived && !dayLogs[item.id] && !ov) return false
+      // Архив с датой: со дня архивации дела нет; до неё — как у живого дела.
+      if (item.archived && item.archived_at && dateStr >= item.archived_at) return false
+      if (item.archived && !item.archived_at && !dayLogs[item.id] && !ov) return false
       if (item.repeat_rule === 'none' && (!item.start_date || item.start_date === dateStr))
         return true
       if (dayLogs[item.id]) return true

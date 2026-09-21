@@ -9,6 +9,7 @@ import { useLang } from '../lib/i18n'
 import { useAuth } from '../lib/AuthContext'
 import { MODULES, moduleForPath } from '../lib/modules'
 import { saveModulePath, loadModulePath } from '../lib/moduleNav'
+import { isAdminEmail } from '../lib/installs'
 import { useTheme } from '../lib/ThemeContext'
 import SettingsModal from './SettingsModal'
 
@@ -21,7 +22,9 @@ export default function Layout() {
   const location = useLocation()
   const navigate = useNavigate()
   const activeModule = moduleForPath(location.pathname)
-  const navItems = activeModule.nav
+  // Вкладка админ-панели видна только аккаунту администратора.
+  const admin = isAdminEmail(user?.email)
+  const navItems = activeModule.nav.filter((item) => !item.adminOnly || admin)
   const accountInitial = (user?.email?.trim()[0] || 'N').toUpperCase()
   const accountLabel = user?.email || 'Настройки'
   // Контент скроллится внутри <main>, а не в окне — это позволяет закреплять

@@ -2,7 +2,7 @@
 // Module 1 - FinLit (finance, lives at the root). Module 2 - Planner (lives under /planner).
 // The active module is derived from the current route, so no extra storage is needed.
 
-export type NavItem = { to: string; key: string; icon: string; end?: boolean }
+export type NavItem = { to: string; key: string; icon: string; end?: boolean; adminOnly?: boolean }
 
 export type ModuleId = 'finlit' | 'planner'
 
@@ -44,6 +44,8 @@ export const MODULES: ModuleDef[] = [
       { to: '/planner/focus', key: 'pnav.focus', icon: '🍅' },
       { to: '/planner/stats', key: 'pnav.stats', icon: '📊' },
       { to: '/planner/settings', key: 'pnav.settings', icon: '⚙️' },
+      // Видна только аккаунту администратора (фильтруется в Layout по email).
+      { to: '/planner/admin', key: 'pnav.admin', icon: '🛡️', adminOnly: true },
     ],
   },
 ]

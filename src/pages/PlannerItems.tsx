@@ -6,17 +6,21 @@ import DatePicker from '../components/DatePicker'
 import TimePicker from '../components/TimePicker'
 import IconButton from '../components/IconButton'
 import ConfirmDialog from '../components/ConfirmDialog'
+import ItemHideMenu from '../components/ItemHideMenu'
 import {
   loadAllItems,
+  loadArchivedItems,
   createItem,
   updateItem,
-  archiveItem,
+  archiveItemFromToday,
+  restoreItemFromArchive,
   saveItemsOrder,
-  toggleHiddenToday,
   endTimeFromDuration,
   durationBetweenTimes,
   formatDuration,
+  addDays,
   PRIORITY_DOT,
+  getHiddenStatus,
   type PlannerItem,
   type PlannerStep,
   type PlannerType,
@@ -97,6 +101,18 @@ export default function PlannerItems() {
   const [newStepText, setNewStepText] = useState('')
   const [saving, setSaving] = useState(false)
   const [delItem, setDelItem] = useState<PlannerItem | null>(null)
+  // Подвкладки «Мои дела»: Задачи (активные) и Архив (вручную заархивированные).
+  const [tab, setTab] = useState<'tasks' | 'archive'>('tasks')
+  const [archivedList, setArchivedList] = useState<PlannerItem[]>([])
+  // Дело, у которого открыто выпадающее меню глазика (варианты скрытия).
+  const [hideMenuId, setHideMenuId] = useState<string | null>(null)
+
+  // Короткая дата «21.09» для подписей архива и скрытия.
+  const fmtShort = (iso: string | null | undefined): string => {
+    if (!iso) return ''
+    const p = iso.split('-')
+    return p.length >= 3 ? `${p[2]}.${p[1]}` : iso
+  }
 
   // ===== Перетаскивание для смены порядка (тот же механизм, что в «Долгах»/
   // «Сегодня»). Порядок сохраняется в planner_items.sort_order через saveItemsOrder
@@ -254,8 +270,12 @@ export default function PlannerItems() {
       setLoading(true)
     }
     try {
-      const list = await loadAllItems(user.id)
+      const [list, archived] = await Promise.all([
+        loadAllItems(user.id),
+        loadArchivedItems(user.id).catch(() => [] as PlannerItem[]),
+      ])
       setItems(list)
+      setArchivedList(archived)
       writeCache(ck, list)
     } catch (e) {
       setError((e as Error).message)
@@ -453,10 +473,12 @@ export default function PlannerItems() {
     }
   }
 
+  // Кнопка корзины теперь отправляет дело в АРХИВ (не удаляет): со дня архивации
+  // дело исчезает из «Сегодня» и будущих дней, прошлые дни остаются в истории.
   const confirmDelete = async () => {
     if (!user || !delItem) return
     try {
-      await archiveItem(user.id, delItem.id)
+      await archiveItemFromToday(user.id, delItem.id)
       setDelItem(null)
       await loadAll()
     } catch (e) {
@@ -464,21 +486,30 @@ export default function PlannerItems() {
     }
   }
 
-  const toggleHidden = async (it: PlannerItem) => {
+  // Вернуть дело из архива в активный список.
+  const confirmRestore = async (it: PlannerItem) => {
     if (!user) return
-    const nextVal = !it.hidden_today
-    setItems((all) =>
-      all.map((x) => (x.id === it.id ? { ...x, hidden_today: nextVal } : x)),
-    )
     try {
-      await toggleHiddenToday(user.id, it.id, nextVal)
+      await restoreItemFromArchive(user.id, it.id)
+      await loadAll()
     } catch (e) {
-      // rollback
-      setItems((all) =>
-        all.map((x) => (x.id === it.id ? { ...x, hidden_today: !nextVal } : x)),
-      )
       setError((e as Error).message)
     }
+  }
+
+  // Подпись состояния скрытия дела: «Скрыт навсегда», «Скрыт до 25.09» и т.п.
+  const hiddenLabel = (it: PlannerItem): string => {
+    const s = getHiddenStatus(it)
+    if (!s.active) {
+      if (s.future.length > 0) {
+        const parts = s.future.map((r) => `${fmtShort(r.from)}–${fmtShort(r.to ? addDays(r.to, -1) : '')}`)
+        return t('items.hiddenFuture', { v: parts.join(', ') })
+      }
+      return ''
+    }
+    if (s.forever) return t('items.hiddenForever')
+    if (s.until) return t('items.hiddenUntil', { d: fmtShort(s.until) })
+    return t('items.hiddenToday')
   }
 
   const describeRepeat = (it: PlannerItem): string => {
@@ -991,7 +1022,7 @@ export default function PlannerItems() {
       <div className="sticky top-0 z-20 -mx-4 flex items-center justify-between gap-2 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
         <h1 className="text-xl font-semibold">{t('pnav.items')}</h1>
         <div className="flex shrink-0 items-center gap-2">
-          {!showForm && items.length > 1 && (
+          {!showForm && tab === 'tasks' && items.length > 1 && (
             <button
               type="button"
               onClick={() => setReorder((v) => !v)}
@@ -1004,7 +1035,7 @@ export default function PlannerItems() {
               {reorder ? t('common.reorderDone') : t('common.reorder')}
             </button>
           )}
-          {!showForm && !reorder && (
+          {!showForm && !reorder && tab === 'tasks' && (
             <button
               type="button"
               onClick={openAdd}
@@ -1016,10 +1047,95 @@ export default function PlannerItems() {
         </div>
       </div>
 
+      {/* Переключатель подвкладок: Задачи / Архив (в стиле переключателя модулей). */}
+      {!showForm && (
+        <div className="flex gap-1 rounded-xl bg-neutral-200/60 p-1 dark:bg-neutral-800/60">
+          <button
+            type="button"
+            onClick={() => setTab('tasks')}
+            className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium transition ${
+              tab === 'tasks'
+                ? 'bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100'
+                : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200'
+            }`}
+          >
+            🗂️ {t('items.subtabTasks')}
+            {items.length > 0 && (
+              <span className="rounded-full bg-neutral-200/80 px-1.5 py-0.5 text-[10px] font-bold text-neutral-600 dark:bg-neutral-600/60 dark:text-neutral-200">
+                {items.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTab('archive')}
+            className={`flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg px-2 py-1.5 text-sm font-medium transition ${
+              tab === 'archive'
+                ? 'bg-white text-neutral-900 shadow-sm dark:bg-neutral-700 dark:text-neutral-100'
+                : 'text-neutral-500 hover:text-neutral-800 dark:text-neutral-400 dark:hover:text-neutral-200'
+            }`}
+          >
+            📦 {t('items.subtabArchive')}
+            {archivedList.length > 0 && (
+              <span className="rounded-full bg-neutral-200/80 px-1.5 py-0.5 text-[10px] font-bold text-neutral-600 dark:bg-neutral-600/60 dark:text-neutral-200">
+                {archivedList.length}
+              </span>
+            )}
+          </button>
+        </div>
+      )}
+
       {/* Форма добавления — сверху; форма редактирования — встроена под делом ниже. */}
       {showForm && !editId && renderForm()}
 
-      {loading ? (
+      {tab === 'archive' ? (
+        <div className="flex flex-col gap-2">
+          <p className="px-1 text-xs text-neutral-500 dark:text-neutral-400">
+            {t('items.archiveHint')}
+          </p>
+          {archivedList.length === 0 ? (
+            <p className="rounded-xl border border-dashed border-neutral-300 p-6 text-center text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
+              {t('items.archiveEmpty')}
+            </p>
+          ) : (
+            archivedList.map((it) => {
+              const dot = PRIORITY_DOT[it.priority]
+              const time = timeLabel(it)
+              return (
+                <div key={it.id} className={`flex items-start gap-3 ${cardCls}`}>
+                  {dot && <span className="mt-0.5 shrink-0 text-xs leading-none">{dot}</span>}
+                  {it.icon && <span className="shrink-0">{it.icon}</span>}
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-1.5">
+                      <p className="break-words text-sm font-medium">{it.title}</p>
+                      {it.important && (
+                        <span className="shrink-0 text-xs" title={t('items.important')}>⭐</span>
+                      )}
+                      {it.type === 'habit' && <span className="shrink-0 text-xs">🔁</span>}
+                    </div>
+                    <p className="truncate text-xs text-neutral-500 dark:text-neutral-400">
+                      {describeRepeat(it)}
+                      {time ? ` · ${time}` : ''}
+                    </p>
+                    {it.archived_at && (
+                      <p className="mt-0.5 text-xs text-neutral-400">
+                        📦 {t('items.archivedFrom', { d: fmtShort(it.archived_at) })}
+                      </p>
+                    )}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => confirmRestore(it)}
+                    className="shrink-0 rounded-lg border border-emerald-500/60 px-2.5 py-1.5 text-xs font-medium text-emerald-600 transition hover:bg-emerald-50 active:scale-95 dark:text-emerald-400 dark:hover:bg-emerald-500/10"
+                  >
+                    ↩ {t('items.restore')}
+                  </button>
+                </div>
+              )
+            })
+          )}
+        </div>
+      ) : loading ? (
         <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
       ) : items.length === 0 && !showForm ? (
         <p className="rounded-xl border border-dashed border-neutral-300 p-6 text-center text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
@@ -1035,6 +1151,7 @@ export default function PlannerItems() {
             const time = timeLabel(it)
             const duration = formatDuration(it.duration_min, lang)
             const isHabitItem = it.type === 'habit'
+            const hActive = getHiddenStatus(it).active
             return (
               <div
                 key={it.id}
@@ -1047,7 +1164,7 @@ export default function PlannerItems() {
                   drag?.id === it.id && drag.active
                     ? ' border-emerald-500/60 shadow-xl ring-1 ring-emerald-500/40'
                     : ''
-                }${it.hidden_today ? ' opacity-50 grayscale transition-all' : ''}`}
+                }${hActive ? ' opacity-50 grayscale transition-all' : ''}`}
               >
                 {grip(it.id, index)}
                 {dot && <span className="mt-0.5 shrink-0 text-xs leading-none">{dot}</span>}
@@ -1083,12 +1200,14 @@ export default function PlannerItems() {
             const duration = formatDuration(it.duration_min, lang)
             const isHabitItem = it.type === 'habit'
             const editing = showForm && editId === it.id
+            const hs = getHiddenStatus(it)
+            const hLabel = hiddenLabel(it)
             return (
               <div key={it.id} className="flex flex-col gap-2">
                 <div
                   className={`flex items-start gap-3 ${cardCls}${
                     editing ? ' border-emerald-500/60 ring-1 ring-emerald-500/40' : ''
-                  }${it.hidden_today && !editing ? ' opacity-50 grayscale transition-all' : ''}`}
+                  }${hs.active && !editing ? ' opacity-50 grayscale transition-all' : ''}`}
                 >
                   {dot && <span className="mt-0.5 shrink-0 text-xs leading-none">{dot}</span>}
                   {it.icon && <span className="shrink-0">{it.icon}</span>}
@@ -1124,26 +1243,43 @@ export default function PlannerItems() {
                     {it.note && (
                       <p className="mt-0.5 truncate text-xs text-neutral-400">{it.note}</p>
                     )}
+                    {hLabel && (
+                      <p className="mt-0.5 break-words text-xs font-medium text-amber-600 dark:text-amber-400">
+                        {hLabel}
+                      </p>
+                    )}
                   </div>
                   <div className="flex shrink-0 gap-1">
-                    <button
-                      type="button"
-                      title={it.hidden_today ? t('items.showToday') : t('items.hideToday')}
-                      onClick={() => toggleHidden(it)}
-                      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${
-                        it.hidden_today
-                          ? 'bg-neutral-200/50 text-neutral-500 dark:bg-neutral-800/50 dark:text-neutral-400'
-                          : 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-400'
-                      }`}
-                    >
-                      <span className={it.hidden_today ? 'text-[11px] opacity-70' : 'text-[13px] opacity-70'}>
-                        {it.hidden_today ? '👁‍🗨' : '👁️'}
-                      </span>
-                    </button>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        title={t('items.hideOptions')}
+                        onClick={() => setHideMenuId((v) => (v === it.id ? null : it.id))}
+                        className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition ${
+                          hs.active
+                            ? 'bg-neutral-200/50 text-neutral-500 dark:bg-neutral-800/50 dark:text-neutral-400'
+                            : 'text-neutral-400 hover:bg-neutral-100 hover:text-neutral-600 dark:text-neutral-500 dark:hover:bg-neutral-800 dark:hover:text-neutral-400'
+                        }`}
+                      >
+                        <span className={hs.active ? 'text-[11px] opacity-70' : 'text-[13px] opacity-70'}>
+                          {hs.active ? '👁‍🗨' : '👁️'}
+                        </span>
+                      </button>
+                      {/* Выпадающее меню вариантов скрытия (навсегда / на сегодня / на день / на период). */}
+                      {hideMenuId === it.id && (
+                        <ItemHideMenu
+                          item={it}
+                          onClose={() => setHideMenuId(null)}
+                          onChanged={() => {
+                            void loadAll()
+                          }}
+                        />
+                      )}
+                    </div>
                     <IconButton icon="edit" title={t('common.edit')} onClick={() => openEdit(it)} />
                     <IconButton
                       icon="delete"
-                      title={t('common.delete')}
+                      title={t('items.archive')}
                       onClick={() => setDelItem(it)}
                     />
                   </div>
@@ -1158,15 +1294,11 @@ export default function PlannerItems() {
 
       <ConfirmDialog
         open={!!delItem}
-        title={delItem?.type === 'habit' ? t('items.deleteHabitTitle') : t('items.deleteTitle')}
+        title={t('items.archiveTitle')}
         message={
-          delItem
-            ? delItem.type === 'habit'
-              ? t('items.deleteHabitMsg', { n: delItem.title })
-              : t('items.deleteMsg', { n: delItem.title })
-            : ''
+          delItem ? t('items.archiveMsg', { n: delItem.title }) : ''
         }
-        confirmLabel={t('common.delete')}
+        confirmLabel={t('items.archive')}
         cancelLabel={t('common.cancel')}
         danger
         onConfirm={confirmDelete}

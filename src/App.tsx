@@ -23,6 +23,7 @@ import { initPomoSync, type PomoSyncMessage } from './lib/pomoSync'
 import { startRealtimeSync, stopRealtimeSync, onSyncEvent } from './lib/realtimeSync'
 import { enableFocusDnd, disableFocusDnd } from './lib/dnd'
 import { syncUserNameFromCloud } from './lib/db'
+import { sendInstallHeartbeat } from './lib/installs'
 import {
   getLastNavPath,
   saveLastNavPath,
@@ -51,6 +52,7 @@ const PlannerFocus = lazy(() => import('./pages/PlannerFocus'))
 const PlannerStats = lazy(() => import('./pages/PlannerStats'))
 const PlannerSettings = lazy(() => import('./pages/PlannerSettings'))
 const WaterTracker = lazy(() => import('./pages/WaterTracker'))
+const AdminPanel = lazy(() => import('./pages/AdminPanel'))
 
 function NotFoundRedirect({ fallback }: { fallback: string }) {
   const to = isValidNavPath(fallback) ? fallback : '/'
@@ -88,6 +90,18 @@ function App() {
   useEffect(() => {
     if (!userId) return
     void syncUserNameFromCloud(userId).catch(() => {})
+  }, [userId])
+
+  // Админ-панель: каждая установка при запуске сообщает о себе в app_installs
+  // (платформа, устройство, версии, пользователь). Ошибки внутри молча игнорируются.
+  useEffect(() => {
+    if (!userId) return
+    let userName: string | null = null
+    try {
+      userName = localStorage.getItem('nucleus:userName:' + userId)
+    } catch {}
+    void sendInstallHeartbeat(userId, user?.email ?? null, userName)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId])
 
   // Синхронизация имени пользователя в реальном времени при изменении на другом устройстве.
@@ -344,6 +358,7 @@ function App() {
         <Route path="/planner/stats" element={<PlannerStats />} />
         <Route path="/planner/settings" element={<PlannerSettings />} />
         <Route path="/planner/water" element={<WaterTracker />} />
+        <Route path="/planner/admin" element={<AdminPanel />} />
           <Route path="*" element={<NotFoundRedirect fallback={lastPath} />} />
         </Route>
       </Routes>

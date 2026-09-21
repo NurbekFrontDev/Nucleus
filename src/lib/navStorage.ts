@@ -23,6 +23,7 @@ const VALID_EXACT_ROUTES = new Set([
   '/planner/focus',
   '/planner/stats',
   '/planner/settings',
+  '/planner/admin',
 ])
 
 // Перенаправления-алиасы: приводим к каноническому адресу
