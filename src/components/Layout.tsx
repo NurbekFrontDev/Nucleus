@@ -12,6 +12,7 @@ import { saveModulePath, loadModulePath } from '../lib/moduleNav'
 import { isAdminEmail } from '../lib/installs'
 import { useTheme } from '../lib/ThemeContext'
 import SettingsModal from './SettingsModal'
+import { FlagRu, FlagUs } from './FlagIcons'
 
 export default function Layout() {
   const { t, lang, setLang } = useLang()
@@ -92,25 +93,25 @@ export default function Layout() {
             <button
               type="button"
               onClick={() => setLang('ru')}
-              className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-1.5 text-xs transition ${
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs transition ${
                 lang === 'ru'
                   ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-600 dark:text-emerald-400 font-semibold'
                   : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 font-medium'
               }`}
             >
-              <span>🇷🇺</span>
+              <FlagRu className="h-3 w-4.5" />
               <span>Русский</span>
             </button>
             <button
               type="button"
               onClick={() => setLang('en')}
-              className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-1.5 text-xs transition ${
+              className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs transition ${
                 lang === 'en'
                   ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-600 dark:text-emerald-400 font-semibold'
                   : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 font-medium'
               }`}
             >
-              <span>🇬🇧</span>
+              <FlagUs className="h-3 w-4.5" />
               <span>English</span>
             </button>
           </div>
@@ -246,25 +247,25 @@ export default function Layout() {
               <button
                 type="button"
                 onClick={() => setLang('ru')}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs transition ${
+                className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-1.5 text-xs transition ${
                   lang === 'ru'
                     ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-600 dark:text-emerald-400 font-semibold'
                     : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 font-medium'
                 }`}
               >
-                <span>🇷🇺</span>
+                <FlagRu className="h-3.5 w-5" />
                 <span>Русский</span>
               </button>
               <button
                 type="button"
                 onClick={() => setLang('en')}
-                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs transition ${
+                className={`flex flex-1 items-center justify-center gap-2 rounded-lg py-1.5 text-xs transition ${
                   lang === 'en'
                     ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-600 dark:text-emerald-400 font-semibold'
                     : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 font-medium'
                 }`}
               >
-                <span>🇬🇧</span>
+                <FlagUs className="h-3.5 w-5" />
                 <span>English</span>
               </button>
             </div>
