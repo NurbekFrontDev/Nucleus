@@ -1557,6 +1557,25 @@ export async function hideItem(
   const raw = (data as { hidden_intervals?: HiddenInterval[] } | null)?.hidden_intervals
   const existing: HiddenInterval[] = Array.isArray(raw) ? [...raw] : []
 
+  const today = todayStr()
+  const kept: HiddenInterval[] = []
+  for (const inv of existing) {
+    if (!inv.to) {
+      // Открытый интервал («навсегда») — если начался в прошлом, сохраняем историю до сегодня.
+      if (inv.from < today) kept.push({ from: inv.from, to: today })
+      continue
+    }
+    if (inv.to <= today) {
+      // Интервал уже завершился в прошлом — сохраняем для истории
+      kept.push(inv)
+      continue
+    }
+    // Интервал ещё действует сегодня или в будущем: если начался в прошлом, сохраняем отрезок до today
+    if (inv.from < today) {
+      kept.push({ from: inv.from, to: today })
+    }
+  }
+
   const add: HiddenInterval[] =
     mode.kind === 'forever'
       ? [{ from: dateStr }]
@@ -1566,13 +1585,17 @@ export async function hideItem(
           ? [{ from: mode.date, to: addDays(mode.date, 1) }]
           : [{ from: mode.from, to: addDays(mode.to, 1) }]
 
+  const coversToday =
+    (mode.kind === 'forever' && dateStr <= today) ||
+    (mode.kind === 'today' && dateStr === today) ||
+    (mode.kind === 'date' && mode.date === today) ||
+    (mode.kind === 'range' && mode.from <= today && mode.to >= today)
+
   const { error } = await supabase
     .from('planner_items')
     .update({
-      // hidden_today=true только при «навсегда» — для совместимости со старыми версиями
-      // приложения на других устройствах (там нет интервалов).
-      hidden_today: mode.kind === 'forever',
-      hidden_intervals: [...existing, ...add],
+      hidden_today: coversToday,
+      hidden_intervals: [...kept, ...add],
     })
     .eq('user_id', userId)
     .eq('id', itemId)
@@ -1581,7 +1604,7 @@ export async function hideItem(
     // Фоллбэк, если колонка hidden_intervals ещё не создана.
     const { error: err2 } = await supabase
       .from('planner_items')
-      .update({ hidden_today: mode.kind === 'forever' })
+      .update({ hidden_today: coversToday })
       .eq('user_id', userId)
       .eq('id', itemId)
     if (err2) throw err2

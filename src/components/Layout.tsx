@@ -14,7 +14,7 @@ import { useTheme } from '../lib/ThemeContext'
 import SettingsModal from './SettingsModal'
 
 export default function Layout() {
-  const { t } = useLang()
+  const { t, lang, setLang } = useLang()
   const { user, signOut } = useAuth()
   const { theme, setTheme } = useTheme()
   const [profileOpen, setProfileOpen] = useState(false)
@@ -84,6 +84,34 @@ export default function Layout() {
               title={t('profile.settings')}
             >
               ⚙️
+            </button>
+          </div>
+
+          {/* Переключатель языка: Русский / English */}
+          <div className="mb-2.5 flex items-center justify-between rounded-xl bg-neutral-100 p-1 dark:bg-neutral-800/80">
+            <button
+              type="button"
+              onClick={() => setLang('ru')}
+              className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-1.5 text-xs transition ${
+                lang === 'ru'
+                  ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-600 dark:text-emerald-400 font-semibold'
+                  : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 font-medium'
+              }`}
+            >
+              <span>🇷🇺</span>
+              <span>Русский</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setLang('en')}
+              className={`flex flex-1 items-center justify-center gap-1 rounded-lg py-1.5 text-xs transition ${
+                lang === 'en'
+                  ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-600 dark:text-emerald-400 font-semibold'
+                  : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 font-medium'
+              }`}
+            >
+              <span>🇬🇧</span>
+              <span>English</span>
             </button>
           </div>
 
@@ -212,7 +240,35 @@ export default function Layout() {
             })}
           </div>
 
-          <div className="mt-auto flex flex-col gap-3 pt-3 border-t border-neutral-200/80 dark:border-neutral-800">
+          <div className="mt-auto flex flex-col gap-2.5 pt-3 border-t border-neutral-200/80 dark:border-neutral-800">
+            {/* Переключатель языка: Русский / English */}
+            <div className="flex items-center justify-between rounded-xl bg-neutral-100 p-1 dark:bg-neutral-800/80">
+              <button
+                type="button"
+                onClick={() => setLang('ru')}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs transition ${
+                  lang === 'ru'
+                    ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-600 dark:text-emerald-400 font-semibold'
+                    : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 font-medium'
+                }`}
+              >
+                <span>🇷🇺</span>
+                <span>Русский</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setLang('en')}
+                className={`flex flex-1 items-center justify-center gap-1.5 rounded-lg py-1.5 text-xs transition ${
+                  lang === 'en'
+                    ? 'bg-white shadow-sm dark:bg-neutral-700 text-emerald-600 dark:text-emerald-400 font-semibold'
+                    : 'text-neutral-500 hover:text-neutral-700 dark:text-neutral-400 dark:hover:text-neutral-200 font-medium'
+                }`}
+              >
+                <span>🇬🇧</span>
+                <span>English</span>
+              </button>
+            </div>
+
             {/* Переключатель темы: Система / Светлая / Тёмная */}
             <div className="flex items-center justify-between rounded-xl bg-neutral-100 p-1 dark:bg-neutral-800/80">
               <button

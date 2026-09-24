@@ -69,13 +69,32 @@ const KNOWN_ANDROID_MODELS: Record<string, string> = {
 export function formatDeviceName(rawModel: string | null | undefined): string | null {
   if (!rawModel) return null
   const clean = rawModel.trim()
-  if (KNOWN_ANDROID_MODELS[clean]) {
-    return `${KNOWN_ANDROID_MODELS[clean]} (${clean})`
-  }
+  if (!clean) return null
+
+  // Если модель известна — возвращаем лаконичное «Имя (Код)» или «Имя»,
+  // исключая повторные вложения вида «Redmi Note 12 (Redmi Note 12 (23021RAA2Y))».
   for (const [code, name] of Object.entries(KNOWN_ANDROID_MODELS)) {
-    if (clean.includes(code)) return `${name} (${clean})`
+    if (clean.includes(code)) {
+      return name.includes(code) ? name : `${name} (${code})`
+    }
   }
-  return clean
+
+  for (const name of Object.values(KNOWN_ANDROID_MODELS)) {
+    if (clean.includes(name)) return name
+  }
+
+  // Убираем случайные дублированные скобки вида "X (X (Y))" -> "X (Y)"
+  let deduped = clean
+  while (true) {
+    const nested = /^(.*?)\s*\(\1\s*\((.*?)\)\)$/.exec(deduped)
+    if (nested) {
+      deduped = `${nested[1]} (${nested[2]})`
+    } else {
+      break
+    }
+  }
+
+  return deduped
 }
 
 // Android: userAgent вида "...Android 14; SM-S918B Build/..." — вытаскиваем модель.

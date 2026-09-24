@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
-import Select from './Select'
 import UsageCard from './UsageCard'
 import { useLang } from '../lib/i18n'
 import { loadUserName, saveUserName } from '../lib/db'
@@ -19,7 +18,8 @@ import { useAnimatedMount } from '../lib/useAnimatedMount'
 
 // Глобальное модальное окно настроек (~80% экрана).
 // Открывается из popup-меню профиля (шестерёнка). Содержит все общие настройки:
-// имя пользователя, язык, бэкап, хранилище, автозапуск, версию.
+// имя пользователя, бэкап, хранилище, автозапуск, версию.
+// Настройка языка вынесена наружу в профиль.
 
 type Props = {
   onClose: () => void
@@ -30,7 +30,7 @@ const cardCls =
 
 export default function SettingsModal({ onClose }: Props) {
   const { user } = useAuth()
-  const { t, lang, setLang } = useLang()
+  const { t, lang } = useLang()
   const [open, setOpen] = useState(true)
   const visible = useAnimatedMount(open, 220)
 
@@ -249,24 +249,6 @@ export default function SettingsModal({ onClose }: Props) {
                 >
                   {nameSaving ? '...' : lang === 'en' ? 'Save' : 'Сохранить'}
                 </button>
-              </div>
-            </div>
-
-            {/* Язык */}
-            <div className={`flex items-center justify-between gap-3 ${cardCls}`}>
-              <div className="min-w-0">
-                <p className="font-medium">🌐 {t('set.language')}</p>
-              </div>
-              <div className="shrink-0">
-                <Select
-                  className="w-fit"
-                  value={lang}
-                  onChange={(v) => setLang(v as 'ru' | 'en')}
-                  options={[
-                    { value: 'ru', label: 'Русский' },
-                    { value: 'en', label: 'English' },
-                  ]}
-                />
               </div>
             </div>
 
