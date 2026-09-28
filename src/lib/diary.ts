@@ -209,11 +209,18 @@ export async function fetchEntriesRange(
   return (data ?? []) as unknown as DiaryEntry[]
 }
 
+/**
+ * Сколько готовых записей ещё не записано в вольт. Считаем только ready:
+ * записи в обработке (pending/transcribing/summarizing) и failed физически
+ * в вольт попасть не могут — считать их «не в вольте» значит вечно показывать
+ * пользователю ложное ожидающее число.
+ */
 export async function countUnsyncedEntries(userId: string): Promise<number> {
   const { count } = await supabase
     .from('diary_entries')
     .select('id', { count: 'exact', head: true })
     .eq('user_id', userId)
+    .eq('status', 'ready')
     .is('vault_synced_at', null)
   return count ?? 0
 }
@@ -414,6 +421,108 @@ export async function retryEntry(userId: string, entryId: string): Promise<void>
     .eq('id', entryId)
     .eq('user_id', userId)
   await continueEntry(userId, entryId)
+}
+
+// ===== Редактирование и удаление =====
+
+/**
+ * Сохраняет отредактированный оригинал и заново прогоняет выжимку:
+ * модель пересматривает текст и возвращает обновлённую структуру.
+ * Возвращает обновлённую запись (или null, если выжимка не удалась —
+ * тогда оригинал всё равно сохранён, см. updateOriginalText).
+ */
+export async function saveEditedEntry(userId: string, entryId: string, newText: string): Promise<DiaryEntry | null> {
+  const value = newText.trim()
+  if (!value) throw new Error('empty-text')
+  const entry = await updateOriginalText(userId, entryId, value)
+  if (!entry) return null
+
+  // Перегоняем выжимку по новому оригиналу.
+  const experiments = await fetchActiveExperiments(userId)
+  const activeExperiments = await Promise.all(
+    experiments.map(async (e) => ({
+      id: e.id,
+      title: e.title,
+      criteria: e.criteria,
+      target_days: e.target_days,
+      started_on: e.started_on,
+      last_day_number: await experimentDaysTracked(userId, e.id),
+    })),
+  )
+  const { summary } = await diaryAi<{ summary: ParsedDiarySummary }>({
+    op: 'summarize',
+    text: value,
+    activeExperiments,
+  })
+
+  // Ре-матч эксперимента по новой выжимке.
+  let experimentId: string | null = null
+  const exp = summary.experiment
+  if (exp?.has_experiment_update) {
+    if (exp.is_new_experiment && exp.experiment_title) {
+      experimentId = await createExperiment(userId, {
+        title: exp.experiment_title,
+        criteria: exp.criteria ?? null,
+        target_days: exp.target_days ?? null,
+        started_on: entry.entry_date,
+      })
+    } else if (exp.matched_experiment_id) {
+      const known = experiments.some((e) => e.id === exp.matched_experiment_id)
+      experimentId = known ? exp.matched_experiment_id : null
+    }
+  }
+
+  const { data: updated } = await supabase
+    .from('diary_entries')
+    // vault_synced_at обнуляем: выжимка изменилась — блок в вольте надо
+    // переписать (десктоп подхватит и заменит его через replaceEntryInVault).
+    .update({
+      summary,
+      status: 'ready',
+      vault_synced_at: null,
+      ...(experimentId ? { experiment_id: experimentId } : {}),
+    })
+    .eq('id', entryId)
+    .eq('user_id', userId)
+    .select()
+    .single()
+    .throwOnError()
+  return (updated as unknown as DiaryEntry | null) ?? null
+}
+
+/** Меняет только оригинальный текст записи (без перегонки выжимки). */
+export async function updateOriginalText(
+  userId: string,
+  entryId: string,
+  newText: string,
+): Promise<DiaryEntry | null> {
+  const { data, error } = await supabase
+    .from('diary_entries')
+    .update({ original_text: newText })
+    .eq('id', entryId)
+    .eq('user_id', userId)
+    .select()
+    .maybeSingle()
+  if (error) throw error
+  return (data as unknown as DiaryEntry | null) ?? null
+}
+
+/**
+ * Удаляет запись: строку в БД и аудиоклип в бакете (если был).
+ * Вольт-заметку чистит vaultSync.removeEntryFromVault — он знает формат файла.
+ * Аудиокэш IndexedDB тоже подтираем на всякий случай.
+ */
+export async function deleteEntry(userId: string, entry: DiaryEntry): Promise<void> {
+  await audioCacheDelete(entry.id)
+  if (entry.audio_path) {
+    await supabase.storage.from('diary-audio').remove([entry.audio_path]).then(undefined, () => {})
+  }
+  const { error } = await supabase
+    .from('diary_entries')
+    .delete()
+    .eq('id', entry.id)
+    .eq('user_id', userId)
+  if (error) throw error
 }
 
 // ===== Эксперименты =====

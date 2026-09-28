@@ -2,6 +2,7 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import { lazy, useEffect, useRef, useState } from 'react'
 import { useAuth } from './lib/AuthContext'
 import { initNativeAuth, initDesktopAuth, setDesktopDnd } from './lib/native'
+import { ensureMicPermissionOnce } from './lib/micPermission'
 import {
   initNotifications,
   cancelItemNotification,
@@ -54,6 +55,7 @@ const PlannerSettings = lazy(() => import('./pages/PlannerSettings'))
 const WaterTracker = lazy(() => import('./pages/WaterTracker'))
 const DiaryToday = lazy(() => import('./pages/DiaryToday'))
 const DiaryHistory = lazy(() => import('./pages/DiaryHistory'))
+const DiarySettings = lazy(() => import('./pages/DiarySettings'))
 const AdminPanel = lazy(() => import('./pages/AdminPanel'))
 
 function NotFoundRedirect({ fallback }: { fallback: string }) {
@@ -137,6 +139,14 @@ function App() {
     const cleanup = initDesktopAuth()
     return cleanup
   }, [])
+
+  // Разрешение на микрофон спрашивается один раз при первом входе в приложение
+  // (для голосовых записей дневника). Если пользователь уже ответил — повторно
+  // диалог не показываем; выдать/отозвать доступ можно в Настройках дневника.
+  useEffect(() => {
+    if (!userId) return
+    void ensureMicPermissionOnce()
+  }, [userId])
 
   // Обновления «по воздуху» (OTA, А-10): на телефоне подтверждаем рабочий запуск
   // и в фоне проверяем новую web-версию в Supabase Storage. Если она есть —
@@ -362,6 +372,7 @@ function App() {
         <Route path="/planner/water" element={<WaterTracker />} />
         <Route path="/diary" element={<DiaryToday />} />
         <Route path="/diary/history" element={<DiaryHistory />} />
+        <Route path="/diary/settings" element={<DiarySettings />} />
         <Route path="/planner/admin" element={<Navigate to="/admin" replace />} />
         <Route path="/admin" element={<AdminPanel />} />
         <Route path="*" element={<NotFoundRedirect fallback={lastPath} />} />

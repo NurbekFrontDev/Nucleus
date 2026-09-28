@@ -3,12 +3,13 @@
 //   F:\SecondBrain\personal\Diary\YYYY\MM\YYYY-MM-DD.md (одна заметка = день),
 //   аудио — personal/Diary/audio/YYYY/MM/YYYY-MM-DD-ЧЧММСС.webm (вне git,
 //   облачный бэкап — Google Drive), выжимка — выше, оригинал — ниже дословно.
-// Вольт-заметка — append-only журнал: правки Нурбека неприкосновенны, новые
-// записи дозаписываются в конец раздела «## Записи», updated обновляется.
-// Ошибки (вольт недоступен) не блокируют UI: vault_synced_at не ставится,
-// попытка повторяется при следующем триггере.
+//
+// Блок одной записи начинается скрытым маркером <!-- diary:UUID -->: по нему
+// синк идемпотентен — повторная синхронизация не дублирует запись, а редактирование
+// и удаление точно находят свой блок. Правки Нурбека вне блоков неприкосновенны:
+// мы переставляем/вырезаем только свои блоки, остальной текст файла не трогаем.
 
-import { exists, mkdir, readTextFile, writeTextFile, writeFile } from '@tauri-apps/plugin-fs'
+import { exists, mkdir, readTextFile, writeTextFile, writeFile, remove } from '@tauri-apps/plugin-fs'
 import { supabase } from './supabase'
 import { isDesktop } from './native'
 import type { DiaryEntry } from './diary'
@@ -95,6 +96,7 @@ function quoteBlock(text: string): string {
 function buildEntryBlock(entry: DiaryEntry, audioName: string | null): string {
   const s = entry.summary
   const lines: string[] = []
+  lines.push(`<!-- diary:${entry.id} -->`)
   lines.push(`### ${entryTimeHM(entry)} — ${s?.title ?? 'Запись'}`)
   if (s?.summary_text) lines.push(`**Выжимка:** ${s.summary_text}`)
   if (s?.key_events?.length) lines.push(`**События:** ${s.key_events.join('; ')}`)
@@ -113,6 +115,60 @@ function buildEntryBlock(entry: DiaryEntry, audioName: string | null): string {
   lines.push('')
   lines.push('---')
   return lines.join('\n')
+}
+
+// Маркер блока: скрытый HTML-комментарий, Obsidian не рендерит его на холсте.
+function markerFor(entryId: string): string {
+  return `<!-- diary:${entryId} -->`
+}
+
+// ===== Поиск и перестановка блоков внутри заметки =====
+
+/** Индекс начала блока записи (маркера) в тексте заметки, -1 если нет. */
+function blockStart(contents: string, entryId: string): number {
+  return contents.indexOf(markerFor(entryId))
+}
+
+/**
+ * Конец блока: позиция сразу после закрывающего '---'. Если маркер следующего
+ * блока или конец файла встречаются раньше — обрезаем по ним (защита от
+ * повреждённой заметки). Возвращает [start, endExclusive].
+ */
+function blockRange(contents: string, entryId: string): [number, number] | null {
+  const start = blockStart(contents, entryId)
+  if (start < 0) return null
+  const nextMarker = contents.indexOf('\n<!-- diary:', start + 1)
+  const limit = nextMarker < 0 ? contents.length : nextMarker
+  const seg = contents.slice(start, limit)
+  // Блок заканчивается строкой '---' (одинокой, не таблицей и не frontmatter).
+  const m = seg.match(/\n---[ \t]*\r?\n?$/)
+  const end = m ? start + m.index! + m[0].length : limit
+  return [start, end]
+}
+
+/**
+ * Fallback-поиск блока для заметок, записанных версиями до v0.1.55 (без
+ * маркеров): блок опознаётся по заголовку «### HH:MM — Title».
+ */
+function legacyBlockRange(contents: string, entry: DiaryEntry): [number, number] | null {
+  const time = entryTimeHM(entry)
+  const title = entry.summary?.title ?? ''
+  const heading = title ? `### ${time} — ${title}` : `### ${time}`
+  const idx = contents.indexOf(heading)
+  if (idx < 0) return null
+  const nextMarker = contents.indexOf('\n<!-- diary:', idx + 1)
+  const nextHeading = contents.indexOf('\n### ', idx + 1)
+  let limit = contents.length
+  for (const pos of [nextMarker, nextHeading]) if (pos >= 0 && pos < limit) limit = pos
+  const seg = contents.slice(idx, limit)
+  const m = seg.match(/\n---[ \t]*\r?\n?$/)
+  const end = m ? idx + m.index! + m[0].length : limit
+  return [idx, end]
+}
+
+/** Поиск блока записи: сначала по маркеру, потом по заголовку (старые заметки). */
+function findBlock(contents: string, entry: DiaryEntry): [number, number] | null {
+  return blockRange(contents, entry.id) ?? legacyBlockRange(contents, entry)
 }
 
 function newDayNote(entry: DiaryEntry, firstBlock: string): string {
@@ -179,8 +235,15 @@ async function syncSingleEntry(entry: DiaryEntry): Promise<void> {
 
   if (await exists(path)) {
     const current = await readTextFile(path)
-    // Дозапись строго в конец файла (конец раздела «## Записи»): всё, что
-    // Нурбек дописал вручную, остаётся нетронутым выше.
+    const range = findBlock(current, entry)
+    if (range) {
+      // Запись уже в вольте — заменяем блок целиком (редактирование/ре-выжимка).
+      const next = touchUpdated(current.slice(0, range[0]) + block + current.slice(range[1]), entry.entry_date)
+      await writeTextFile(path, next, { create: true, append: false })
+      return
+    }
+    // Новый блок дозаписываем в конец: всё, что Нурбек дописал вручную,
+    // остаётся нетронутым выше.
     const sep = current.endsWith('\n') ? '' : '\n'
     const next = touchUpdated(current + sep + '\n' + block, entry.entry_date)
     await writeTextFile(path, next, { create: true, append: false })
@@ -189,12 +252,64 @@ async function syncSingleEntry(entry: DiaryEntry): Promise<void> {
   }
 }
 
+/**
+ * Удаляет блок записи из заметки дня. Если блоков больше не осталось —
+ * заметка удаляется целиком (пустой день не нужен). Аудиофайл вольта тоже
+ * стираем. Возвращает true, если что-то было изменено.
+ */
+export async function removeEntryFromVault(entry: DiaryEntry): Promise<boolean> {
+  if (!isVaultSyncAvailable()) return false
+  const path = notePathFor(entry.entry_date)
+  try {
+    if (!(await exists(path))) {
+      // Заметки нет — возможно, блок писался старой версией без маркера.
+      // Просто чистим аудио (если найдём).
+      await removeVaultAudio(entry)
+      return false
+    }
+    const current = await readTextFile(path)
+    const range = findBlock(current, entry)
+    if (!range) {
+      // Блока нет в заметке (запись не успела синхронизироваться или заметка
+      // была отредактирована вручную). Чистим хотя бы аудио.
+      await removeVaultAudio(entry)
+      return false
+    }
+    const next = (current.slice(0, range[0]) + current.slice(range[1])).replace(/\n{3,}/g, '\n\n')
+    await removeVaultAudio(entry)
+    const hasAnyBlock = /<!-- diary:[0-9a-f-]+ -->/.test(next) || /^### /m.test(next)
+    if (!hasAnyBlock && next.trim().length < 400) {
+      // Записей не осталось — удаляем пустую заметку целиком.
+      await remove(path)
+      return true
+    }
+    await writeTextFile(path, touchUpdated(next, entry.entry_date), { create: true, append: false })
+    return true
+  } catch (e) {
+    console.warn('[vaultSync] удаление блока не удалось:', e)
+    return false
+  }
+}
+
+/** Стирает аудиофайл записи из папки вольта (best-effort). */
+async function removeVaultAudio(entry: DiaryEntry): Promise<void> {
+  if (entry.source !== 'voice') return
+  const name = audioFileName(entry)
+  const full = `${audioDirFor(entry.entry_date)}\\${name}`
+  try {
+    if (await exists(full)) await remove(full)
+  } catch {
+    // аудио могло не сохраниться — не критично
+  }
+}
+
 export type VaultSyncResult = { synced: number; failed: number }
 
 /**
  * Пишет в вольт все готовые (ready), ещё не записанные записи. Вызывается
  * на десктопе: при старте экрана дневника, после каждой новой записи,
- * по кнопке «Синхронизировать вольт».
+ * по кнопке «Синхронизировать вольт». Идемпотентна: повторный вызов для
+ * уже записанной записи обновляет её блок, а не дублирует.
  */
 export async function syncVault(userId: string): Promise<VaultSyncResult> {
   const result: VaultSyncResult = { synced: 0, failed: 0 }

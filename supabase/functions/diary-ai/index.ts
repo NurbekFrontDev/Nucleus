@@ -89,9 +89,10 @@ const SUMMARY_SYSTEM_PROMPT = `Ты — персональный AI-ассист
 // провайдера не знает ничего.
 type LlmProvider = { name: string; baseUrl: string; apiKey: string; model: string }
 
-function buildSummarizeProviders(): LlmProvider[] {
+// Ключ пользователя имеет приоритет над серверным секретом (настройки дневника).
+function buildSummarizeProviders(userGroqKey: string | null = null): LlmProvider[] {
   const providers: LlmProvider[] = []
-  const groqKey = Deno.env.get('GROQ_API_KEY')
+  const groqKey = userGroqKey || Deno.env.get('GROQ_API_KEY')
   if (groqKey) {
     providers.push({
       name: 'groq',
@@ -166,11 +167,61 @@ function isValidSummary(v: unknown): v is Record<string, unknown> {
     typeof o.summary_text === 'string' && o.summary_text.trim().length > 0
 }
 
+// ===== Настройки дневника конкретного пользователя =====
+// Хранятся в app_settings (синхронизируются между устройствами). Запрос идёт
+// с JWT самого пользователя — RLS «own app_settings» пускает только свою строку.
+// Любая ошибка = мягкая деградация до серверных дефолтов.
+type DiarySettings = {
+  smartTranscription: boolean
+  summaryPrompt: string | null
+  geminiKey: string | null
+  groqKey: string | null
+}
+
+const DEFAULT_SETTINGS: DiarySettings = {
+  smartTranscription: true,
+  summaryPrompt: null,
+  geminiKey: null,
+  groqKey: null,
+}
+
+async function loadDiarySettings(req: Request, userId: string): Promise<DiarySettings> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')
+  const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
+  const authHeader = req.headers.get('Authorization') ?? ''
+  if (!supabaseUrl || !anonKey || !authHeader) return { ...DEFAULT_SETTINGS }
+  try {
+    const res = await fetch(
+      `${supabaseUrl}/rest/v1/app_settings?user_id=eq.${userId}&select=diary_smart_transcription,diary_summary_prompt,diary_gemini_key,diary_groq_key`,
+      { headers: { Authorization: authHeader, apikey: anonKey } },
+    )
+    if (!res.ok) return { ...DEFAULT_SETTINGS }
+    const rows = await res.json()
+    const r = Array.isArray(rows) ? rows[0] : undefined
+    if (!r) return { ...DEFAULT_SETTINGS }
+    return {
+      smartTranscription: r.diary_smart_transcription !== false,
+      summaryPrompt: typeof r.diary_summary_prompt === 'string' && r.diary_summary_prompt.trim() ? r.diary_summary_prompt.trim() : null,
+      geminiKey: typeof r.diary_gemini_key === 'string' && r.diary_gemini_key.trim() ? r.diary_gemini_key.trim() : null,
+      groqKey: typeof r.diary_groq_key === 'string' && r.diary_groq_key.trim() ? r.diary_groq_key.trim() : null,
+    }
+  } catch {
+    return { ...DEFAULT_SETTINGS }
+  }
+}
+
 // ===== Транскрибация: Gemini 3.5 Transcribe (REST generateContent) =====
-// Референс — Voxel v2 (модели gemini-3.5-transcribe): аудио inline base64.
-// Язык авто (ru/en/uz). Ретрай ×2 при 429 (rate-limit)/5xx/сетевых сбоях.
-async function transcribeWithRetry(audioBytes: Uint8Array, mimeType: string): Promise<{ text: string | null; detail?: string }> {
-  const key = Deno.env.get('GEMINI_API_KEY')
+// Референс — Voxel v2 (модели gemini-3.5-transcribe): аудио inline base64,
+// конфиг транскрипции через generationConfig.audioTranscriptionConfig.
+// mode: SMART — умное форматирование (тиражи/числа, удаление запинок),
+//       VERBATIM — дословно. Язык авто (ru/en/uz). Ретрай ×2 при 429/5xx.
+async function transcribeWithRetry(
+  audioBytes: Uint8Array,
+  mimeType: string,
+  smartMode: boolean,
+  geminiKey: string | null,
+): Promise<{ text: string | null; detail?: string }> {
+  const key = geminiKey || Deno.env.get('GEMINI_API_KEY')
   if (!key) return { text: null, detail: 'no-gemini-key' }
 
   const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-transcribe:generateContent?key=${key}`
@@ -182,11 +233,14 @@ async function transcribeWithRetry(audioBytes: Uint8Array, mimeType: string): Pr
   }
   const body = JSON.stringify({
     contents: [{
-      parts: [
-        { text: 'Транскрибируй аудио дословно, без пунктуационной цензуры и сокращений. Автоопределение языка.' },
-        { inline_data: { mime_type: mimeType, data: btoa(binary) } },
-      ],
+      parts: [{ inline_data: { mime_type: mimeType, data: btoa(binary) } }],
     }],
+    generationConfig: {
+      audioTranscriptionConfig: {
+        mode: smartMode ? 'SMART' : 'VERBATIM',
+        languageCodes: ['ru', 'en', 'uz'],
+      },
+    },
   })
 
   let lastDetail = 'unknown'
@@ -258,6 +312,7 @@ Deno.serve(async (req: Request) => {
   try {
     const body = await req.json().catch(() => ({}))
     const op = typeof body?.op === 'string' ? body.op : ''
+    const settings = await loadDiarySettings(req, userId)
 
     // ===== op: transcribe — аудио из бакета -> Gemini -> транскрипт =====
     if (op === 'transcribe') {
@@ -292,9 +347,9 @@ Deno.serve(async (req: Request) => {
         ? 'audio/mp4'
         : 'audio/webm'
 
-      const r = await transcribeWithRetry(bytes, mimeType)
+      const r = await transcribeWithRetry(bytes, mimeType, settings.smartTranscription, settings.geminiKey)
       if (!r.text) return reply({ error: 'transcribe-failed', detail: r.detail })
-      return reply({ transcript: r.text })
+      return reply({ transcript: r.text, mode: settings.smartTranscription ? 'SMART' : 'VERBATIM' })
     }
 
     // ===== op: summarize — текст + активные эксперименты -> JSON выжимки =====
@@ -304,12 +359,23 @@ Deno.serve(async (req: Request) => {
       const experiments = Array.isArray(body?.activeExperiments) ? body.activeExperiments : []
       const expJson = JSON.stringify(experiments)
 
+      // Кастомный промпт пользователя (если задан) полностью заменяет системный;
+      // плейсхолдер {active_experiments_json} обязателен — если его нет,
+      // подсписок экспериментов добавляем в конец, иначе AI не увидит активные
+      // челленджи и не сможет отследить их прогресс.
+      let systemPrompt = settings.summaryPrompt || SUMMARY_SYSTEM_PROMPT
+      if (systemPrompt.includes('{active_experiments_json}')) {
+        systemPrompt = systemPrompt.replace('{active_experiments_json}', expJson)
+      } else {
+        systemPrompt = `${systemPrompt}\n\nСПИСОК АКТИВНЫХ ЭКСПЕРИМЕНТОВ (может быть пустым):\n${expJson}`
+      }
+
       const messages = [
-        { role: 'system', content: SUMMARY_SYSTEM_PROMPT.replace('{active_experiments_json}', expJson) },
+        { role: 'system', content: systemPrompt },
         { role: 'user', content: text },
       ]
 
-      const providers = buildSummarizeProviders()
+      const providers = buildSummarizeProviders(settings.groqKey)
       if (providers.length === 0) return reply({ error: 'no-api-key' })
 
       const details: string[] = []

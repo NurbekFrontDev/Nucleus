@@ -1,15 +1,18 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
 import { showToast } from '../lib/toast'
 import { isOnline } from '../lib/offlineSync'
 import {
+  deleteEntry,
   fetchActiveExperiments,
   fetchDayEntries,
   fetchEntriesRange,
   countUnsyncedEntries,
   resumePendingPipelines,
   retryEntry,
+  saveEditedEntry,
   sendTextEntry,
   sendVoiceEntry,
   todayStr,
@@ -22,8 +25,9 @@ import {
   startRecording,
   stopRecording,
 } from '../lib/recorder'
-import { isVaultSyncAvailable, syncVault } from '../lib/vaultSync'
+import { isVaultSyncAvailable, removeEntryFromVault, syncVault } from '../lib/vaultSync'
 import { onSyncEvent } from '../lib/realtimeSync'
+import { log } from '../lib/logger'
 import DiaryEntryCard from '../components/DiaryEntryCard'
 import DiaryExperiments from '../components/DiaryExperiments'
 
@@ -51,6 +55,7 @@ function fmtTimer(ms: number): string {
 export default function DiaryToday() {
   const { user } = useAuth()
   const { t, lang } = useLang()
+  const navigate = useNavigate()
   const userId = user?.id
 
   const [entries, setEntries] = useState<DiaryEntry[]>([])
@@ -61,10 +66,12 @@ export default function DiaryToday() {
   const [sending, setSending] = useState(false)
   const [recording, setRecording] = useState(false)
   const [elapsed, setElapsed] = useState(0)
+  const [micDenied, setMicDenied] = useState(false)
   const vaultAvailable = isVaultSyncAvailable()
 
   const listRef = useRef<HTMLDivElement>(null)
   const vaultTimer = useRef<number | undefined>(undefined)
+  const inputRef = useRef<HTMLTextAreaElement>(null)
 
   // ===== Загрузка =====
   const reload = useCallback(async () => {
@@ -91,12 +98,21 @@ export default function DiaryToday() {
   }, [reload, userId])
 
   // ===== Вольт-синк (только десктоп): после готовности записей и по кнопке =====
+  // Счётчик unsynced всегда перечитываем из БД (а не декрементируем локально):
+  // так он отражает реальное состояние, даже если синк отработал в другой
+  // вкладке/на другом устройстве или упал посередине.
+  const refreshUnsynced = useCallback(async () => {
+    if (!userId) return
+    const count = await countUnsyncedEntries(userId)
+    setUnsynced(count)
+  }, [userId])
+
   const runVaultSync = useCallback(
     async (manual: boolean) => {
       if (!vaultAvailable || !userId || !isOnline()) return
       try {
         const r = await syncVault(userId)
-        setUnsynced((c) => Math.max(0, c - r.synced))
+        await refreshUnsynced()
         if (manual) {
           showToast(
             r.failed > 0
@@ -105,12 +121,14 @@ export default function DiaryToday() {
                 ? `${t('diary.vaultOk')} (${r.synced})`
                 : t('diary.vaultAll'),
           )
+          log.info('vault', 'Manual vault sync', { synced: r.synced, failed: r.failed }, userId)
         }
       } catch {
         if (manual) showToast(t('diary.vaultFail'))
+        log.error('vault', 'Vault sync threw', {}, userId)
       }
     },
-    [vaultAvailable, userId, t],
+    [vaultAvailable, userId, t, refreshUnsynced],
   )
 
   const scheduleVaultSync = useCallback(() => {
@@ -164,12 +182,14 @@ export default function DiaryToday() {
     if (!value || !userId || sending) return
     setSending(true)
     try {
+      log.info('diary', 'Text entry sent', { length: value.length }, userId)
       await sendTextEntry(userId, value)
       setText('')
       await reload()
       scheduleVaultSync()
     } catch {
       showToast(t('diary.aiFail'))
+      log.error('diary', 'Text entry failed', { length: value.length }, userId)
     } finally {
       setSending(false)
     }
@@ -186,12 +206,15 @@ export default function DiaryToday() {
     async (clip: { blob: Blob; ext: string }) => {
       if (!userId) return
       setRecording(false)
+      setMicDenied(false)
       try {
+        log.info('diary', 'Voice entry recorded', { bytes: clip.blob.size, ext: clip.ext }, userId)
         await sendVoiceEntry(userId, clip)
         await reload()
         scheduleVaultSync()
       } catch {
         showToast(t('diary.aiFail'))
+        log.error('diary', 'Voice entry pipeline failed', { bytes: clip.blob.size }, userId)
       }
     },
     [userId, reload, scheduleVaultSync, t],
@@ -219,8 +242,17 @@ export default function DiaryToday() {
       })
       setElapsed(0)
       setRecording(true)
+      setMicDenied(false)
     } catch (e) {
-      showToast((e as Error)?.message === 'mic-denied' ? t('diary.micDenied') : t('diary.micUnavailable'))
+      const code = (e as Error)?.message
+      if (code === 'mic-denied') {
+        setMicDenied(true)
+        showToast(t('diary.micDenied'))
+        log.warn('diary', 'Microphone permission denied', {}, userId)
+      } else {
+        showToast(t('diary.micUnavailable'))
+        log.warn('diary', 'Microphone unavailable', { code }, userId)
+      }
     }
   }
 
@@ -235,10 +267,66 @@ export default function DiaryToday() {
     }
   }
 
+  // ===== Удаление и редактирование =====
+  const handleDelete = useCallback(
+    async (entry: DiaryEntry) => {
+      if (!userId) return
+      try {
+        await deleteEntry(userId, entry)
+        // Вольт: убираем блок записи из заметки дня (только десктоп).
+        if (isVaultSyncAvailable()) {
+          await removeEntryFromVault(entry)
+        }
+        await reload()
+        showToast(t('diary.deleted'))
+        log.info('diary', 'Entry deleted', { id: entry.id, source: entry.source }, userId)
+      } catch {
+        showToast(t('diary.deleteFail'))
+        log.error('diary', 'Entry delete failed', { id: entry.id }, userId)
+      }
+    },
+    [userId, reload, t],
+  )
+
+  const handleEdit = useCallback(
+    async (entry: DiaryEntry, newText: string) => {
+      if (!userId) return
+      showToast(t('diary.reSummarizing'))
+      try {
+        const updated = await saveEditedEntry(userId, entry.id, newText)
+        await reload()
+        if (isVaultSyncAvailable()) {
+          // Выжимка изменилась — переписываем блок в вольте и снимаем флаг
+          // синка, чтобы десктопный автосинк его подхватил.
+          if (updated) await syncVault(userId).then(() => refreshUnsynced())
+        }
+        log.info('diary', 'Entry edited + re-summarized', { id: entry.id }, userId)
+      } catch {
+        showToast(t('diary.editFail'))
+        log.error('diary', 'Entry edit failed', { id: entry.id }, userId)
+        throw new Error('edit-failed')
+      }
+    },
+    [userId, reload, refreshUnsynced],
+  )
+
   useEffect(() => {
-    // Новые записи появляются снизу — держим ленту прижатой к последней карточке.
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
   }, [entries.length])
+
+  // Авто-рост поля ввода по высоте: текстарь растёт вместе с контентом,
+  // пока не упрётся в потолок (иначе длинная диктовка видна только двумя
+  // строчками). Ширина остаётся фиксированной.
+  const growInput = useCallback(() => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+  }, [])
+
+  useEffect(() => {
+    growInput()
+  }, [text, growInput])
 
   const micActive = recording
 
@@ -252,25 +340,23 @@ export default function DiaryToday() {
         <span className="text-sm text-neutral-400">{fmtDate(lang)}</span>
       </div>
 
-      {/* Статус вольта (десктоп) / подпись (мобильный) */}
-      <div className="mb-3 flex items-center justify-between gap-2 px-1">
-        {vaultAvailable ? (
-          <>
-            <span className="text-xs text-neutral-400">
-              {unsynced > 0 ? t('diary.vaultPending', { n: unsynced }) : t('diary.vaultAll')}
-            </span>
-            <button
-              type="button"
-              onClick={() => void runVaultSync(true)}
-              className="rounded-lg border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-600 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-            >
-              ⤓ {t('diary.vaultSync')}
-            </button>
-          </>
-        ) : (
-          <span className="text-xs text-neutral-400">☁️ {t('diary.vaultHintMobile')}</span>
-        )}
-      </div>
+      {/* Статус вольта — только на десктопе. На мобильном вольт недоступен
+          по архитектуре (Tauri FS), поэтому не показываем здесь ничего:
+          ни счётчика, ни подсказки, чтобы не вводить в заблуждение. */}
+      {vaultAvailable && (
+        <div className="mb-3 flex items-center justify-between gap-2 px-1">
+          <span className="text-xs text-neutral-400">
+            {unsynced > 0 ? t('diary.vaultPending', { n: unsynced }) : t('diary.vaultAll')}
+          </span>
+          <button
+            type="button"
+            onClick={() => void runVaultSync(true)}
+            className="rounded-lg border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-600 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
+          >
+            ☁️ {t('diary.vaultSync')}
+          </button>
+        </div>
+      )}
 
       {/* Лента записей дня (сверху старые) */}
       <div ref={listRef} className="flex-1 overflow-y-auto">
@@ -280,7 +366,15 @@ export default function DiaryToday() {
               {t('diary.empty')}
             </div>
           ) : (
-            entries.map((entry) => <DiaryEntryCard key={entry.id} entry={entry} onRetry={retry} />)
+            entries.map((entry) => (
+              <DiaryEntryCard
+                key={entry.id}
+                entry={entry}
+                onRetry={retry}
+                onEdit={handleEdit}
+                onDelete={handleDelete}
+              />
+            ))
           )}
         </div>
 
@@ -290,6 +384,23 @@ export default function DiaryToday() {
 
       {/* Ввод: текст + mic */}
       <div className="sticky bottom-0 -mx-4 border-t border-neutral-200 bg-white/95 px-4 pb-[env(safe-area-inset-bottom)] pt-3 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
+        {micDenied && (
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-3.5 py-2.5 dark:border-amber-900/60 dark:bg-amber-950/30">
+            <span className="text-xs leading-snug text-amber-800 dark:text-amber-200">
+              🎙 {t('diary.micDenied')}
+            </span>
+            <button
+              type="button"
+              onClick={() => {
+                setMicDenied(false)
+                navigate('/diary/settings')
+              }}
+              className="shrink-0 rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white transition hover:bg-amber-600"
+            >
+              {t('diary.settingsMicAllow')}
+            </button>
+          </div>
+        )}
         {micActive ? (
           <div className="flex items-center justify-center gap-3 pb-3">
             <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-red-500" />
@@ -307,6 +418,7 @@ export default function DiaryToday() {
         ) : (
           <div className="flex items-end gap-2 pb-3">
             <textarea
+              ref={inputRef}
               value={text}
               onChange={(e) => setText(e.target.value)}
               onKeyDown={(e) => {
@@ -317,7 +429,7 @@ export default function DiaryToday() {
               }}
               rows={1}
               placeholder={t('diary.inputPlaceholder')}
-              className="max-h-32 min-h-[44px] flex-1 resize-none rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-sm text-neutral-900 outline-none transition focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100"
+              className="max-h-52 min-h-[44px] flex-1 resize-none overflow-y-auto rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-600 sm:text-sm"
             />
             <button
               type="button"

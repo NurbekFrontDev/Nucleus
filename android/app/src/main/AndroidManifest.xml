@@ -82,6 +82,10 @@
 
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <!-- Голосовые записи дневника: захват аудио. WebView Capacitor сам покажет
+         системный диалог при первом getUserMedia (BridgeWebChromeClient). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Точные будильники для надёжного срабатывания напоминаний по расписанию -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.USE_EXACT_ALARM" />

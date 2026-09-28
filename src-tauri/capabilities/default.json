@@ -40,6 +40,13 @@
         { "path": "F:\\SecondBrain\\personal\\Diary" },
         { "path": "F:\\SecondBrain\\personal\\Diary\\**" }
       ]
+    },
+    {
+      "identifier": "fs:allow-remove",
+      "allow": [
+        { "path": "F:\\SecondBrain\\personal\\Diary\\**" },
+        { "path": "F:\\SecondBrain\\personal\\Diary\\audio\\**" }
+      ]
     }
   ]
 }

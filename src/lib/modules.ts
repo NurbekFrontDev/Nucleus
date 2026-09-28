@@ -56,6 +56,7 @@ export const MODULES: ModuleDef[] = [
     nav: [
       { to: '/diary', key: 'dnav.today', icon: '✍️', end: true },
       { to: '/diary/history', key: 'dnav.history', icon: '🗓️' },
+      { to: '/diary/settings', key: 'dnav.settings', icon: '⚙️' },
     ],
   },
   {
