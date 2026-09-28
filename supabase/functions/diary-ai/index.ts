@@ -168,7 +168,7 @@ function isValidSummary(v: unknown): v is Record<string, unknown> {
 
 // ===== Транскрибация: Gemini 3.5 Transcribe (REST generateContent) =====
 // Референс — Voxel v2 (модели gemini-3.5-transcribe): аудио inline base64.
-// Язык авто (ru/en/uz). Ретрай ×2 при 5xx/сетевых сбоях.
+// Язык авто (ru/en/uz). Ретрай ×2 при 429 (rate-limit)/5xx/сетевых сбоях.
 async function transcribeWithRetry(audioBytes: Uint8Array, mimeType: string): Promise<{ text: string | null; detail?: string }> {
   const key = Deno.env.get('GEMINI_API_KEY')
   if (!key) return { text: null, detail: 'no-gemini-key' }
@@ -197,9 +197,12 @@ async function transcribeWithRetry(audioBytes: Uint8Array, mimeType: string): Pr
         headers: { 'Content-Type': 'application/json' },
         body,
       })
-      // 5xx/таймаут — ретраим; 4xx — не имеет смысла.
-      if (res.status >= 500) {
+      // 5xx/таймаут — ретраим. 429 — тоже ретраим: это минутный лимит (RPM)
+      // ключа, через ~20с отпускает. Без этого запись пользователя падала бы
+      // навсегда при любом попадании в rate-limit.
+      if (res.status === 429 || res.status >= 500) {
         lastDetail = `gemini http ${res.status}`
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 20_000))
         continue
       }
       if (!res.ok) return { text: null, detail: `gemini http ${res.status}: ${(await res.text()).slice(0, 200)}` }
@@ -208,7 +211,8 @@ async function transcribeWithRetry(audioBytes: Uint8Array, mimeType: string): Pr
       let text = ''
       if (Array.isArray(parts)) {
         for (const part of parts) {
-          const t = part?.text ?? part?.audio_transcription?.text
+          // REST отдаёт поле в camelCase: audioTranscription.text
+          const t = part?.text ?? part?.audioTranscription?.text ?? part?.audio_transcription?.text
           if (typeof t === 'string') text += (text ? ' ' : '') + t
         }
       }
@@ -266,11 +270,18 @@ Deno.serve(async (req: Request) => {
       const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
       if (!supabaseUrl || !serviceKey) return reply({ error: 'no-service-config' })
 
+      // Скачиваем аудио с JWT владельца (RLS-политика «own diary-audio read»):
+      // из edge-сети сервисный ключ до storage не доходит, а JWT владельца
+      // проходит по политике бакета. JWT уже проверен в authUserId.
+      const authHeader = req.headers.get('Authorization') ?? ''
       const res = await fetch(
         `${supabaseUrl}/storage/v1/object/diary-audio/${audioPath}`,
-        { headers: { Authorization: `Bearer ${serviceKey}` } },
+        { headers: { Authorization: authHeader } },
       )
-      if (!res.ok) return reply({ error: 'audio-not-found', detail: `storage http ${res.status}` })
+      if (!res.ok) {
+        const body = await res.text().catch(() => '')
+        return reply({ error: 'audio-not-found', detail: `storage http ${res.status}: ${body.slice(0, 200)}` })
+      }
       const bytes = new Uint8Array(await res.arrayBuffer())
       if (bytes.length === 0) return reply({ error: 'audio-empty' })
       // Inline-лимит Gemini 20 MB: записи дневника (минуты речи) укладываются

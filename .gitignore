@@ -34,3 +34,4 @@ finlit-backup*.sql
 
 # Локальные сборки и релизы (бинарники .exe и .apk)
 releases/
+supabase/.temp/
