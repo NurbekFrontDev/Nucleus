@@ -10,6 +10,36 @@
     "process:default",
     "autostart:default",
     "deep-link:default",
-    "shell:allow-open"
+    "shell:allow-open",
+    {
+      "identifier": "fs:allow-read-text-file",
+      "allow": [{ "path": "F:\\SecondBrain\\personal\\Diary\\**" }]
+    },
+    {
+      "identifier": "fs:allow-write-text-file",
+      "allow": [{ "path": "F:\\SecondBrain\\personal\\Diary\\**" }]
+    },
+    {
+      "identifier": "fs:allow-write-file",
+      "allow": [{ "path": "F:\\SecondBrain\\personal\\Diary\\audio\\**" }]
+    },
+    {
+      "identifier": "fs:allow-mkdir",
+      "allow": [
+        { "path": "F:\\SecondBrain\\personal\\Diary" },
+        { "path": "F:\\SecondBrain\\personal\\Diary\\**" }
+      ]
+    },
+    {
+      "identifier": "fs:allow-stat",
+      "allow": [{ "path": "F:\\SecondBrain\\personal\\Diary\\**" }]
+    },
+    {
+      "identifier": "fs:allow-exists",
+      "allow": [
+        { "path": "F:\\SecondBrain\\personal\\Diary" },
+        { "path": "F:\\SecondBrain\\personal\\Diary\\**" }
+      ]
+    }
   ]
 }
