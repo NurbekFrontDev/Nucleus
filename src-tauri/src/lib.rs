@@ -50,6 +50,9 @@ pub fn run() {
         }))
         .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_shell::init())
+        // Модуль «Дневник»: запись заметок в вольт Second Brain. Доступ к файлам
+        // строго ограничен capability scope (см. capabilities/default.json).
+        .plugin(tauri_plugin_fs::init())
         .invoke_handler(tauri::generate_handler![set_dnd])
         .setup(|app| {
             // Меню трея: открыть окно и выйти.

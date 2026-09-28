@@ -1,10 +1,11 @@
 // Nucleus modules: the app is a shell that hosts modules.
 // Module 1 - FinLit (finance, lives at the root). Module 2 - Planner (lives under /planner).
+// Module 3 - Diary (lives under /diary).
 // The active module is derived from the current route, so no extra storage is needed.
 
 export type NavItem = { to: string; key: string; icon: string; end?: boolean; adminOnly?: boolean }
 
-export type ModuleId = 'finlit' | 'planner' | 'admin'
+export type ModuleId = 'finlit' | 'planner' | 'diary' | 'admin'
 
 export type ModuleDef = {
   id: ModuleId
@@ -48,6 +49,16 @@ export const MODULES: ModuleDef[] = [
     ],
   },
   {
+    id: 'diary',
+    nameKey: 'mod.diary',
+    icon: '📓',
+    home: '/diary',
+    nav: [
+      { to: '/diary', key: 'dnav.today', icon: '✍️', end: true },
+      { to: '/diary/history', key: 'dnav.history', icon: '🗓️' },
+    ],
+  },
+  {
     id: 'admin',
     nameKey: 'pnav.admin',
     icon: '🛡️',
@@ -60,7 +71,8 @@ export const MODULES: ModuleDef[] = [
 ]
 
 export function moduleForPath(pathname: string): ModuleDef {
-  if (pathname === '/admin' || pathname.startsWith('/admin/') || pathname === '/planner/admin') return MODULES[2]
+  if (pathname === '/admin' || pathname.startsWith('/admin/') || pathname === '/planner/admin') return MODULES[3]
+  if (pathname === '/diary' || pathname.startsWith('/diary/')) return MODULES[2]
   if (pathname === '/planner' || pathname.startsWith('/planner/')) return MODULES[1]
   return MODULES[0]
 }

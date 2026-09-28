@@ -141,11 +141,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   // Привязываем кэш и очередь к текущему пользователю. Когда сеть появляется,
   // очередь отправляется с новым токеном и не может уйти в чужой аккаунт.
+  // После успешной отправки сообщаем модулю «Дневник»: офлайн-записи дошли
+  // до базы и их пайплайн (транскрибация/выжимка) можно продолжить.
   useEffect(() => {
     const userId = session?.user.id ?? offlineUser?.id ?? null
     setOfflineUser(userId)
     if (!userId) return
-    return startOfflineSync(syncOfflineChanges)
+    return startOfflineSync(async () => {
+      const sent = await syncOfflineChanges()
+      if (sent > 0) window.dispatchEvent(new CustomEvent('nucleus:offline-flushed'))
+    })
   }, [session?.user.id, offlineUser?.id])
 
   // Фикс бага: после возврата в приложение (на телефоне было свёрнуто несколько

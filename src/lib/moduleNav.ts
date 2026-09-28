@@ -13,6 +13,7 @@ const KEY = (id: ModuleId) => `nucleus:moduleLastPath:${id}`
 const memoryModulePaths: Record<ModuleId, string | null> = {
   finlit: null,
   planner: null,
+  diary: null,
   admin: null,
 }
 
@@ -25,7 +26,7 @@ export function isValidPathForModule(id: ModuleId, path: unknown): path is strin
 
 // Предварительная инициализация из localStorage с фильтрацией путей чужих модулей
 try {
-  for (const id of ['finlit', 'planner', 'admin'] as ModuleId[]) {
+  for (const id of ['finlit', 'planner', 'diary', 'admin'] as ModuleId[]) {
     const raw = localStorage.getItem(KEY(id))
     if (isValidPathForModule(id, raw)) {
       memoryModulePaths[id] = canonicalizeNavPath(raw)
@@ -38,7 +39,7 @@ try {
 
 // Если запущено на Android — подтягиваем из нативного Preferences
 if (Capacitor.isNativePlatform()) {
-  for (const id of ['finlit', 'planner', 'admin'] as ModuleId[]) {
+  for (const id of ['finlit', 'planner', 'diary', 'admin'] as ModuleId[]) {
     void Preferences.get({ key: KEY(id) }).then(({ value }) => {
       if (isValidPathForModule(id, value)) {
         memoryModulePaths[id] = canonicalizeNavPath(value)

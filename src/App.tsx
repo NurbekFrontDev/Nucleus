@@ -52,6 +52,8 @@ const PlannerFocus = lazy(() => import('./pages/PlannerFocus'))
 const PlannerStats = lazy(() => import('./pages/PlannerStats'))
 const PlannerSettings = lazy(() => import('./pages/PlannerSettings'))
 const WaterTracker = lazy(() => import('./pages/WaterTracker'))
+const DiaryToday = lazy(() => import('./pages/DiaryToday'))
+const DiaryHistory = lazy(() => import('./pages/DiaryHistory'))
 const AdminPanel = lazy(() => import('./pages/AdminPanel'))
 
 function NotFoundRedirect({ fallback }: { fallback: string }) {
@@ -358,6 +360,8 @@ function App() {
         <Route path="/planner/stats" element={<PlannerStats />} />
         <Route path="/planner/settings" element={<PlannerSettings />} />
         <Route path="/planner/water" element={<WaterTracker />} />
+        <Route path="/diary" element={<DiaryToday />} />
+        <Route path="/diary/history" element={<DiaryHistory />} />
         <Route path="/planner/admin" element={<Navigate to="/admin" replace />} />
         <Route path="/admin" element={<AdminPanel />} />
         <Route path="*" element={<NotFoundRedirect fallback={lastPath} />} />
