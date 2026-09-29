@@ -3,9 +3,9 @@
 // Принимает историю сообщений и необязательный системный промпт, на сервере
 // ходит к провайдеру ИИ (ключ спрятан в секретах Supabase) и возвращает ответ.
 //
-// ОСНОВНОЙ провайдер: Cerebras (самый быстрый, ~3000 токенов/с), модель gpt-oss-120b.
-//   Ключ: CEREBRAS_API_KEY. OpenAI-совместимый endpoint https://api.cerebras.ai/v1.
-// ЗАПАСНОЙ провайдер: NVIDIA NIM (ключ NVIDIA_API_KEY) — используется, если Cerebras
+// ОСНОВНОЙ провайдер: Groq (ключ GROQ_API_KEY, общий с diary-ai), модель openai/gpt-oss-120b.
+//   OpenAI-совместимый endpoint https://api.groq.com/openai/v1.
+// ЗАПАСНОЙ провайдер: NVIDIA NIM (ключ NVIDIA_API_KEY) — используется, если Groq
 //   недоступен или не настроен. Модели можно переопределить секретами (см. ниже).
 //
 // Тело запроса (POST, JSON):
@@ -40,8 +40,8 @@ type Provider = {
   extraBody?: Record<string, unknown>
 }
 
-// Модели Cerebras по умолчанию (можно переопределить секретом CEREBRAS_MODEL).
-const CEREBRAS_DEFAULT_MODELS = ['gpt-oss-120b']
+// Модели Groq по умолчанию (можно переопределить секретом GROQ_MODEL).
+const GROQ_DEFAULT_MODELS = ['openai/gpt-oss-120b']
 
 // Модели NVIDIA по умолчанию (запасной провайдер; переопределяется NVIDIA_MODEL).
 const NVIDIA_DEFAULT_MODELS = ['meta/llama-3.3-70b-instruct', 'meta/llama-3.1-70b-instruct']
@@ -86,23 +86,23 @@ async function callModel(
   }
 }
 
-// Собирает список провайдеров по приоритету: сначала Cerebras (быстрый),
-// потом NVIDIA (запасной). Провайдер включается, только если задан его ключ.
+// Собирает список провайдеров по приоритету: сначала Groq, потом NVIDIA (запасной).
+// Провайдер включается, только если задан его ключ.
 function buildProviders(): Provider[] {
   const providers: Provider[] = []
 
-  const cerebrasKey = Deno.env.get('CEREBRAS_API_KEY')
-  if (cerebrasKey) {
-    const modelEnv = Deno.env.get('CEREBRAS_MODEL') ?? ''
+  const groqKey = Deno.env.get('GROQ_API_KEY')
+  if (groqKey) {
+    const modelEnv = Deno.env.get('GROQ_MODEL') ?? ''
     const models = modelEnv
       .split(',')
       .map((s) => s.trim())
       .filter((s) => s.length > 0)
     providers.push({
-      name: 'cerebras',
-      baseUrl: Deno.env.get('CEREBRAS_BASE_URL') ?? 'https://api.cerebras.ai/v1',
-      apiKey: cerebrasKey,
-      models: models.length > 0 ? models : CEREBRAS_DEFAULT_MODELS,
+      name: 'groq',
+      baseUrl: Deno.env.get('GROQ_BASE_URL') ?? 'https://api.groq.com/openai/v1',
+      apiKey: groqKey,
+      models: models.length > 0 ? models : GROQ_DEFAULT_MODELS,
       // gpt-oss — reasoning-модель. Ставим самый низкий уровень раздумий, чтобы
       // ответ приходил мгновенно (приложение простое, долгие раздумья не нужны).
       extraBody: { reasoning_effort: 'low' },
