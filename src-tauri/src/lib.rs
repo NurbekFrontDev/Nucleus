@@ -30,8 +30,33 @@ fn set_dnd(enabled: bool) {
     }
 }
 
+// Windows: открыть страницу «Параметры → Конфиденциальность → Микрофон».
+// Нужна настройкам дневника: если доступ к микрофону запрещён на уровне ОС,
+// пользователь включает его здесь (см. openMicSystemSettings в native.ts).
+#[tauri::command]
+fn open_mic_settings() {
+    #[cfg(target_os = "windows")]
+    {
+        let _ = std::process::Command::new("explorer.exe")
+            .arg("ms-settings:privacy-microphone")
+            .spawn();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // WebView2 по умолчанию МОЛЧА отклоняет запросы микрофона/камеры
+    // (wry auto-грантит только CLIPBOARD_READ — см. wry src/webview2/mod.rs,
+    // add_PermissionRequested). Аргумент включает автосогласие запросов
+    // мультимедиа внутри нашего WebView: приватность ОС при этом по-прежнему
+    // регулируется в Параметрах Windows (ms-settings:privacy-microphone).
+    #[cfg(target_os = "windows")]
+    if std::env::var_os("WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS").is_none() {
+        std::env::set_var(
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
+            "--use-fake-ui-for-media-stream",
+        );
+    }
     tauri::Builder::default()
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
@@ -53,7 +78,7 @@ pub fn run() {
         // Модуль «Дневник»: запись заметок в вольт Second Brain. Доступ к файлам
         // строго ограничен capability scope (см. capabilities/default.json).
         .plugin(tauri_plugin_fs::init())
-        .invoke_handler(tauri::generate_handler![set_dnd])
+        .invoke_handler(tauri::generate_handler![set_dnd, open_mic_settings])
         .setup(|app| {
             // Меню трея: открыть окно и выйти.
             let show = MenuItem::with_id(app, "show", "Открыть Nucleus", true, None::<&str>)?;

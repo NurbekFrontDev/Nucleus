@@ -25,6 +25,7 @@ const VALID_EXACT_ROUTES = new Set([
   '/planner/settings',
   '/planner/admin',
   '/admin',
+  '/admin/logs',
 ])
 
 // Перенаправления-алиасы: приводим к каноническому адресу

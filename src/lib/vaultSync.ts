@@ -166,9 +166,40 @@ function legacyBlockRange(contents: string, entry: DiaryEntry): [number, number]
   return [idx, end]
 }
 
-/** Поиск блока записи: сначала по маркеру, потом по заголовку (старые заметки). */
+/**
+ * Fallback №2 — блок до v0.1.55, у которого после редактирования записи
+ * изменился title: точный заголовок уже не совпадает, и раньше это приводило
+ * к дозаписи дубля вместо замены (v0.1.56). created_at записи не меняется,
+ * поэтому ищем блок по времени «### HH:MM —» без привязки к названию; из
+ * кандидатов предпочитаем тот, что содержит оригинальный текст записи.
+ */
+function legacyTimeBlockRange(contents: string, entry: DiaryEntry): [number, number] | null {
+  const time = entryTimeHM(entry)
+  const snippet = (entry.original_text ?? '').replace(/\s+/g, ' ').trim().slice(0, 40)
+  const re = /^### (\d{2}:\d{2}) — .*$/gm
+  let first: [number, number] | null = null
+  let match: RegExpExecArray | null
+  while ((match = re.exec(contents)) !== null) {
+    if (match[1] !== time) continue
+    const idx = match.index
+    const nextMarker = contents.indexOf('\n<!-- diary:', idx + 1)
+    const nextHeading = contents.indexOf('\n### ', idx + 1)
+    let limit = contents.length
+    for (const pos of [nextMarker, nextHeading]) if (pos >= 0 && pos < limit) limit = pos
+    const seg = contents.slice(idx, limit)
+    const m = seg.match(/\n---[ \t]*\r?\n?$/)
+    const end = m ? idx + m.index! + m[0].length : limit
+    if (!first) first = [idx, end]
+    if (snippet && contents.slice(idx, end).replace(/\s+/g, ' ').includes(snippet)) {
+      return [idx, end]
+    }
+  }
+  return first
+}
+
+/** Поиск блока записи: маркер → точный заголовок → время заголовка (старые заметки). */
 function findBlock(contents: string, entry: DiaryEntry): [number, number] | null {
-  return blockRange(contents, entry.id) ?? legacyBlockRange(contents, entry)
+  return blockRange(contents, entry.id) ?? legacyBlockRange(contents, entry) ?? legacyTimeBlockRange(contents, entry)
 }
 
 function newDayNote(entry: DiaryEntry, firstBlock: string): string {

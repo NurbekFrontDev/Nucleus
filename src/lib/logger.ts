@@ -1,7 +1,9 @@
-// Единый журнал событий приложения (таблица app_logs). Пишется клиентом на
-// ПК и на телефоне; читается подвкладкой «Логи» в админ-панели. Любое
-// значимое действие — отправка записи, шаги AI-пайплайна, вольт-синк,
-// правки, удаления, смена настроек, ошибки — должно логироваться сюда.
+// Единый журнал событий приложения. Двойная запись:
+//  1) таблица app_logs (Supabase) — пишется клиентом на ПК и на телефоне,
+//     читается экраном «Логи» (/admin/logs);
+//  2) на десктопе — дневной файл logs/YYYY-MM-DD.log в корне проекта
+//     (один файл на каждый день, ничего не удаляется — полная локальная
+//     история даже без сети).
 //
 // Ограничения: логи НЕ заменяют консоль разработчика — это пользовательский
 // аудит «что происходило в приложении». Поэтому пишем короткие человекочитаемые
@@ -18,6 +20,46 @@ function currentPlatform(): string {
   if (isDesktop()) return 'windows'
   if (Capacitor.isNativePlatform()) return 'android'
   return 'web'
+}
+
+// ===== Локальные дневные файлы (только десктоп) =====
+// logs/YYYY-MM-DD.log в корне проекта: один файл на день, файлы НИКОГДА
+// не чистятся и не ротируются — полная история остаётся на диске. Это дубль
+// журнала app_logs (Supabase), независимый от сети и от ретеншена базы.
+const LOGS_DIR = 'F:\\Apps\\Nucleus\\logs'
+
+let fileDay = '' // день, для которого папка уже создана/проверена
+let fileChain: Promise<void> = Promise.resolve() // сериализуем дозапись
+
+function localDayStr(d: Date): string {
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}-${m}-${day}`
+}
+
+function clockStr(d: Date): string {
+  return [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map((n) => String(n).padStart(2, '0'))
+    .join(':')
+}
+
+/** Дописывает строку в дневной файл; ошибки глотаются (лог не роняет приложение). */
+function appendToDailyFile(line: string): void {
+  if (!isDesktop()) return
+  fileChain = fileChain.then(async () => {
+    try {
+      const day = localDayStr(new Date())
+      const fs = await import('@tauri-apps/plugin-fs')
+      if (fileDay !== day) {
+        await fs.mkdir(LOGS_DIR, { recursive: true }).catch(() => {})
+        fileDay = day
+      }
+      await fs.writeTextFile(`${LOGS_DIR}\\${day}.log`, line, { append: true, create: true })
+    } catch {
+      // нет доступа к диску — остаётся только журналирование в Supabase
+    }
+  })
 }
 
 // Слегка ограничиваем «инфу», чтобы лог не тонул в шуме повтора одних и тех же
@@ -56,6 +98,12 @@ export function logEvent(
     }
     // fire-and-forget: результат логирования никого не волнует
     void supabase.from('app_logs').insert(row).then(undefined, () => {})
+
+    // И в дневной файл на диске: [ЧЧ:ММ:СС] [LEVEL] [scope] сообщение | {meta}
+    const metaStr = Object.keys(meta).length > 0 ? ` | ${JSON.stringify(meta)}` : ''
+    appendToDailyFile(
+      `[${clockStr(new Date())}] [${level}] [${scope}] ${message.slice(0, 500)}${metaStr}\n`,
+    )
   } catch {
     // даже сериализация упала — молча, логи не должны ронять приложение
   }

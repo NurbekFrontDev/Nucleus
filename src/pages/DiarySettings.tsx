@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useAuth } from '../lib/AuthContext'
 import { useLang } from '../lib/i18n'
 import { showToast } from '../lib/toast'
@@ -15,6 +15,8 @@ import {
   type MicPermissionState,
 } from '../lib/micPermission'
 import { openAppDetailsSettings } from '../lib/battery'
+import { isDesktop, openMicSystemSettings } from '../lib/native'
+import { DEFAULT_SUMMARY_PROMPT, SERVER_DIARY_KEYS } from '../lib/diaryDefaults'
 import { onSyncEvent } from '../lib/realtimeSync'
 import { log } from '../lib/logger'
 
@@ -50,9 +52,13 @@ export default function DiarySettings() {
     try {
       const s = await loadDiarySettings(userId)
       setSettings(s)
-      setPromptDraft(s.summaryPrompt ?? '')
-      setGeminiDraft(s.geminiKey ?? '')
-      setGroqDraft(s.groqKey ?? '')
+      // Поле показывает РЕАЛЬНЫЙ промпт: пользовательский оверрайд, а если его
+      // нет — канонический дефолт, который edge-функция использует под капотом.
+      setPromptDraft(s.summaryPrompt ?? DEFAULT_SUMMARY_PROMPT)
+      // Ключи: если пользователь не задал своих — показываем серверные,
+      // реально используемые edge-функцией (тот же приоритет, что в diary-ai).
+      setGeminiDraft(s.geminiKey ?? SERVER_DIARY_KEYS.gemini)
+      setGroqDraft(s.groqKey ?? SERVER_DIARY_KEYS.groq)
     } catch {
       // остаются дефолты
     } finally {
@@ -88,7 +94,8 @@ export default function DiarySettings() {
   }, [])
 
   // ===== Микрофон =====
-  const requestMic = async () => {
+  /** Пробует получить доступ; false — доступ не выдан (диалог отклонён/блокирует ОС). */
+  const requestMic = async (): Promise<boolean> => {
     const granted = await probeMicPermission()
     const next: MicPermissionState = granted ? 'granted' : 'denied'
     setMicState(next)
@@ -98,12 +105,13 @@ export default function DiarySettings() {
     } else {
       log.warn('settings', 'Microphone permission denied by user', {}, userId)
     }
+    return granted
   }
 
   const onAllowClick = async () => {
     // Android: если пользователь ранее выбрал «Отказать и больше не спрашивать»,
-    // повторный getUserMesh не покажет диалог — открываем настройки приложения.
-    if (micState === 'denied') {
+    // повторный getUserMedia не покажет диалог — открываем настройки приложения.
+    if (micState === 'denied' && !isDesktop()) {
       try {
         await openAppDetailsSettings()
       } catch {
@@ -111,7 +119,17 @@ export default function DiarySettings() {
       }
       return
     }
-    await requestMic()
+    const granted = await requestMic()
+    if (!granted && isDesktop()) {
+      // WebView2/ОС отклонили запрос молча: ведём в настройки Windows,
+      // где доступ к микрофону включается для десктопных приложений.
+      await openMicSystemSettings().catch(() => {})
+      showToast(t('diary.settingsMicDesktopHint'))
+    }
+  }
+
+  const onOpenSystemClick = async () => {
+    await openMicSystemSettings().catch(() => {})
   }
 
   // ===== Smart transcription =====
@@ -147,12 +165,31 @@ export default function DiarySettings() {
     }
   }
 
-  const resetPrompt = () => {
-    setPromptDraft('')
-    void savePrompt()
+  const resetPrompt = async () => {
+    if (!userId || savingPrompt) return
+    setPromptDraft(DEFAULT_SUMMARY_PROMPT)
+    try {
+      // Оверрайд снимается: в поле и в diary-ai снова работает дефолт из кода.
+      await saveDiarySettings(userId, { summaryPrompt: null })
+      log.info('settings', 'Summary prompt reset to default', {}, userId)
+      showToast(t('diary.settingsPromptSaved'))
+      await reload()
+    } catch {
+      showToast(t('diary.editFail'))
+    }
   }
 
-  const promptDirty = promptDraft.trim() !== (settings.summaryPrompt ?? '').trim()
+  const promptDirty = promptDraft.trim() !== (settings.summaryPrompt ?? DEFAULT_SUMMARY_PROMPT).trim()
+
+  // Поле промпта растёт под содержимое (до потолка 420px): весь реальный
+  // промпт виден целиком, без скролла внутри маленького бокса.
+  const promptRef = useRef<HTMLTextAreaElement>(null)
+  useEffect(() => {
+    const el = promptRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = Math.min(el.scrollHeight, 420) + 'px'
+  }, [promptDraft, ready])
 
   // ===== Ключи =====
   const saveKeys = async () => {
@@ -171,8 +208,11 @@ export default function DiarySettings() {
   }
 
   const keysDirty =
-    geminiDraft.trim() !== (settings.geminiKey ?? '').trim() ||
-    groqDraft.trim() !== (settings.groqKey ?? '').trim()
+    geminiDraft.trim() !== (settings.geminiKey ?? SERVER_DIARY_KEYS.gemini).trim() ||
+    groqDraft.trim() !== (settings.groqKey ?? SERVER_DIARY_KEYS.groq).trim()
+
+  // Глазик: показать/скрыть содержимое обоих полей ключей.
+  const [showKeys, setShowKeys] = useState(false)
 
   if (!ready) {
     return (
@@ -191,37 +231,33 @@ export default function DiarySettings() {
         ⚙️ {t('diary.settingsTitle')}
       </h1>
 
-      {/* Микрофон */}
-      <section className={cardCls}>
-        <h2 className={labelCls}>🎙️ {t('diary.settingsMic')}</h2>
-        {micState === 'granted' ? (
-          <p className={hintCls}>{t('diary.settingsMicGranted')}</p>
-        ) : (
-          <>
-            <p className={hintCls}>
-              {micState === 'denied' ? t('diary.settingsMicDenied') : t('diary.settingsMicPrompt')}
-            </p>
-            <div className="mt-3 flex flex-wrap gap-2">
+      {/* Микрофон: карточка нужна только пока доступ не выдан. */}
+      {micState !== 'granted' && (
+        <section className={cardCls}>
+          <h2 className={labelCls}>🎙️ {t('diary.settingsMic')}</h2>
+          <p className={hintCls}>
+            {micState === 'denied' ? t('diary.settingsMicDenied') : t('diary.settingsMicPrompt')}
+          </p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => void onAllowClick()}
+              className="rounded-lg bg-emerald-500 px-3.5 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-600"
+            >
+              {t('diary.settingsMicAllow')}
+            </button>
+            {micState === 'denied' && (
               <button
                 type="button"
-                onClick={() => void onAllowClick()}
-                className="rounded-lg bg-emerald-500 px-3.5 py-1.5 text-sm font-semibold text-white transition hover:bg-emerald-600"
+                onClick={() => void onOpenSystemClick()}
+                className="rounded-lg border border-neutral-300 px-3.5 py-1.5 text-sm font-medium text-neutral-600 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
               >
-                {t('diary.settingsMicAllow')}
+                ⚙️ {t('diary.settingsMicOpenSystem')}
               </button>
-              {micState === 'denied' && (
-                <button
-                  type="button"
-                  onClick={() => void openAppDetailsSettings().catch(() => {})}
-                  className="rounded-lg border border-neutral-300 px-3.5 py-1.5 text-sm font-medium text-neutral-600 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-                >
-                  ⚙️ {t('diary.settingsMicOpenSystem')}
-                </button>
-              )}
-            </div>
-          </>
-        )}
-      </section>
+            )}
+          </div>
+        </section>
+      )}
 
       {/* Транскрибация: smart transcription */}
       <section className={cardCls}>
@@ -289,11 +325,12 @@ export default function DiarySettings() {
           {t('diary.settingsPromptHint', { placeholder: '{active_experiments_json}' })}
         </p>
         <textarea
+          ref={promptRef}
           value={promptDraft}
           onChange={(e) => setPromptDraft(e.target.value)}
           placeholder={t('diary.settingsPromptPlaceholder')}
           rows={6}
-          className={`${inputCls} mt-3 resize-y font-mono text-xs leading-relaxed`}
+          className={`${inputCls} mt-3 resize-y overflow-y-auto font-mono text-xs leading-relaxed`}
         />
         <div className="mt-3 flex items-center gap-2">
           <button
@@ -306,8 +343,8 @@ export default function DiarySettings() {
           </button>
           <button
             type="button"
-            onClick={resetPrompt}
-            disabled={savingPrompt || !settings.summaryPrompt}
+            onClick={() => void resetPrompt()}
+            disabled={savingPrompt || promptDraft.trim() === DEFAULT_SUMMARY_PROMPT.trim()}
             className="rounded-lg border border-neutral-300 px-3.5 py-1.5 text-sm font-medium text-neutral-600 transition hover:bg-neutral-100 disabled:opacity-30 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           >
             {t('diary.settingsPromptReset')}
@@ -317,15 +354,25 @@ export default function DiarySettings() {
 
       {/* API-ключи */}
       <section className={cardCls}>
-        <h2 className={labelCls}>🔑 {t('diary.settingsApiKeys')}</h2>
-        <p className={hintCls}>{t('diary.settingsApiKeysHint')}</p>
+        <div className="flex items-center justify-between gap-2">
+          <h2 className={labelCls}>🔑 {t('diary.settingsApiKeys')}</h2>
+          <button
+            type="button"
+            onClick={() => setShowKeys((v) => !v)}
+            aria-label={showKeys ? t('diary.keysHide') : t('diary.keysShow')}
+            title={showKeys ? t('diary.keysHide') : t('diary.keysShow')}
+            className="rounded-lg p-1.5 text-base leading-none text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+          >
+            {showKeys ? '🙈' : '👁️'}
+          </button>
+        </div>
         <div className="mt-3 flex flex-col gap-3">
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300">
               {t('diary.geminiKey')}
             </span>
             <input
-              type="password"
+              type={showKeys ? 'text' : 'password'}
               value={geminiDraft}
               onChange={(e) => setGeminiDraft(e.target.value)}
               placeholder="AIza…"
@@ -339,7 +386,7 @@ export default function DiarySettings() {
               {t('diary.groqKey')}
             </span>
             <input
-              type="password"
+              type={showKeys ? 'text' : 'password'}
               value={groqDraft}
               onChange={(e) => setGroqDraft(e.target.value)}
               placeholder="gsk_…"

@@ -2,11 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import { useLang } from '../lib/i18n'
 import { entryTimeHM, type DiaryEntry } from '../lib/diary'
 import { log } from '../lib/logger'
+import ConfirmDialog from './ConfirmDialog'
 
 // Карточка записи дневника: статус-машина пайплайна (пишем / транскрибируем /
 // думаем / готово / ошибка-повтор), выжимка сверху, оригинал свёрнут снизу.
-// У готовой записи есть кнопки редактирования оригинала (карандаш) и удаления
-// (корзина). Редактирование перегоняет выжимку заново — см. saveEditedEntry.
+// У готовой записи есть кнопки редактирования оригинала и удаления (эмодзи
+// ✏️/🗑 — общий стиль приложения, как в «Моих делах»). Редактирование
+// перегоняет выжимку заново — см. saveEditedEntry. Удаление подтверждается
+// фирменной модалкой ConfirmDialog (никаких window.confirm).
 
 function MoodEmoji({ score }: { score: number }) {
   const clamped = Math.max(1, Math.min(10, Math.round(score)))
@@ -60,6 +63,7 @@ export default function DiaryEntryCard({
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(entry.original_text ?? '')
   const [busy, setBusy] = useState(false)
+  const [confirming, setConfirming] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   // Высота поля редактирования подстраивается под текст (как у основного ввода).
@@ -95,12 +99,18 @@ export default function DiaryEntryCard({
     }
   }
 
-  const remove = async () => {
+  // Удаление: сначала фирменное подтверждение, потом сама работа.
+  const askRemove = () => {
     if (!onDelete || busy) return
-    if (!window.confirm(t('diary.deleteConfirm'))) return
+    setConfirming(true)
+  }
+
+  const doRemove = async () => {
+    if (!onDelete || busy) return
     setBusy(true)
     try {
       await onDelete(entry)
+      setConfirming(false)
     } catch {
       log.error('diary', 'Entry delete failed in card', { id: entry.id })
     } finally {
@@ -170,18 +180,18 @@ export default function DiaryEntryCard({
                 onClick={startEdit}
                 title={t('diary.edit')}
                 aria-label={t('diary.edit')}
-                className="rounded-md p-1 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
               >
-                ✎
+                ✏️
               </button>
             )}
             {onDelete && (
               <button
                 type="button"
-                onClick={() => void remove()}
+                onClick={askRemove}
                 title={t('diary.delete')}
                 aria-label={t('diary.delete')}
-                className="rounded-md p-1 text-neutral-400 transition hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
               >
                 🗑
               </button>
@@ -194,7 +204,7 @@ export default function DiaryEntryCard({
       {editing ? (
         <div className="flex flex-col gap-2.5">
           <p className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
-            ✎ {t('diary.editOriginal')}
+            ✏️ {t('diary.editOriginal')}
           </p>
           <textarea
             ref={textareaRef}
@@ -256,6 +266,18 @@ export default function DiaryEntryCard({
           )}
         </>
       )}
+
+      {/* Подтверждение удаления — в стиле приложения */}
+      <ConfirmDialog
+        open={confirming}
+        title={t('diary.delete')}
+        message={t('diary.deleteConfirm')}
+        confirmLabel={t('common.delete')}
+        danger
+        loading={busy}
+        onConfirm={() => void doRemove()}
+        onCancel={() => setConfirming(false)}
+      />
     </div>
   )
 }

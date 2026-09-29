@@ -57,6 +57,7 @@ const DiaryToday = lazy(() => import('./pages/DiaryToday'))
 const DiaryHistory = lazy(() => import('./pages/DiaryHistory'))
 const DiarySettings = lazy(() => import('./pages/DiarySettings'))
 const AdminPanel = lazy(() => import('./pages/AdminPanel'))
+const AdminLogs = lazy(() => import('./pages/AdminLogs'))
 
 function NotFoundRedirect({ fallback }: { fallback: string }) {
   const to = isValidNavPath(fallback) ? fallback : '/'
@@ -375,6 +376,7 @@ function App() {
         <Route path="/diary/settings" element={<DiarySettings />} />
         <Route path="/planner/admin" element={<Navigate to="/admin" replace />} />
         <Route path="/admin" element={<AdminPanel />} />
+        <Route path="/admin/logs" element={<AdminLogs />} />
         <Route path="*" element={<NotFoundRedirect fallback={lastPath} />} />
         </Route>
       </Routes>

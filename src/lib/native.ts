@@ -221,3 +221,25 @@ export async function setDesktopDnd(enabled: boolean): Promise<void> {
     // команда недоступна — не критично
   }
 }
+
+/**
+ * Открывает системные настройки микрофона: на Windows — страницу
+ * «Параметры → Конфиденциальность → Микрофон» (Rust-команда open_mic_settings),
+ * на Android — карточку приложения (разрешения). В браузере — no-op.
+ * Вызывается настройками дневника, когда доступ к микрофону не выдан.
+ */
+export async function openMicSystemSettings(): Promise<void> {
+  if (isDesktop()) {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      await invoke('open_mic_settings')
+    } catch {
+      // команда недоступна — не критично
+    }
+    return
+  }
+  if (Capacitor.isNativePlatform()) {
+    const { openAppDetailsSettings } = await import('./battery')
+    await openAppDetailsSettings()
+  }
+}

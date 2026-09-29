@@ -67,6 +67,7 @@ export const MODULES: ModuleDef[] = [
     adminOnly: true,
     nav: [
       { to: '/admin', key: 'admin.title', icon: '💻', end: true },
+      { to: '/admin/logs', key: 'admin.tabLogs', icon: '📜' },
     ],
   },
 ]

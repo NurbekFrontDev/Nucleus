@@ -107,40 +107,30 @@ export default function DiaryToday() {
     setUnsynced(count)
   }, [userId])
 
-  const runVaultSync = useCallback(
-    async (manual: boolean) => {
-      if (!vaultAvailable || !userId || !isOnline()) return
-      try {
-        const r = await syncVault(userId)
-        await refreshUnsynced()
-        if (manual) {
-          showToast(
-            r.failed > 0
-              ? t('diary.vaultFail')
-              : r.synced > 0
-                ? `${t('diary.vaultOk')} (${r.synced})`
-                : t('diary.vaultAll'),
-          )
-          log.info('vault', 'Manual vault sync', { synced: r.synced, failed: r.failed }, userId)
-        }
-      } catch {
-        if (manual) showToast(t('diary.vaultFail'))
-        log.error('vault', 'Vault sync threw', {}, userId)
-      }
-    },
-    [vaultAvailable, userId, t, refreshUnsynced],
-  )
+  // Синк идемпотентен и запускается автоматически: при входе на экран, после
+  // каждой новой записи/правки/повтора, по realtime-событию готовой записи и
+  // при возврате сети. Ручной кнопки больше нет — она запускала ровно тот же
+  // syncVault, что и эти триггеры.
+  const runVaultSync = useCallback(async () => {
+    if (!vaultAvailable || !userId || !isOnline()) return
+    try {
+      await syncVault(userId)
+      await refreshUnsynced()
+    } catch {
+      log.error('vault', 'Vault sync threw', {}, userId)
+    }
+  }, [vaultAvailable, userId, refreshUnsynced])
 
   const scheduleVaultSync = useCallback(() => {
     if (!vaultAvailable) return
     if (vaultTimer.current !== undefined) window.clearTimeout(vaultTimer.current)
-    vaultTimer.current = window.setTimeout(() => void runVaultSync(false), 2500)
+    vaultTimer.current = window.setTimeout(() => void runVaultSync(), 2500)
   }, [vaultAvailable, runVaultSync])
 
   useEffect(() => {
-    void runVaultSync(false)
+    void runVaultSync()
     // Desktop: синк также при возврате сети.
-    const onOnline = () => void runVaultSync(false)
+    const onOnline = () => void runVaultSync()
     window.addEventListener('online', onOnline)
     return () => {
       window.removeEventListener('online', onOnline)
@@ -314,14 +304,16 @@ export default function DiaryToday() {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
   }, [entries.length])
 
-  // Авто-рост поля ввода по высоте: текстарь растёт вместе с контентом,
-  // пока не упрётся в потолок (иначе длинная диктовка видна только двумя
-  // строчками). Ширина остаётся фиксированной.
+  // Авто-рост поля ввода по высоте: текстарь растёт вместе с контентом до
+  // самого низа страницы (резерв — шапка, статус вольта и обвязка композера),
+  // но не дальше: длинная диктовка разворачивается во всё свободное место.
+  // Ширина остаётся фиксированной.
   const growInput = useCallback(() => {
     const el = inputRef.current
     if (!el) return
     el.style.height = 'auto'
-    el.style.height = Math.min(el.scrollHeight, 200) + 'px'
+    const cap = Math.max(120, Math.floor(window.innerHeight - 240))
+    el.style.height = Math.min(el.scrollHeight, cap) + 'px'
   }, [])
 
   useEffect(() => {
@@ -342,19 +334,13 @@ export default function DiaryToday() {
 
       {/* Статус вольта — только на десктопе. На мобильном вольт недоступен
           по архитектуре (Tauri FS), поэтому не показываем здесь ничего:
-          ни счётчика, ни подсказки, чтобы не вводить в заблуждение. */}
+          ни счётчика, ни подсказки, чтобы не вводить в заблуждение. Синк
+          автоматический, кнопки «Синхронизировать» больше нет. */}
       {vaultAvailable && (
-        <div className="mb-3 flex items-center justify-between gap-2 px-1">
+        <div className="mb-3 px-1">
           <span className="text-xs text-neutral-400">
             {unsynced > 0 ? t('diary.vaultPending', { n: unsynced }) : t('diary.vaultAll')}
           </span>
-          <button
-            type="button"
-            onClick={() => void runVaultSync(true)}
-            className="rounded-lg border border-neutral-200 px-2.5 py-1 text-xs font-medium text-neutral-600 transition hover:bg-neutral-100 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
-          >
-            ☁️ {t('diary.vaultSync')}
-          </button>
         </div>
       )}
 
@@ -429,7 +415,7 @@ export default function DiaryToday() {
               }}
               rows={1}
               placeholder={t('diary.inputPlaceholder')}
-              className="max-h-52 min-h-[44px] flex-1 resize-none overflow-y-auto rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-600 sm:text-sm"
+              className="min-h-[44px] flex-1 resize-none overflow-y-auto rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-600 sm:text-sm"
             />
             <button
               type="button"

@@ -17,7 +17,10 @@
     },
     {
       "identifier": "fs:allow-write-text-file",
-      "allow": [{ "path": "F:\\SecondBrain\\personal\\Diary\\**" }]
+      "allow": [
+        { "path": "F:\\SecondBrain\\personal\\Diary\\**" },
+        { "path": "F:\\Apps\\Nucleus\\logs\\**" }
+      ]
     },
     {
       "identifier": "fs:allow-write-file",
@@ -27,7 +30,9 @@
       "identifier": "fs:allow-mkdir",
       "allow": [
         { "path": "F:\\SecondBrain\\personal\\Diary" },
-        { "path": "F:\\SecondBrain\\personal\\Diary\\**" }
+        { "path": "F:\\SecondBrain\\personal\\Diary\\**" },
+        { "path": "F:\\Apps\\Nucleus\\logs" },
+        { "path": "F:\\Apps\\Nucleus\\logs\\**" }
       ]
     },
     {
