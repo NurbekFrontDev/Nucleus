@@ -252,6 +252,36 @@ export default function DiarySettings() {
         </div>
       </section>
 
+      {/* Словарь Voxel (Ф3): редактируется в Voxel, сюда пушится автоматически */}
+      <section className={cardCls}>
+        <h2 className={labelCls}>📚 {t('diary.vocabTitle')}</h2>
+        {settings.vocabulary.length > 0 ? (
+          <>
+            <p className="mt-1 text-sm font-medium text-emerald-600 dark:text-emerald-400">
+              {t('diary.vocabCount', { n: settings.vocabulary.length })}
+            </p>
+            <p className={hintCls}>{t('diary.vocabHint')}</p>
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {settings.vocabulary.slice(0, 12).map((phrase) => (
+                <span
+                  key={phrase}
+                  className="rounded-md bg-neutral-100 px-2 py-0.5 text-xs text-neutral-600 dark:bg-neutral-800 dark:text-neutral-300"
+                >
+                  {phrase}
+                </span>
+              ))}
+              {settings.vocabulary.length > 12 && (
+                <span className="rounded-md px-2 py-0.5 text-xs text-neutral-400 dark:text-neutral-500">
+                  +{settings.vocabulary.length - 12}
+                </span>
+              )}
+            </div>
+          </>
+        ) : (
+          <p className={hintCls}>{t('diary.vocabEmpty')}</p>
+        )}
+      </section>
+
       {/* Промпт выжимки */}
       <section className={cardCls}>
         <h2 className={labelCls}>✨ {t('diary.settingsPrompt')}</h2>

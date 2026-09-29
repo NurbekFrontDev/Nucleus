@@ -176,6 +176,8 @@ type DiarySettings = {
   summaryPrompt: string | null
   geminiKey: string | null
   groqKey: string | null
+  // Канонические фразы из словаря Voxel (push через diary-dictionary).
+  vocabulary: string[]
 }
 
 const DEFAULT_SETTINGS: DiarySettings = {
@@ -183,6 +185,7 @@ const DEFAULT_SETTINGS: DiarySettings = {
   summaryPrompt: null,
   geminiKey: null,
   groqKey: null,
+  vocabulary: [],
 }
 
 async function loadDiarySettings(req: Request, userId: string): Promise<DiarySettings> {
@@ -192,7 +195,7 @@ async function loadDiarySettings(req: Request, userId: string): Promise<DiarySet
   if (!supabaseUrl || !anonKey || !authHeader) return { ...DEFAULT_SETTINGS }
   try {
     const res = await fetch(
-      `${supabaseUrl}/rest/v1/app_settings?user_id=eq.${userId}&select=diary_smart_transcription,diary_summary_prompt,diary_gemini_key,diary_groq_key`,
+      `${supabaseUrl}/rest/v1/app_settings?user_id=eq.${userId}&select=diary_smart_transcription,diary_summary_prompt,diary_gemini_key,diary_groq_key,diary_vocabulary`,
       { headers: { Authorization: authHeader, apikey: anonKey } },
     )
     if (!res.ok) return { ...DEFAULT_SETTINGS }
@@ -204,6 +207,7 @@ async function loadDiarySettings(req: Request, userId: string): Promise<DiarySet
       summaryPrompt: typeof r.diary_summary_prompt === 'string' && r.diary_summary_prompt.trim() ? r.diary_summary_prompt.trim() : null,
       geminiKey: typeof r.diary_gemini_key === 'string' && r.diary_gemini_key.trim() ? r.diary_gemini_key.trim() : null,
       groqKey: typeof r.diary_groq_key === 'string' && r.diary_groq_key.trim() ? r.diary_groq_key.trim() : null,
+      vocabulary: Array.isArray(r.diary_vocabulary) ? r.diary_vocabulary.filter((p: unknown): p is string => typeof p === 'string') : [],
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
@@ -215,11 +219,30 @@ async function loadDiarySettings(req: Request, userId: string): Promise<DiarySet
 // конфиг транскрипции через generationConfig.audioTranscriptionConfig.
 // mode: SMART — умное форматирование (тиражи/числа, удаление запинок),
 //       VERBATIM — дословно. Язык авто (ru/en/uz). Ретрай ×2 при 429/5xx.
+// Biasing распознавания: канонические фразы словаря Voxel. Тот же фильтр, что
+// в Voxel v2 build_gemini_custom_vocabulary: короткие токены не бист ничего,
+// запятая/перевод строки — список вариантов, а не фраза. Лимит API — 1000 фраз.
+function cleanVocabulary(vocabulary: string[]): string[] {
+  const seen = new Set<string>()
+  const out: string[] = []
+  for (const raw of vocabulary) {
+    const p = (raw ?? '').trim()
+    if (p.length < 2 || p.includes(',') || p.includes('\n')) continue
+    const key = p.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(p)
+    if (out.length >= 1000) break
+  }
+  return out
+}
+
 async function transcribeWithRetry(
   audioBytes: Uint8Array,
   mimeType: string,
   smartMode: boolean,
   geminiKey: string | null,
+  vocabulary: string[],
 ): Promise<{ text: string | null; detail?: string }> {
   const key = geminiKey || Deno.env.get('GEMINI_API_KEY')
   if (!key) return { text: null, detail: 'no-gemini-key' }
@@ -231,16 +254,17 @@ async function transcribeWithRetry(
   for (let i = 0; i < audioBytes.length; i += CHUNK) {
     binary += String.fromCharCode(...audioBytes.subarray(i, i + CHUNK))
   }
+  const transcriptionConfig: Record<string, unknown> = {
+    mode: smartMode ? 'SMART' : 'VERBATIM',
+    languageCodes: ['ru', 'en', 'uz'],
+  }
+  const vocab = cleanVocabulary(vocabulary)
+  if (vocab.length > 0) transcriptionConfig.customVocabulary = vocab
   const body = JSON.stringify({
     contents: [{
       parts: [{ inline_data: { mime_type: mimeType, data: btoa(binary) } }],
     }],
-    generationConfig: {
-      audioTranscriptionConfig: {
-        mode: smartMode ? 'SMART' : 'VERBATIM',
-        languageCodes: ['ru', 'en', 'uz'],
-      },
-    },
+    generationConfig: { audioTranscriptionConfig: transcriptionConfig },
   })
 
   let lastDetail = 'unknown'
@@ -347,7 +371,7 @@ Deno.serve(async (req: Request) => {
         ? 'audio/mp4'
         : 'audio/webm'
 
-      const r = await transcribeWithRetry(bytes, mimeType, settings.smartTranscription, settings.geminiKey)
+      const r = await transcribeWithRetry(bytes, mimeType, settings.smartTranscription, settings.geminiKey, settings.vocabulary)
       if (!r.text) return reply({ error: 'transcribe-failed', detail: r.detail })
       return reply({ transcript: r.text, mode: settings.smartTranscription ? 'SMART' : 'VERBATIM' })
     }

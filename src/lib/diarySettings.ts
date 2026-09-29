@@ -10,6 +10,9 @@ export type DiarySettings = {
   summaryPrompt: string | null
   geminiKey: string | null
   groqKey: string | null
+  // Канонические фразы из словаря Voxel (пишутся edge-функцией diary-dictionary,
+  // здесь только читаются для показа счётчика). Read-only в UI.
+  vocabulary: string[]
 }
 
 export const DIARY_SETTINGS_DEFAULTS: DiarySettings = {
@@ -17,10 +20,11 @@ export const DIARY_SETTINGS_DEFAULTS: DiarySettings = {
   summaryPrompt: null,
   geminiKey: null,
   groqKey: null,
+  vocabulary: [],
 }
 
 const SELECT =
-  'diary_smart_transcription, diary_summary_prompt, diary_gemini_key, diary_groq_key'
+  'diary_smart_transcription, diary_summary_prompt, diary_gemini_key, diary_groq_key, diary_vocabulary'
 
 /** Текущие настройки дневника пользователя (дефолты при любой ошибке). */
 export async function loadDiarySettings(userId: string): Promise<DiarySettings> {
@@ -42,6 +46,9 @@ export async function loadDiarySettings(userId: string): Promise<DiarySettings> 
         typeof r.diary_gemini_key === 'string' && r.diary_gemini_key.trim() ? r.diary_gemini_key : null,
       groqKey:
         typeof r.diary_groq_key === 'string' && r.diary_groq_key.trim() ? r.diary_groq_key : null,
+      vocabulary: Array.isArray(r.diary_vocabulary)
+        ? (r.diary_vocabulary as unknown[]).filter((p): p is string => typeof p === 'string')
+        : [],
     }
   } catch {
     return { ...DIARY_SETTINGS_DEFAULTS }
