@@ -351,7 +351,6 @@ export default function DiarySettings() {
             <p className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
               {t('diary.smartTranscription')}
             </p>
-            <p className={hintCls}>{t('diary.smartTranscriptionHint')}</p>
           </div>
           <button
             type="button"
@@ -380,7 +379,6 @@ export default function DiarySettings() {
             <p className="mt-1 text-sm font-medium text-emerald-600 dark:text-emerald-400">
               {t('diary.vocabCount', { n: settings.vocabulary.length })}
             </p>
-            <p className={hintCls}>{t('diary.vocabHint')}</p>
             <div className="mt-2 flex flex-wrap gap-1.5">
               {settings.vocabulary.slice(0, 12).map((phrase) => (
                 <span
@@ -398,16 +396,13 @@ export default function DiarySettings() {
             </div>
           </>
         ) : (
-          <p className={hintCls}>{t('diary.vocabEmpty')}</p>
+          <p className="mt-1 text-sm text-neutral-500 dark:text-neutral-400">{t('diary.vocabEmpty')}</p>
         )}
       </section>
 
       {/* Промпт выжимки */}
       <section className={cardCls}>
         <h2 className={labelCls}>✨ {t('diary.settingsPrompt')}</h2>
-        <p className={hintCls}>
-          {t('diary.settingsPromptHint', { placeholder: '{active_experiments_json}' })}
-        </p>
         <textarea
           ref={promptRef}
           value={promptDraft}
@@ -439,7 +434,6 @@ export default function DiarySettings() {
       {/* Уровень размышлений AI (reasoning_effort GPT-OSS 120B на Groq) */}
       <section className={cardCls}>
         <h2 className={labelCls}>🧠 {t('diary.thinkingTitle')}</h2>
-        <p className={hintCls}>{t('diary.thinkingHint')}</p>
         <div className="mt-3 flex flex-col gap-2">
           <button
             type="button"
@@ -485,7 +479,6 @@ export default function DiarySettings() {
       {/* Google Drive: единственное хранилище аудио */}
       <section className={cardCls}>
         <h2 className={labelCls}>☁️ {t('diary.driveTitle')}</h2>
-        <p className={hintCls}>{t('diary.driveHint')}</p>
         <p
           className={`mt-2 text-xs font-semibold ${
             driveConfigured
