@@ -224,43 +224,46 @@ export default function DiaryExperiments({
                 />
               ) : (
                 <>
-                  <div className="flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-sm font-semibold text-neutral-900 dark:text-neutral-100">
+                  {/* Заголовок + ✏️/🗑 в правом верхнем углу: длинное название
+                      просто переносится на новую строку, кнопки не сдвигаются */}
+                  <div className="flex items-start justify-between gap-2">
+                    <span className="min-w-0 text-sm font-semibold text-neutral-900 dark:text-neutral-100">
                       {experiment.title}
                     </span>
-                    <span className="flex items-center gap-1">
-                      <span className="text-xs text-neutral-500 dark:text-neutral-400">
-                        {dayNumber !== null && t('diary.dayOf', { n: dayNumber, m: targetDays ?? '∞' })}
-                        {streak > 0 && ` · 🔥 ${t('diary.streak', { n: streak })}`}
+                    {(onEdit || onDelete) && !busy && (
+                      <span className="flex shrink-0 items-center gap-1">
+                        {onEdit && (
+                          <button
+                            type="button"
+                            onClick={() => setEditingId(experiment.id)}
+                            title={t('diary.expEdit')}
+                            aria-label={t('diary.expEdit')}
+                            className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
+                          >
+                            ✏️
+                          </button>
+                        )}
+                        {onDelete && (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmingId(experiment.id)}
+                            title={t('common.delete')}
+                            aria-label={t('common.delete')}
+                            className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
+                          >
+                            🗑
+                          </button>
+                        )}
                       </span>
-                      {(onEdit || onDelete) && !busy && (
-                        <span className="ml-1 flex items-center gap-1">
-                          {onEdit && (
-                            <button
-                              type="button"
-                              onClick={() => setEditingId(experiment.id)}
-                              title={t('diary.expEdit')}
-                              aria-label={t('diary.expEdit')}
-                              className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-100 hover:text-neutral-700 dark:hover:bg-neutral-800 dark:hover:text-neutral-200"
-                            >
-                              ✏️
-                            </button>
-                          )}
-                          {onDelete && (
-                            <button
-                              type="button"
-                              onClick={() => setConfirmingId(experiment.id)}
-                              title={t('common.delete')}
-                              aria-label={t('common.delete')}
-                              className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-500/10"
-                            >
-                              🗑
-                            </button>
-                          )}
-                        </span>
-                      )}
-                    </span>
+                    )}
                   </div>
+                  {/* День и страйк — отдельной строкой под названием */}
+                  {(dayNumber !== null || streak > 0) && (
+                    <div className="mt-0.5 text-xs text-neutral-500 dark:text-neutral-400">
+                      {dayNumber !== null && t('diary.dayOf', { n: dayNumber, m: targetDays ?? '∞' })}
+                      {streak > 0 && ` · 🔥 ${t('diary.streak', { n: streak })}`}
+                    </div>
+                  )}
                   {/* Критерии эксперимента — видны прямо в карточке */}
                   {experiment.criteria && (
                     <p className="mt-1.5 text-xs leading-relaxed text-neutral-500 dark:text-neutral-400">

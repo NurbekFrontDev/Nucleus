@@ -503,12 +503,15 @@ export default function DiaryToday() {
         </div>
       </div>
 
-      {/* Ввод: текст + mic. На мобильном под полем оставлена зона пузыря
-          ассистента (bottom-28 right-4): кнопки записи/отправки стоят чуть
-          ВЫШЕ пузыря и никогда с ним не пересекаются. */}
+      {/* Ввод: текст + mic. На мобильном под полем оставлена компактная зона
+          пузыря ассистента (bottom-28 right-4): кнопки чуть выше пузыря. Полоса
+          ПОЛНОСТЬЮ НЕПРОЗРАЧНА (bg без /95 и без blur) — сквозь неё не видно
+          контент. touch-none гасит жесты скролла, начатые на поле/под ним:
+          скроллить можно только саму ленту и текст внутри поля (цепочка
+          touch-action упирается в текстарь — его скролл не страдает). */}
       <div
         data-composer
-        className="sticky bottom-0 -mx-4 border-t border-neutral-200 bg-white/95 px-4 pb-[calc(env(safe-area-inset-bottom)+6.5rem)] pt-3 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:pb-3"
+        className="sticky bottom-0 -mx-4 touch-none border-t border-neutral-200 bg-white px-4 pb-[calc(env(safe-area-inset-bottom)+6rem)] pt-3 dark:border-neutral-800 dark:bg-neutral-950 md:pb-3"
       >
         {micDenied && (
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-3.5 py-2.5 dark:border-amber-900/60 dark:bg-amber-950/30">
