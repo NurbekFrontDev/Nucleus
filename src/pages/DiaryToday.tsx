@@ -12,6 +12,7 @@ import {
   countUnsyncedEntries,
   resumePendingPipelines,
   retryEntry,
+  runEntryPipeline,
   saveEditedEntry,
   sendTextEntry,
   sendVoiceEntry,
@@ -20,6 +21,7 @@ import {
   type DiaryExperiment,
 } from '../lib/diary'
 import {
+  cancelRecording,
   isRecordingSupported,
   recordingElapsedMs,
   startRecording,
@@ -97,6 +99,19 @@ export default function DiaryToday() {
     void resumePendingPipelines(userId ?? '').then(() => reload())
   }, [reload, userId])
 
+  // Живой статус карточек: пока есть записи в обработке (pending/transcribing/
+  // summarizing), опрашиваем базу каждые 3с — карточка сама сменится на
+  // готовую, без перехода в другую вкладку и обратно. Realtime остаётся
+  // как быстрый канал, опрос — страховка от пропущенного события.
+  const hasPending = entries.some(
+    (e) => e.status === 'pending' || e.status === 'transcribing' || e.status === 'summarizing',
+  )
+  useEffect(() => {
+    if (!hasPending || !userId) return
+    const timer = window.setInterval(() => void reload(), 3000)
+    return () => window.clearInterval(timer)
+  }, [hasPending, userId, reload])
+
   // ===== Вольт-синк (только десктоп): после готовности записей и по кнопке =====
   // Счётчик unsynced всегда перечитываем из БД (а не декрементируем локально):
   // так он отражает реальное состояние, даже если синк отработал в другой
@@ -173,10 +188,18 @@ export default function DiaryToday() {
     setSending(true)
     try {
       log.info('diary', 'Text entry sent', { length: value.length }, userId)
-      await sendTextEntry(userId, value)
+      const { entry } = await sendTextEntry(userId, value)
       setText('')
       await reload()
       scheduleVaultSync()
+      // Пайплайн гоним сами и перерисовываем карточку по завершении —
+      // статус «думает» не зависает до перевхода на вкладку.
+      if (isOnline()) {
+        void runEntryPipeline(userId, entry.id).then(() => {
+          void reload()
+          scheduleVaultSync()
+        })
+      }
     } catch {
       showToast(t('diary.aiFail'))
       log.error('diary', 'Text entry failed', { length: value.length }, userId)
@@ -199,9 +222,15 @@ export default function DiaryToday() {
       setMicDenied(false)
       try {
         log.info('diary', 'Voice entry recorded', { bytes: clip.blob.size, ext: clip.ext }, userId)
-        await sendVoiceEntry(userId, clip)
+        const { entry } = await sendVoiceEntry(userId, clip)
         await reload()
         scheduleVaultSync()
+        if (isOnline()) {
+          void runEntryPipeline(userId, entry.id).then(() => {
+            void reload()
+            scheduleVaultSync()
+          })
+        }
       } catch {
         showToast(t('diary.aiFail'))
         log.error('diary', 'Voice entry pipeline failed', { bytes: clip.blob.size }, userId)
@@ -209,6 +238,14 @@ export default function DiaryToday() {
     },
     [userId, reload, scheduleVaultSync, t],
   )
+
+  // Отмена записи: клип уничтожается, ничего не отправляется и не сохраняется.
+  const cancelRecordingNow = useCallback(() => {
+    cancelRecording()
+    setRecording(false)
+    setElapsed(0)
+    log.info('diary', 'Voice recording cancelled', {}, userId)
+  }, [userId])
 
   const toggleMic = async () => {
     if (recording) {
@@ -306,14 +343,17 @@ export default function DiaryToday() {
 
   // Авто-рост поля ввода по высоте: текстарь растёт вместе с контентом до
   // самого низа страницы (резерв — шапка, статус вольта и обвязка композера),
-  // но не дальше: длинная диктовка разворачивается во всё свободное место.
-  // Ширина остаётся фиксированной.
+  // но не дальше. Работает и на телефоне: потолок замеряем на «чистом»
+  // вьюпорте и пересчитываем только в большую сторону — виртуальная
+  // клавиатура сжимает innerHeight, из-за чего потолок раньше схлопывался.
+  const inputCapRef = useRef(0)
   const growInput = useCallback(() => {
     const el = inputRef.current
     if (!el) return
     el.style.height = 'auto'
-    const cap = Math.max(120, Math.floor(window.innerHeight - 240))
-    el.style.height = Math.min(el.scrollHeight, cap) + 'px'
+    const fresh = Math.max(120, Math.floor(window.innerHeight - 240))
+    if (inputCapRef.current === 0 || fresh > inputCapRef.current) inputCapRef.current = fresh
+    el.style.height = Math.min(el.scrollHeight, inputCapRef.current) + 'px'
   }, [])
 
   useEffect(() => {
@@ -324,28 +364,31 @@ export default function DiaryToday() {
 
   return (
     <div className="flex h-full flex-col">
-      {/* Шапка экрана: название и дата */}
-      <div className="mb-3 flex items-baseline justify-between px-1 pt-1">
-        <h1 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">
-          📓 {t('mod.diary')}
-        </h1>
-        <span className="text-sm text-neutral-400">{fmtDate(lang)}</span>
+      {/* Шапка экрана: закреплена сверху (название, дата и статус вольта) */}
+      <div className="sticky top-0 z-20 -mx-4 mb-3 shrink-0 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
+        <div className="flex items-baseline justify-between">
+          <h1 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+            📓 {t('mod.diary')}
+          </h1>
+          <span className="text-sm text-neutral-400">{fmtDate(lang)}</span>
+        </div>
+        {/* Статус вольта — только на десктопе. На мобильном вольт недоступен
+            по архитектуре (Tauri FS), поэтому не показываем здесь ничего:
+            ни счётчика, ни подсказки, чтобы не вводить в заблуждение. Синк
+            автоматический, кнопки «Синхронизировать» больше нет. */}
+        {vaultAvailable && (
+          <div className="mt-0.5">
+            <span className="text-xs text-neutral-400">
+              {unsynced > 0 ? t('diary.vaultPending', { n: unsynced }) : t('diary.vaultAll')}
+            </span>
+          </div>
+        )}
       </div>
 
-      {/* Статус вольта — только на десктопе. На мобильном вольт недоступен
-          по архитектуре (Tauri FS), поэтому не показываем здесь ничего:
-          ни счётчика, ни подсказки, чтобы не вводить в заблуждение. Синк
-          автоматический, кнопки «Синхронизировать» больше нет. */}
-      {vaultAvailable && (
-        <div className="mb-3 px-1">
-          <span className="text-xs text-neutral-400">
-            {unsynced > 0 ? t('diary.vaultPending', { n: unsynced }) : t('diary.vaultAll')}
-          </span>
-        </div>
-      )}
-
-      {/* Лента записей дня (сверху старые) */}
-      <div ref={listRef} className="flex-1 overflow-y-auto">
+      {/* Лента записей дня (сверху старые). min-h-0 обязателен: без него
+          flex-высота не сжимается, список не скроллится внутри, и едет вся
+          раскладка (шапка уезжала при скролле). */}
+      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
         <div className="flex flex-col gap-2.5 pb-4">
           {entries.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-neutral-200 p-8 text-center text-sm text-neutral-400 dark:border-neutral-800">
@@ -364,8 +407,10 @@ export default function DiaryToday() {
           )}
         </div>
 
-        {/* Прогресс экспериментов */}
-        <DiaryExperiments experiments={experiments} recentEntries={recentEntries} />
+        {/* Прогресс экспериментов + воздух до разделителя композера */}
+        <div className="pb-6">
+          <DiaryExperiments experiments={experiments} recentEntries={recentEntries} />
+        </div>
       </div>
 
       {/* Ввод: текст + mic */}
@@ -388,11 +433,19 @@ export default function DiaryToday() {
           </div>
         )}
         {micActive ? (
-          <div className="flex items-center justify-center gap-3 pb-3">
+          <div className="flex items-center justify-center gap-2 pb-3">
             <span className="inline-block h-3 w-3 animate-pulse rounded-full bg-red-500" />
             <span className="text-sm font-medium text-neutral-700 dark:text-neutral-200">
               {t('diary.recording', { time: fmtTimer(elapsed) })}
             </span>
+            <button
+              type="button"
+              onClick={cancelRecordingNow}
+              title={t('diary.micCancel')}
+              className="ml-2 flex h-11 items-center gap-2 rounded-xl border border-neutral-300 px-4 text-sm font-medium text-neutral-600 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-neutral-700 dark:text-neutral-300 dark:hover:border-red-900 dark:hover:bg-red-950/30 dark:hover:text-red-400"
+            >
+              ✕ {t('diary.micCancel')}
+            </button>
             <button
               type="button"
               onClick={() => void toggleMic()}

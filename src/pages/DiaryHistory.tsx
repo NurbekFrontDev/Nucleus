@@ -292,7 +292,8 @@ export default function DiaryHistory() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex items-baseline justify-between px-1 pt-1">
+      {/* Закреплённая шапка: заголовок не уезжает при скролле */}
+      <div className="sticky top-0 z-20 -mx-4 flex items-baseline justify-between border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
         <h1 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">
           🗓️ {t('dnav.history')}
         </h1>

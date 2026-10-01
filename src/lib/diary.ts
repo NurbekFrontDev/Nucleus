@@ -269,15 +269,15 @@ async function insertEntry(
 
 /**
  * Текстовая запись: оригинал уходит вместе со строкой (одна вставка, офлайн —
- * через очередь общего офлайн-слоя).
+ * через очередь общего офлайн-слоя). Пайплайн не запускается здесь — экран
+ * сам вызывает runEntryPipeline, чтобы узнать о завершении и перерисовать
+ * карточку (см. DiaryToday).
  */
 export async function sendTextEntry(
   userId: string,
   text: string,
 ): Promise<{ entry: DiaryEntry; done: boolean }> {
   const entry = await insertEntry(userId, 'text', { originalText: text })
-  if (!isOnline()) return { entry, done: false }
-  void continueEntry(userId, entry.id).catch(() => {})
   return { entry, done: false }
 }
 
@@ -291,8 +291,6 @@ export async function sendVoiceEntry(
 ): Promise<{ entry: DiaryEntry; done: boolean }> {
   const entry = await insertEntry(userId, 'voice')
   await audioCachePut(entry.id, clip.blob)
-  if (!isOnline()) return { entry, done: false }
-  void continueEntry(userId, entry.id).catch(() => {})
   return { entry, done: false }
 }
 
@@ -313,6 +311,27 @@ async function uploadAudioClip(path: string, blob: Blob): Promise<boolean> {
 
 /** Продолжает пайплайн одной записи с текущего шага. Возвращает финальную запись. */
 export async function continueEntry(userId: string, entryId: string): Promise<DiaryEntry | null> {
+  return continueEntryImpl(userId, entryId)
+}
+
+/**
+ * Глобальная защита от параллельного прогона одного пайплайна: два
+ * одновременных вызова (отправка + resume при возврате сети/перевходе на
+ * вкладку) раньше приводили к двойной выжимке и ДУБЛЮ эксперимента в БД
+ * (каждый прогон создавал свою строку). Повторный вызов для той же записи
+ * просто дожидается уже идущего прогона.
+ */
+const inFlight = new Map<string, Promise<DiaryEntry | null>>()
+
+function continueEntryImpl(userId: string, entryId: string): Promise<DiaryEntry | null> {
+  const existing = inFlight.get(entryId)
+  if (existing) return existing
+  const run = doContinueEntry(userId, entryId).finally(() => inFlight.delete(entryId))
+  inFlight.set(entryId, run)
+  return run
+}
+
+async function doContinueEntry(userId: string, entryId: string): Promise<DiaryEntry | null> {
   const { data } = await supabase
     .from('diary_entries')
     .select('*')
@@ -421,6 +440,18 @@ export async function retryEntry(userId: string, entryId: string): Promise<void>
     .eq('id', entryId)
     .eq('user_id', userId)
   await continueEntry(userId, entryId)
+}
+
+/**
+ * Запускает пайплайн записи в фоне и глотает ошибки (запись останется failed
+ * с кнопкой «Повторить»). Экран вызывает после отправки, чтобы дождаться
+ * готовности и перерисовать карточку.
+ */
+export function runEntryPipeline(userId: string, entryId: string): Promise<void> {
+  return continueEntry(userId, entryId).then(
+    () => {},
+    () => {},
+  )
 }
 
 // ===== Редактирование и удаление =====
@@ -563,13 +594,14 @@ export async function createExperiment(
 
 // ===== Автопродолжение пайплайнов (офлайн-записи, прерванные шаги) =====
 
-const resuming = new Set<string>()
 let resumeRunning = false
 
 /**
  * Ищет записи, застрявшие до выжимки (офлайн-очередь дошла до базы, приложение
  * было закрыто посреди пайплайна) и продолжает их. Вызывается при старте
- * экрана дневника, при появлении сети и после офлайн-флеша.
+ * экрана дневника, при появлении сети и после офлайн-флеша. От параллельности
+ * защищает continueEntry: повторный вызов для той же записи дожидается
+ * уже идущего прогона.
  */
 export async function resumePendingPipelines(userId: string): Promise<void> {
   if (!isOnline() || resumeRunning) return
@@ -584,14 +616,10 @@ export async function resumePendingPipelines(userId: string): Promise<void> {
       .limit(20)
     const ids = ((data ?? []) as Array<{ id: string }>).map((r) => r.id)
     for (const id of ids) {
-      if (resuming.has(id)) continue
-      resuming.add(id)
       try {
         await continueEntry(userId, id)
       } catch {
         // continueEntry сам пометит failed; идём дальше по списку
-      } finally {
-        resuming.delete(id)
       }
     }
   } catch {
