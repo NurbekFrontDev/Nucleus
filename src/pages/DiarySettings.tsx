@@ -488,12 +488,6 @@ export default function DiarySettings() {
         >
           {driveConfigured ? t('diary.driveConnected') : t('diary.driveNotConnected')}
         </p>
-        <details className="mt-2">
-          <summary className="cursor-pointer text-xs font-medium text-neutral-500 underline decoration-dotted dark:text-neutral-400">
-            {t('diary.driveHowToTitle')}
-          </summary>
-          <p className={`${hintCls} mt-2 whitespace-pre-line`}>{t('diary.driveHowTo')}</p>
-        </details>
         <div className="mt-3 flex flex-col gap-3">
           <label className="flex flex-col gap-1.5">
             <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300">
