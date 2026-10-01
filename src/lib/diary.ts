@@ -13,6 +13,7 @@
 
 import { supabase } from './supabase'
 import { isOnline } from './offlineSync'
+import { log } from './logger'
 import { deleteDriveFile, getDriveConfig, isDriveAudioPath, uploadDiaryAudio } from './drive'
 
 // ===== Типы (ParsedDiarySummary — из Echo, без изменений) =====
@@ -383,6 +384,7 @@ async function doContinueEntry(userId: string, entryId: string): Promise<DiaryEn
         const fileId = await uploadDiaryAudio(cfg, entry, cached)
         await supabase.from('diary_entries').update({ audio_path: fileId }).eq('id', entry.id)
         entry.audio_path = fileId
+        log.info('diary', 'Audio uploaded to Google Drive', { fileId }, userId)
         transcribeBody = { op: 'transcribe', driveFileId: fileId, mime: cached.type || 'audio/webm' }
       }
       const { transcript } = await diaryAi<{ transcript: string }>(transcribeBody)
@@ -446,6 +448,13 @@ async function doContinueEntry(userId: string, entryId: string): Promise<DiaryEn
     return updated as unknown as DiaryEntry
   } catch (e) {
     // Ошибка пайплайна не теряет запись: статус failed и кнопка «Повторить».
+    // Причину фиксируем в app_logs ПОЛНОСТЬЮ (сообщение + стек/детали от
+    // провайдера), чтобы «Failed» в ленте никогда не был загадкой.
+    log.error('diary', `Entry pipeline failed: ${String((e as Error)?.message ?? e)}`, {
+      entryId,
+      status: 'failed',
+      hadAudioPath: !!entry.audio_path,
+    }, userId)
     await supabase.from('diary_entries').update({ status: 'failed' }).eq('id', entry.id)
     throw e
   }

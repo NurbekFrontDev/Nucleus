@@ -258,9 +258,9 @@ export default function DiaryToday() {
             scheduleVaultSync()
           })
         }
-      } catch {
+      } catch (e) {
         showToast(t('diary.aiFail'))
-        log.error('diary', 'Voice entry pipeline failed', { bytes: clip.blob.size }, userId)
+        log.error('diary', `Voice entry pipeline failed: ${String((e as Error)?.message ?? e)}`, { bytes: clip.blob.size }, userId)
       }
     },
     [userId, reload, scheduleVaultSync, t],

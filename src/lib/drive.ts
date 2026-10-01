@@ -101,7 +101,10 @@ async function findFolder(token: string, name: string, parent: string | null): P
     `name = ${JSON.stringify(name)}`,
     `mimeType = '${FOLDER_MIME}'`,
     'trashed = false',
-    parent ? `'${parent}' in parents` : "'me' in parents",
+    // В корне Drive ищем строго через 'root' in parents: вариант 'me' in parents
+    // Drive API отвечает 404 «File not found» (проверено живым запросом), из-за
+    // чего в v0.1.62 падала каждая загрузка.
+    parent ? `'${parent}' in parents` : "'root' in parents",
   ]
   const url = `${DRIVE_API}/files?q=${encodeURIComponent(clauses.join(' and '))}&fields=files(id)&pageSize=5`
   const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
