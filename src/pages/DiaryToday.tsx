@@ -321,12 +321,22 @@ export default function DiaryToday() {
 
   const retry = async (entry: DiaryEntry) => {
     if (!userId) return
+    // Оптимистично: карточка сразу оживает — спиннер + живой статус вместо
+    // статичной «Failed». Как только появляется pending, запускается опрос
+    // базы каждые 3с, и статус сам едет: «В очереди» → «Транскрибация» →
+    // «AI-выжимка» → готово. Без этого до конца пайплайна ничего не двигается.
+    const markPending = (list: DiaryEntry[]) =>
+      list.map((e) => (e.id === entry.id ? { ...e, status: 'pending' as const } : e))
+    setEntries(markPending)
+    setRecentEntries(markPending)
     try {
       await retryEntry(userId, entry.id)
       await reload()
       scheduleVaultSync()
     } catch {
       showToast(t('diary.aiFail'))
+      // Сбрасываем оптимистичный статус на актуальный из БД (снова failed).
+      void reload()
     }
   }
 

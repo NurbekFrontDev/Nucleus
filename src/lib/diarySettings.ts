@@ -14,6 +14,9 @@ export type DiarySettings = {
   driveClientId: string | null
   driveClientSecret: string | null
   driveRefreshToken: string | null
+  // Уровень «размышлений» (reasoning_effort) GPT-OSS 120B при выжимке.
+  // null = серверный дефолт edge-функции (low). allowed: diary-ai/index.ts.
+  reasoningEffort: string | null
   // Канонические фразы из словаря Voxel (пишутся edge-функцией diary-dictionary,
   // здесь только читаются для показа счётчика). Read-only в UI.
   vocabulary: string[]
@@ -24,6 +27,7 @@ export const DIARY_SETTINGS_DEFAULTS: DiarySettings = {
   summaryPrompt: null,
   geminiKey: null,
   groqKey: null,
+  reasoningEffort: null,
   driveClientId: null,
   driveClientSecret: null,
   driveRefreshToken: null,
@@ -31,7 +35,7 @@ export const DIARY_SETTINGS_DEFAULTS: DiarySettings = {
 }
 
 const SELECT =
-  'diary_smart_transcription, diary_summary_prompt, diary_gemini_key, diary_groq_key, diary_drive_client_id, diary_drive_client_secret, diary_drive_refresh_token, diary_vocabulary'
+  'diary_smart_transcription, diary_summary_prompt, diary_gemini_key, diary_groq_key, diary_reasoning_effort, diary_drive_client_id, diary_drive_client_secret, diary_drive_refresh_token, diary_vocabulary'
 
 /** Текущие настройки дневника пользователя (дефолты при любой ошибке). */
 export async function loadDiarySettings(userId: string): Promise<DiarySettings> {
@@ -53,6 +57,10 @@ export async function loadDiarySettings(userId: string): Promise<DiarySettings> 
         typeof r.diary_gemini_key === 'string' && r.diary_gemini_key.trim() ? r.diary_gemini_key : null,
       groqKey:
         typeof r.diary_groq_key === 'string' && r.diary_groq_key.trim() ? r.diary_groq_key : null,
+      reasoningEffort:
+        typeof r.diary_reasoning_effort === 'string' && r.diary_reasoning_effort.trim()
+          ? r.diary_reasoning_effort.trim()
+          : null,
       driveClientId:
         typeof r.diary_drive_client_id === 'string' && r.diary_drive_client_id.trim()
           ? r.diary_drive_client_id
@@ -97,6 +105,10 @@ export async function saveDiarySettings(
   if (patch.groqKey !== undefined) {
     const v = patch.groqKey?.trim() ?? ''
     row.diary_groq_key = v.length > 0 ? v : null
+  }
+  if (patch.reasoningEffort !== undefined) {
+    const v = patch.reasoningEffort?.trim() ?? ''
+    row.diary_reasoning_effort = v.length > 0 ? v : null
   }
   if (patch.driveClientId !== undefined) {
     const v = patch.driveClientId?.trim() ?? ''

@@ -98,10 +98,39 @@ const SUMMARY_SYSTEM_PROMPT = `Ты — персональный AI-ассист
 // ===== Провайдеры выжимки (OpenAI-совместимый /chat/completions) =====
 // Смена модели = правка этого блока или секрет GROQ_MODEL. Клиент про
 // провайдера не знает ничего.
-type LlmProvider = { name: string; baseUrl: string; apiKey: string; model: string }
+type LlmProvider = {
+  name: string
+  baseUrl: string
+  apiKey: string
+  model: string
+  extraBody?: Record<string, unknown>
+}
+
+// Уровни reasoning_effort, которые openai/gpt-oss-120b на Groq принимает
+// стабильно (проверено серией запросов: 15/15 успехов на low/medium/high).
+// Документация Groq описывает именно эти три значения; недокументированные
+// none/xhigh/max работают через один из путей валидации, но второй путь их
+// отвергает целиком вместе с запросом — использующий их риск остаться без
+// выжимки, поэтому они не предлагаются.
+const REASONING_EFFORTS = ['low', 'medium', 'high'] as const
+type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
+
+function parseReasoningEffort(v: string | null): ReasoningEffort | null {
+  if (!v) return null
+  return REASONING_EFFORTS.includes(v as ReasoningEffort) ? (v as ReasoningEffort) : null
+}
+
+// Reasoning-токены вычитаются из max_tokens наравне с ответом модели. Бюджет
+// лимита подбираем по уровню: при 1400 на high модель в принципе может
+// израсходовать всю квоту на «размышления» и отдать пустой content.
+const REASONING_BUDGET: Record<ReasoningEffort, number> = { low: 400, medium: 800, high: 1600 }
 
 // Ключ пользователя имеет приоритет над серверным секретом (настройки дневника).
-function buildSummarizeProviders(userGroqKey: string | null = null): LlmProvider[] {
+// reasoningEffort: null = не отправляем параметр (модель использует свой дефолт).
+function buildSummarizeProviders(
+  userGroqKey: string | null = null,
+  reasoningEffort: ReasoningEffort | null = null,
+): LlmProvider[] {
   const providers: LlmProvider[] = []
   const groqKey = userGroqKey || Deno.env.get('GROQ_API_KEY')
   if (groqKey) {
@@ -110,6 +139,9 @@ function buildSummarizeProviders(userGroqKey: string | null = null): LlmProvider
       baseUrl: Deno.env.get('GROQ_BASE_URL') ?? 'https://api.groq.com/openai/v1',
       apiKey: groqKey,
       model: Deno.env.get('GROQ_MODEL') ?? 'openai/gpt-oss-120b',
+      // gpt-oss — reasoning-модель: уровень «размышлений» задаёт пользователь
+      // в настройках дневника. None = серверный дефолт Groq.
+      ...(reasoningEffort ? { extraBody: { reasoning_effort: reasoningEffort } } : {}),
     })
   }
   const nvidiaKey = Deno.env.get('NVIDIA_API_KEY')
@@ -119,6 +151,7 @@ function buildSummarizeProviders(userGroqKey: string | null = null): LlmProvider
       baseUrl: Deno.env.get('NVIDIA_BASE_URL') ?? 'https://integrate.api.nvidia.com/v1',
       apiKey: nvidiaKey,
       model: Deno.env.get('NVIDIA_MODEL') ?? 'meta/llama-3.3-70b-instruct',
+      // NVIDIA NIM — обычная (не reasoning) модель, effort для неё не нужен.
     })
   }
   return providers
@@ -140,6 +173,7 @@ async function callChat(
         temperature: 0.4,
         max_tokens: maxTokens,
         stream: false,
+        ...(p.extraBody ?? {}),
       }),
     })
     if (!res.ok) {
@@ -187,6 +221,8 @@ type DiarySettings = {
   summaryPrompt: string | null
   geminiKey: string | null
   groqKey: string | null
+  // Уровень reasoning_effort GPT-OSS 120B (low/medium/high), null — дефолт Groq.
+  reasoningEffort: string | null
   // OAuth Google Drive (хранилище аудио дневника, v0.1.62+).
   driveClientId: string | null
   driveClientSecret: string | null
@@ -200,6 +236,7 @@ const DEFAULT_SETTINGS: DiarySettings = {
   summaryPrompt: null,
   geminiKey: null,
   groqKey: null,
+  reasoningEffort: null,
   driveClientId: null,
   driveClientSecret: null,
   driveRefreshToken: null,
@@ -213,7 +250,7 @@ async function loadDiarySettings(req: Request, userId: string): Promise<DiarySet
   if (!supabaseUrl || !anonKey || !authHeader) return { ...DEFAULT_SETTINGS }
   try {
     const res = await fetch(
-      `${supabaseUrl}/rest/v1/app_settings?user_id=eq.${userId}&select=diary_smart_transcription,diary_summary_prompt,diary_gemini_key,diary_groq_key,diary_drive_client_id,diary_drive_client_secret,diary_drive_refresh_token,diary_vocabulary`,
+      `${supabaseUrl}/rest/v1/app_settings?user_id=eq.${userId}&select=diary_smart_transcription,diary_summary_prompt,diary_gemini_key,diary_groq_key,diary_reasoning_effort,diary_drive_client_id,diary_drive_client_secret,diary_drive_refresh_token,diary_vocabulary`,
       { headers: { Authorization: authHeader, apikey: anonKey } },
     )
     if (!res.ok) return { ...DEFAULT_SETTINGS }
@@ -227,6 +264,7 @@ async function loadDiarySettings(req: Request, userId: string): Promise<DiarySet
       summaryPrompt: trim(r.diary_summary_prompt),
       geminiKey: trim(r.diary_gemini_key),
       groqKey: trim(r.diary_groq_key),
+      reasoningEffort: trim(r.diary_reasoning_effort),
       driveClientId: trim(r.diary_drive_client_id),
       driveClientSecret: trim(r.diary_drive_client_secret),
       driveRefreshToken: trim(r.diary_drive_refresh_token),
@@ -559,8 +597,15 @@ Deno.serve(async (req: Request) => {
         { role: 'user', content: text },
       ]
 
-      const providers = buildSummarizeProviders(settings.groqKey)
+      // reasoning_effort пользователя (low/medium/high). Невалидное значение
+      // из БД игнорируем — оно не должно ломать выжимку (parseReasoningEffort).
+      const effort = parseReasoningEffort(settings.reasoningEffort)
+      const providers = buildSummarizeProviders(settings.groqKey, effort)
       if (providers.length === 0) return reply({ error: 'no-api-key' })
+
+      // Бюджет токенов: 1400 на сам JSON-ответ + запас на reasoning, который
+      // растёт вместе с уровнем «размышлений» (reasoning-токоны съедают квоту).
+      const maxTokens = 1400 + (effort ? REASONING_BUDGET[effort] : 0)
 
       const details: string[] = []
       for (const p of providers) {
@@ -568,13 +613,13 @@ Deno.serve(async (req: Request) => {
         let raw: string | null = null
         const retryMessages = [...messages]
         for (let attempt = 0; attempt < 2; attempt++) {
-          const r = await callChat(p, retryMessages, 1400)
+          const r = await callChat(p, retryMessages, maxTokens)
           if (!r.text) {
             if (r.detail) details.push(r.detail)
             break
           }
           const parsed = extractJson(r.text)
-          if (isValidSummary(parsed)) return reply({ summary: parsed, provider: p.name, model: p.model })
+          if (isValidSummary(parsed)) return reply({ summary: parsed, provider: p.name, model: p.model, reasoningEffort: effort })
           details.push(`${p.model}: invalid json (attempt ${attempt + 1})`)
           if (attempt === 0) {
             retryMessages.push({ role: 'assistant', content: r.text })

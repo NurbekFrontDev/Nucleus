@@ -217,6 +217,35 @@ export default function DiarySettings() {
     el.style.height = Math.min(el.scrollHeight, 420) + 'px'
   }, [promptDraft, ready])
 
+  // ===== Thinking effort (reasoning_effort GPT-OSS 120B) =====
+  // Значения, стабильно принимаемые Groq (15/15 успешных запросов при проверке).
+  const THINKING_OPTIONS: Array<{ value: string; label: string; hint?: string }> = [
+    { value: 'low', label: t('diary.thinkingLow') },
+    { value: 'medium', label: t('diary.thinkingMedium') },
+    { value: 'high', label: t('diary.thinkingHigh') },
+  ]
+
+  const [savingEffort, setSavingEffort] = useState(false)
+
+  const selectEffort = async (next: string) => {
+    if (!userId || savingEffort) return
+    const value = next.trim() || null
+    if (settings.reasoningEffort === value) return
+    setSavingEffort(true)
+    const prev = settings.reasoningEffort
+    setSettings((s) => ({ ...s, reasoningEffort: next }))
+    try {
+      await saveDiarySettings(userId, { reasoningEffort: next })
+      log.info('settings', `Thinking effort set to ${next}`, {}, userId)
+      showToast(t('diary.thinkingSaved'))
+    } catch {
+      setSettings((s) => ({ ...s, reasoningEffort: prev }))
+      showToast(t('diary.editFail'))
+    } finally {
+      setSavingEffort(false)
+    }
+  }
+
   // ===== Ключи =====
   const saveKeys = async () => {
     if (!userId || savingKeys) return
@@ -404,6 +433,52 @@ export default function DiarySettings() {
           >
             {t('diary.settingsPromptReset')}
           </button>
+        </div>
+      </section>
+
+      {/* Уровень размышлений AI (reasoning_effort GPT-OSS 120B на Groq) */}
+      <section className={cardCls}>
+        <h2 className={labelCls}>🧠 {t('diary.thinkingTitle')}</h2>
+        <p className={hintCls}>{t('diary.thinkingHint')}</p>
+        <div className="mt-3 flex flex-col gap-2">
+          <button
+            type="button"
+            disabled={savingEffort}
+            onClick={() => void selectEffort('')}
+            className={`flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition disabled:opacity-50 ${
+              !settings.reasoningEffort
+                ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+                : 'border-neutral-300 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800/50'
+            }`}
+          >
+            <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+              {t('diary.thinkingDefault')}
+            </span>
+            <span className="text-xs text-neutral-500 dark:text-neutral-400">
+              {t('diary.thinkingDefaultHint')}
+            </span>
+          </button>
+          {THINKING_OPTIONS.map((opt) => {
+            const active = settings.reasoningEffort === opt.value
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                disabled={savingEffort}
+                onClick={() => void selectEffort(opt.value)}
+                className={`flex items-center justify-between gap-3 rounded-xl border px-3.5 py-2.5 text-left transition disabled:opacity-50 ${
+                  active
+                    ? 'border-emerald-500 bg-emerald-50 dark:bg-emerald-500/10'
+                    : 'border-neutral-300 hover:bg-neutral-50 dark:border-neutral-700 dark:hover:bg-neutral-800/50'
+                }`}
+              >
+                <span className="text-sm font-medium text-neutral-900 dark:text-neutral-100">
+                  {opt.label}
+                </span>
+                {active && <span className="text-sm text-emerald-600 dark:text-emerald-400">✓</span>}
+              </button>
+            )
+          })}
         </div>
       </section>
 
