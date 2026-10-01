@@ -3,6 +3,9 @@
 // свои провайдеры, ноль влияния на AI-бухгалтера FinLit).
 //
 // Операции (POST JSON, поле op):
+//   op: "drive-upload" { fileName, mime, dataBase64 } -> { fileId }  (v0.1.64+)
+//     Серверный фолбэк: клиент не смог загрузить аудио в Drive напрямую —
+//     шлёт клип сюда, сервер льёт в Drive по OAuth-ключам пользователя.
 //   op: "transcribe" { driveFileId }          -> { transcript }   (v0.1.62+)
 //   op: "transcribe" { audioPath }            -> { transcript }   (легаси до v0.1.62)
 //     Аудио скачивается из Google Drive по OAuth-ключам пользователя из
@@ -257,6 +260,35 @@ async function driveAccessToken(s: DiarySettings): Promise<string | null> {
   }
 }
 
+// Ищет папку по имени (среди файлов приложения), иначе создаёт. Цепочка
+// Nucleus/DiaryAudio/YYYY/MM — та же, что строит клиент в drive.ts.
+async function driveEnsureFolder(token: string, name: string, parent: string | null): Promise<string> {
+  const clauses = [
+    `name = ${JSON.stringify(name)}`,
+    "mimeType = 'application/vnd.google-apps.folder'",
+    'trashed = false',
+    // В корне ищем строго через 'root' in parents ('me' in parents даёт 404).
+    parent ? `'${parent}' in parents` : "'root' in parents",
+  ]
+  const list = await fetch(
+    `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(clauses.join(' and '))}&fields=files(id)&pageSize=5`,
+    { headers: { Authorization: `Bearer ${token}` } },
+  )
+  if (list.ok) {
+    const j = await list.json()
+    if (Array.isArray(j?.files) && j.files[0]?.id) return j.files[0].id as string
+  }
+  const created = await fetch('https://www.googleapis.com/drive/v3/files?fields=id', {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, mimeType: 'application/vnd.google-apps.folder', ...(parent ? { parents: [parent] } : {}) }),
+  })
+  if (!created.ok) throw new Error(`drive-mkdir-failed http ${created.status}`)
+  const cj = await created.json()
+  if (!cj?.id) throw new Error('drive-mkdir-failed no id')
+  return cj.id as string
+}
+
 // ===== Транскрибация: Gemini 3.5 Transcribe (REST generateContent) =====
 // Референс — Voxel v2 (модели gemini-3.5-transcribe): аудио inline base64,
 // конфиг транскрипции через generationConfig.audioTranscriptionConfig.
@@ -380,6 +412,69 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({}))
     const op = typeof body?.op === 'string' ? body.op : ''
     const settings = await loadDiarySettings(req, userId)
+
+    // ===== op: drive-upload — серверный фолбэк загрузки аудио в Drive =====
+    // Клиент иногда не может достучаться до googleapis из WebView («Failed to
+    // fetch») — тогда он шлёт клип сюда (base64), а сервер льёт его в Drive
+    // по ключам самого пользователя. Канал Supabase работает всегда.
+    if (op === 'drive-upload') {
+      const fileName = typeof body?.fileName === 'string' ? body.fileName.trim() : ''
+      const b64 = typeof body?.dataBase64 === 'string' ? body.dataBase64 : ''
+      if (!fileName || !b64) return reply({ error: 'no-file' })
+      // Имя строго формата клиента: YYYY-MM-DD-HHMMSS.ext — произвольные пути запрещены.
+      if (!/^\d{4}-\d{2}-\d{2}-\d{6}\.(webm|m4a)$/.test(fileName)) return reply({ error: 'bad-file-name' }, 400)
+
+      const token = await driveAccessToken(settings)
+      if (!token) return reply({ error: 'no-drive-config' })
+
+      try {
+        const [y, m] = fileName.split('-')
+        let parent: string | null = null
+        for (const seg of ['Nucleus', 'DiaryAudio', y, m]) {
+          parent = await driveEnsureFolder(token, seg, parent)
+        }
+
+        const bin = Uint8Array.from(atob(b64), (ch) => ch.charCodeAt(0))
+        if (bin.length === 0) return reply({ error: 'audio-empty' })
+        if (bin.length > 19 * 1024 * 1024) return reply({ error: 'audio-too-large' })
+
+        const mime = fileName.endsWith('.m4a') ? 'audio/mp4' : 'audio/webm'
+        const enc = new TextEncoder()
+        const boundary = 'edge' + crypto.randomUUID().replace(/-/g, '')
+        const head = enc.encode(
+          `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify({ name: fileName, parents: [parent] })}\r\n--${boundary}\r\nContent-Type: ${mime}\r\n\r\n`,
+        )
+        const foot = enc.encode(`\r\n--${boundary}--\r\n`)
+        const parts = new Uint8Array(head.length + bin.length + foot.length)
+        parts.set(head, 0)
+        parts.set(bin, head.length)
+        parts.set(foot, head.length + bin.length)
+
+        const up = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': `multipart/related; boundary=${boundary}`,
+          },
+          body: parts,
+        })
+        if (!up.ok) {
+          const errBody = await up.text().catch(() => '')
+          return reply({ error: 'drive-upload-failed', detail: `drive http ${up.status}: ${errBody.slice(0, 200)}` })
+        }
+        const upJson = await up.json()
+        if (!upJson?.id) return reply({ error: 'drive-upload-failed', detail: 'no id' })
+        // «Всем по ссылке» — как при прямой загрузке, иначе Obsidian не проиграет.
+        await fetch(`https://www.googleapis.com/drive/v3/files/${upJson.id}/permissions`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: 'reader', type: 'anyone' }),
+        })
+        return reply({ fileId: upJson.id })
+      } catch (e) {
+        return reply({ error: 'drive-upload-failed', detail: String(e).slice(0, 300) })
+      }
+    }
 
     // ===== op: transcribe — аудио из Drive (или легаси-бакета) -> Gemini =====
     if (op === 'transcribe') {

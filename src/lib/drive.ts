@@ -11,10 +11,31 @@
 // копии. ID файла — 33+ случайных символа, сама папка Drive остаётся приватной.
 
 import { loadDiarySettings, type DiarySettings } from './diarySettings'
+import { log } from './logger'
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
 const DRIVE_API = 'https://www.googleapis.com/drive/v3'
 const UPLOAD_API = 'https://www.googleapis.com/upload/drive/v3'
+
+/**
+ * fetch с ретраями на сетевые сбои: внутри WebView соединения к Google иногда
+ * умирают на коннекте (~21с тишины, затем «Failed to fetch»), а повторная
+ * попытка через пару секунд проходит. 5xx/429 тоже ретраим, 4xx — нет.
+ */
+async function fetchRetry(url: string, init: RequestInit, tries = 3): Promise<Response> {
+  let lastErr: unknown = null
+  for (let attempt = 0; attempt < tries; attempt++) {
+    try {
+      const res = await fetch(url, init)
+      if ((res.status < 500 && res.status !== 429) || attempt === tries - 1) return res
+    } catch (e) {
+      lastErr = e
+      if (attempt === tries - 1) throw e
+    }
+    await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)))
+  }
+  throw lastErr
+}
 
 export type DriveConfig = { clientId: string; clientSecret: string; refreshToken: string }
 
@@ -42,7 +63,7 @@ const tokenCache = new Map<string, { token: string; expiresAt: number }>()
 export async function getAccessToken(cfg: DriveConfig): Promise<string> {
   const cached = tokenCache.get(cfg.refreshToken)
   if (cached && Date.now() < cached.expiresAt) return cached.token
-  const res = await fetch(TOKEN_URL, {
+  const res = await fetchRetry(TOKEN_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
     body: new URLSearchParams({
@@ -107,14 +128,14 @@ async function findFolder(token: string, name: string, parent: string | null): P
     parent ? `'${parent}' in parents` : "'root' in parents",
   ]
   const url = `${DRIVE_API}/files?q=${encodeURIComponent(clauses.join(' and '))}&fields=files(id)&pageSize=5`
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+  const res = await fetchRetry(url, { headers: { Authorization: `Bearer ${token}` } })
   if (!res.ok) throw new Error(`drive-list-failed: http ${res.status}`)
   const json = (await res.json()) as { files?: Array<{ id?: string }> }
   return json.files?.[0]?.id ?? null
 }
 
 async function createFolder(token: string, name: string, parent: string | null): Promise<string> {
-  const res = await fetch(`${DRIVE_API}/files?fields=id`, {
+  const res = await fetchRetry(`${DRIVE_API}/files?fields=id`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -175,7 +196,7 @@ export function driveDirectUrl(fileId: string): string {
 
 /** Открывает файл «всем, у кого есть ссылка» (reader). Без этого Obsidian не проиграет аудио. */
 async function makePublic(token: string, fileId: string): Promise<void> {
-  const res = await fetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}/permissions`, {
+  const res = await fetchRetry(`${DRIVE_API}/files/${encodeURIComponent(fileId)}/permissions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({ role: 'reader', type: 'anyone' }),
@@ -194,10 +215,12 @@ export async function uploadDiaryAudio(
   blob: Blob,
 ): Promise<string> {
   const token = await getAccessToken(cfg)
+  log.info('diary', 'Drive upload: access token acquired')
   const mime = blob.type || 'audio/webm'
   const name = driveAudioName(entry.created_at, entry.timezone, mime)
   const [y, m] = name.slice(0, 10).split('-') // YYYY-MM-DD из имени
   const folderId = await ensureFolderPath(token, ['Nucleus', 'DiaryAudio', y, m])
+  log.info('diary', 'Drive upload: folder ensured', { folderId, name, bytes: blob.size })
 
   const upload = async (accessToken: string): Promise<Response> => {
     const boundary = 'nucleus' + Math.random().toString(36).slice(2)
@@ -208,7 +231,7 @@ export async function uploadDiaryAudio(
       blob,
       `\r\n--${boundary}--\r\n`,
     ])
-    return fetch(`${UPLOAD_API}/files?uploadType=multipart&fields=id`, {
+    return fetchRetry(`${UPLOAD_API}/files?uploadType=multipart&fields=id`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -240,7 +263,7 @@ export async function uploadDiaryAudio(
 
 /** Удаляет файл из Drive. 404 = уже удалён — не ошибка. */
 export async function deleteDriveFile(cfg: DriveConfig, fileId: string): Promise<void> {
-  const res = await fetch(`${DRIVE_API}/files/${encodeURIComponent(fileId)}`, {
+  const res = await fetchRetry(`${DRIVE_API}/files/${encodeURIComponent(fileId)}`, {
     method: 'DELETE',
     headers: { Authorization: `Bearer ${await getAccessToken(cfg)}` },
   })

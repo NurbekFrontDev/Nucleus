@@ -14,7 +14,7 @@
 import { supabase } from './supabase'
 import { isOnline } from './offlineSync'
 import { log } from './logger'
-import { deleteDriveFile, getDriveConfig, isDriveAudioPath, uploadDiaryAudio } from './drive'
+import { deleteDriveFile, driveAudioName, getDriveConfig, isDriveAudioPath, uploadDiaryAudio } from './drive'
 
 // ===== Типы (ParsedDiarySummary — из Echo, без изменений) =====
 
@@ -177,11 +177,26 @@ async function audioCacheDelete(entryId: string): Promise<void> {
 
 type DiaryAiResult<T> = { data?: T; error?: string; detail?: string }
 
-async function diaryAi<T>(body: Record<string, unknown>): Promise<T> {
-  const { data, error } = await supabase.functions.invoke<DiaryAiResult<T>>('diary-ai', { body })
-  if (error) throw new Error(error.message || 'diary-ai network')
-  if (!data || data.error) throw new Error(data?.detail || data?.error || 'diary-ai error')
-  return data as T
+/**
+ * Вызов Edge Function diary-ai. Транскрибация с ретраями внутри может думать
+ * до минуты+, поэтому клиентский таймаут — 120 c (AbortSignal.timeout);
+ * истёк — честная ошибка ai-timeout вместо вечного «думает».
+ */
+async function diaryAi<T>(body: Record<string, unknown>, timeoutMs = 120_000): Promise<T> {
+  try {
+    const { data, error } = await supabase.functions.invoke<DiaryAiResult<T>>('diary-ai', {
+      body,
+      signal: AbortSignal.timeout(timeoutMs),
+    })
+    if (error) throw new Error(error.message || 'diary-ai network')
+    if (!data || data.error) throw new Error(data?.detail || data?.error || 'diary-ai error')
+    return data as T
+  } catch (e) {
+    if ((e as Error)?.name === 'TimeoutError' || (e as Error)?.name === 'AbortError') {
+      throw new Error(`ai-timeout-${Math.round(timeoutMs / 1000)}s`)
+    }
+    throw e
+  }
 }
 
 // ===== Записи: чтение =====
@@ -314,6 +329,46 @@ async function uploadAudioClip(path: string, blob: Blob): Promise<boolean> {
   return !error
 }
 
+// ===== Загрузка аудио в Drive: напрямую, при сбое — через сервер =====
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return blob.arrayBuffer().then((buf) => {
+    const bytes = new Uint8Array(buf)
+    let binary = ''
+    const CHUNK = 0x8000
+    for (let i = 0; i < bytes.length; i += CHUNK) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK))
+    }
+    return btoa(binary)
+  })
+}
+
+/**
+ * Fallback-загрузка в Drive через Edge Function: в некоторых WebView прямые
+ * соединения к googleapis.com умирают на коннекте («Failed to fetch»), а канал
+ * Supabase работает всегда — клип уезжает на сервер (base64), сервер льёт его
+ * в Drive своими-же ключами пользователя. Возвращает fileId.
+ */
+async function uploadAudioViaEdge(
+  userId: string,
+  entry: DiaryEntry,
+  blob: Blob,
+): Promise<string> {
+  const mime = blob.type || 'audio/webm'
+  const dataBase64 = await blobToBase64(blob)
+  const { fileId } = await diaryAi<{ fileId: string }>(
+    {
+      op: 'drive-upload',
+      fileName: driveAudioName(entry.created_at, entry.timezone, mime),
+      mime,
+      dataBase64,
+    },
+    180_000,
+  )
+  log.info('diary', 'Audio uploaded to Google Drive (server fallback)', { fileId }, userId)
+  return fileId
+}
+
 /** Продолжает пайплайн одной записи с текущего шага. Возвращает финальную запись. */
 export async function continueEntry(userId: string, entryId: string): Promise<DiaryEntry | null> {
   return continueEntryImpl(userId, entryId)
@@ -381,7 +436,14 @@ async function doContinueEntry(userId: string, entryId: string): Promise<DiaryEn
         if (!cfg) throw new Error('drive-not-configured')
         const cached = await audioCacheGet(entry.id)
         if (!cached) throw new Error('audio-blob-missing')
-        const fileId = await uploadDiaryAudio(cfg, entry, cached)
+        let fileId: string
+        try {
+          fileId = await uploadDiaryAudio(cfg, entry, cached)
+        } catch (directErr) {
+          // Прямой канал упал (сеть WebView → Google): пробуем через сервер.
+          log.warn('diary', `Direct Drive upload failed, trying server fallback: ${String((directErr as Error)?.message ?? directErr)}`, {}, userId)
+          fileId = await uploadAudioViaEdge(userId, entry, cached)
+        }
         await supabase.from('diary_entries').update({ audio_path: fileId }).eq('id', entry.id)
         entry.audio_path = fileId
         log.info('diary', 'Audio uploaded to Google Drive', { fileId }, userId)
