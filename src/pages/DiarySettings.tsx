@@ -17,12 +17,15 @@ import {
 import { openAppDetailsSettings } from '../lib/battery'
 import { isDesktop, openMicSystemSettings } from '../lib/native'
 import { DEFAULT_SUMMARY_PROMPT, SERVER_DIARY_KEYS } from '../lib/diaryDefaults'
+import { readCache, writeCache } from '../lib/offlineCache'
 import { onSyncEvent } from '../lib/realtimeSync'
 import { log } from '../lib/logger'
 
 // Настройки модуля «Дневник»: microphone, smart transcription, промпт выжимки,
 // API-ключи. Всё хранится в app_settings и синхронизируется между устройствами
 // через Realtime — изменение с ПК моментально применяется на телефоне.
+// Local-first: при открытии мгновенно показываем кэш последней загрузки,
+// сеть/Realtime обновляют в фоне.
 
 const cardCls = 'rounded-2xl border border-neutral-200 bg-white p-4 dark:border-neutral-800 dark:bg-neutral-900/50'
 const labelCls = 'text-sm font-semibold text-neutral-900 dark:text-neutral-100'
@@ -35,32 +38,48 @@ export default function DiarySettings() {
   const { t } = useLang()
   const userId = user?.id
 
-  const [settings, setSettings] = useState<DiarySettings>(DIARY_SETTINGS_DEFAULTS)
-  const [ready, setReady] = useState(false)
+  // Local-first: гидрируемся из кэша сразу (до сети), чтобы экран не мигал
+  // «Loading» при плохом интернете.
+  const settingsCacheKey = `diary:settings:${user?.id ?? ''}`
+
+  const [settings, setSettings] = useState<DiarySettings>(
+    () => readCache<DiarySettings>(`diary:settings:${user?.id ?? ''}`) ?? DIARY_SETTINGS_DEFAULTS,
+  )
+  const [ready, setReady] = useState(() => readCache<DiarySettings>(`diary:settings:${user?.id ?? ''}`) !== null)
   const [micState, setMicState] = useState<MicPermissionState>('unknown')
 
   // Локальные правки промпта/ключей: сохраняем по кнопке, а не на каждый чих.
-  const [promptDraft, setPromptDraft] = useState('')
-  const [geminiDraft, setGeminiDraft] = useState('')
-  const [groqDraft, setGroqDraft] = useState('')
+  const cached = readCache<DiarySettings>(settingsCacheKey)
+  const [promptDraft, setPromptDraft] = useState(
+    () =>
+      cached?.summaryPrompt ??
+      (cached ? DEFAULT_SUMMARY_PROMPT : ''),
+  )
+  const [geminiDraft, setGeminiDraft] = useState(() => cached?.geminiKey ?? '')
+  const [groqDraft, setGroqDraft] = useState(() => cached?.groqKey ?? '')
   const [savingPrompt, setSavingPrompt] = useState(false)
   const [savingKeys, setSavingKeys] = useState(false)
   const [togglingSmart, setTogglingSmart] = useState(false)
+
+  const applySettings = (s: DiarySettings) => {
+    setSettings(s)
+    // Поле показывает РЕАЛЬНЫЙ промпт: пользовательский оверрайд, а если его
+    // нет — канонический дефолт, который edge-функция использует под капотом.
+    setPromptDraft(s.summaryPrompt ?? DEFAULT_SUMMARY_PROMPT)
+    // Ключи: если пользователь не задал своих — показываем серверные,
+    // реально используемые edge-функцией (тот же приоритет, что в diary-ai).
+    setGeminiDraft(s.geminiKey ?? SERVER_DIARY_KEYS.gemini)
+    setGroqDraft(s.groqKey ?? SERVER_DIARY_KEYS.groq)
+  }
 
   const reload = async () => {
     if (!userId) return
     try {
       const s = await loadDiarySettings(userId)
-      setSettings(s)
-      // Поле показывает РЕАЛЬНЫЙ промпт: пользовательский оверрайд, а если его
-      // нет — канонический дефолт, который edge-функция использует под капотом.
-      setPromptDraft(s.summaryPrompt ?? DEFAULT_SUMMARY_PROMPT)
-      // Ключи: если пользователь не задал своих — показываем серверные,
-      // реально используемые edge-функцией (тот же приоритет, что в diary-ai).
-      setGeminiDraft(s.geminiKey ?? SERVER_DIARY_KEYS.gemini)
-      setGroqDraft(s.groqKey ?? SERVER_DIARY_KEYS.groq)
+      applySettings(s)
+      writeCache(settingsCacheKey, s)
     } catch {
-      // остаются дефолты
+      // остаются кэш/дефолты
     } finally {
       setReady(true)
     }

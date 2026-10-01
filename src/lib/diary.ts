@@ -592,6 +592,51 @@ export async function createExperiment(
   return (data as { id: string } | null)?.id ?? null
 }
 
+export type ExperimentPatch = {
+  title: string
+  criteria: string | null
+  target_days: number | null
+  started_on: string
+}
+
+/** Полное редактирование эксперимента: название, срок, критерии, дата старта. */
+export async function updateExperiment(
+  userId: string,
+  experimentId: string,
+  patch: ExperimentPatch,
+): Promise<void> {
+  const { error } = await supabase
+    .from('diary_experiments')
+    .update({
+      title: patch.title,
+      criteria: patch.criteria,
+      target_days: patch.target_days,
+      started_on: patch.started_on,
+    })
+    .eq('id', experimentId)
+    .eq('user_id', userId)
+  if (error) throw error
+}
+
+/**
+ * Удаляет эксперимент. Записи дневника не пропадают: у них просто снимается
+ * ссылка (experiment_id = null) — история остаётся, исчезает только прогресс
+ * карточки эксперимента.
+ */
+export async function deleteExperiment(userId: string, experimentId: string): Promise<void> {
+  await supabase
+    .from('diary_entries')
+    .update({ experiment_id: null })
+    .eq('experiment_id', experimentId)
+    .eq('user_id', userId)
+  const { error } = await supabase
+    .from('diary_experiments')
+    .delete()
+    .eq('id', experimentId)
+    .eq('user_id', userId)
+  if (error) throw error
+}
+
 // ===== Автопродолжение пайплайнов (офлайн-записи, прерванные шаги) =====
 
 let resumeRunning = false

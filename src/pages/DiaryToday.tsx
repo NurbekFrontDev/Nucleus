@@ -6,6 +6,7 @@ import { showToast } from '../lib/toast'
 import { isOnline } from '../lib/offlineSync'
 import {
   deleteEntry,
+  deleteExperiment,
   fetchActiveExperiments,
   fetchDayEntries,
   fetchEntriesRange,
@@ -17,8 +18,10 @@ import {
   sendTextEntry,
   sendVoiceEntry,
   todayStr,
+  updateExperiment,
   type DiaryEntry,
   type DiaryExperiment,
+  type ExperimentPatch,
 } from '../lib/diary'
 import {
   cancelRecording,
@@ -29,15 +32,24 @@ import {
 } from '../lib/recorder'
 import { isVaultSyncAvailable, removeEntryFromVault, syncVault } from '../lib/vaultSync'
 import { onSyncEvent } from '../lib/realtimeSync'
+import { readCache, writeCache } from '../lib/offlineCache'
 import { log } from '../lib/logger'
 import DiaryEntryCard from '../components/DiaryEntryCard'
 import DiaryExperiments from '../components/DiaryExperiments'
 
 // Экран «Сегодня»: чат-подобная лента записей дня + ввод текста/голоса.
 // Главный жест — одна кнопка: нажал mic → сказал → пайплайн сам дотранскрибирует,
-// довыжмёт AI и (на десктопе) запишет в вольт Second Brain.
+// довыжмёт AI и (на десктопе) запишет в вольт Second Brain. Local-first:
+// содержимое мгновенно hydrate'ится из кэша последней загрузки.
 
 const HISTORY_WINDOW_DAYS = 30
+
+type CachedToday = {
+  day: DiaryEntry[]
+  recent: DiaryEntry[]
+  exp: DiaryExperiment[]
+  unsynced: number
+}
 
 function fmtDate(lang: string, d: Date = new Date()): string {
   return d.toLocaleDateString(lang === 'en' ? 'en-US' : 'ru-RU', {
@@ -60,15 +72,26 @@ export default function DiaryToday() {
   const navigate = useNavigate()
   const userId = user?.id
 
-  const [entries, setEntries] = useState<DiaryEntry[]>([])
-  const [experiments, setExperiments] = useState<DiaryExperiment[]>([])
-  const [recentEntries, setRecentEntries] = useState<DiaryEntry[]>([])
+  // Local-first (stale-while-revalidate): при открытии мгновенно показываем
+  // кэш последней загрузки, сеть потом догоняет свежими данными.
+  const [entries, setEntries] = useState<DiaryEntry[]>(
+    () => readCache<CachedToday>(`diary:today:${user?.id ?? ''}`)?.day ?? [],
+  )
+  const [experiments, setExperiments] = useState<DiaryExperiment[]>(
+    () => readCache<CachedToday>(`diary:today:${user?.id ?? ''}`)?.exp ?? [],
+  )
+  const [recentEntries, setRecentEntries] = useState<DiaryEntry[]>(
+    () => readCache<CachedToday>(`diary:today:${user?.id ?? ''}`)?.recent ?? [],
+  )
   const [unsynced, setUnsynced] = useState(0)
   const [text, setText] = useState('')
   const [sending, setSending] = useState(false)
   const [recording, setRecording] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [micDenied, setMicDenied] = useState(false)
+  // Поле ввода развернулось до предела (длинная диктовка): фон замораживаем,
+  // чтобы скролл внутри/снаружи поля не двигал ленту за ним.
+  const [inputExpanded, setInputExpanded] = useState(false)
   const vaultAvailable = isVaultSyncAvailable()
 
   const listRef = useRef<HTMLDivElement>(null)
@@ -92,6 +115,8 @@ export default function DiaryToday() {
     setRecentEntries(recent)
     setExperiments(exp)
     setUnsynced(count)
+    // Local-first: сохраняем снапшот для мгновенного открытия в следующий раз.
+    writeCache<CachedToday>(`diary:today:${userId}`, { day, recent, exp, unsynced: count })
   }, [userId])
 
   useEffect(() => {
@@ -337,6 +362,42 @@ export default function DiaryToday() {
     [userId, reload, refreshUnsynced],
   )
 
+  // ===== Редактирование и удаление экспериментов =====
+  const handleExpEdit = useCallback(
+    async (exp: DiaryExperiment, patch: ExperimentPatch) => {
+      if (!userId) return
+      try {
+        await updateExperiment(userId, exp.id, patch)
+        await reload()
+        showToast(t('diary.expSaved'))
+        log.info('diary', 'Experiment updated', { id: exp.id, title: patch.title }, userId)
+      } catch {
+        showToast(t('diary.editFail'))
+        log.error('diary', 'Experiment update failed', { id: exp.id }, userId)
+        throw new Error('experiment-update-failed')
+      }
+    },
+    [userId, reload, t],
+  )
+
+  const handleExpDelete = useCallback(
+    async (exp: DiaryExperiment) => {
+      if (!userId) return
+      try {
+        // Записи остаются в дневнике — снимается только ссылка на эксперимент.
+        await deleteExperiment(userId, exp.id)
+        await reload()
+        showToast(t('diary.expDeleted'))
+        log.info('diary', 'Experiment deleted', { id: exp.id, title: exp.title }, userId)
+      } catch {
+        showToast(t('diary.deleteFail'))
+        log.error('diary', 'Experiment delete failed', { id: exp.id }, userId)
+        throw new Error('experiment-delete-failed')
+      }
+    },
+    [userId, reload, t],
+  )
+
   useEffect(() => {
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
   }, [entries.length])
@@ -354,6 +415,7 @@ export default function DiaryToday() {
     const fresh = Math.max(120, Math.floor(window.innerHeight - 240))
     if (inputCapRef.current === 0 || fresh > inputCapRef.current) inputCapRef.current = fresh
     el.style.height = Math.min(el.scrollHeight, inputCapRef.current) + 'px'
+    setInputExpanded(el.scrollHeight > inputCapRef.current)
   }, [])
 
   useEffect(() => {
@@ -387,8 +449,13 @@ export default function DiaryToday() {
 
       {/* Лента записей дня (сверху старые). min-h-0 обязателен: без него
           flex-высота не сжимается, список не скроллится внутри, и едет вся
-          раскладка (шапка уезжала при скролле). */}
-      <div ref={listRef} className="min-h-0 flex-1 overflow-y-auto">
+          раскладка (шапка уезжала при скролле). Когда поле ввода развёрнуто
+          до предела — фон заморожен (overflow-hidden): скролл не двигает
+          содержимое за гигантским полем. */}
+      <div
+        ref={listRef}
+        className={`min-h-0 flex-1 ${inputExpanded ? 'overflow-hidden' : 'overflow-y-auto'}`}
+      >
         <div className="flex flex-col gap-2.5 pb-4">
           {entries.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-neutral-200 p-8 text-center text-sm text-neutral-400 dark:border-neutral-800">
@@ -409,7 +476,12 @@ export default function DiaryToday() {
 
         {/* Прогресс экспериментов + воздух до разделителя композера */}
         <div className="pb-6">
-          <DiaryExperiments experiments={experiments} recentEntries={recentEntries} />
+          <DiaryExperiments
+            experiments={experiments}
+            recentEntries={recentEntries}
+            onEdit={handleExpEdit}
+            onDelete={handleExpDelete}
+          />
         </div>
       </div>
 
@@ -468,7 +540,7 @@ export default function DiaryToday() {
               }}
               rows={1}
               placeholder={t('diary.inputPlaceholder')}
-              className="min-h-[44px] flex-1 resize-none overflow-y-auto rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-600 sm:text-sm"
+              className="min-h-[44px] flex-1 resize-none overscroll-contain overflow-y-auto rounded-xl border border-neutral-300 bg-white px-3.5 py-2.5 text-[13px] leading-relaxed text-neutral-900 outline-none transition placeholder:text-neutral-400 focus:border-emerald-500 dark:border-neutral-700 dark:bg-neutral-900 dark:text-neutral-100 dark:placeholder:text-neutral-600 sm:text-sm"
             />
             <button
               type="button"
