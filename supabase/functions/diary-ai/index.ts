@@ -3,17 +3,21 @@
 // свои провайдеры, ноль влияния на AI-бухгалтера FinLit).
 //
 // Операции (POST JSON, поле op):
-//   op: "transcribe" { audioPath }  -> { transcript }
-//     Аудио скачивается из приватного бакета diary-audio сервисным ключом
-//     и отправляется в Gemini 3.5 Transcribe (аудио inline base64).
+//   op: "transcribe" { driveFileId }          -> { transcript }   (v0.1.62+)
+//   op: "transcribe" { audioPath }            -> { transcript }   (легаси до v0.1.62)
+//     Аудио скачивается из Google Drive по OAuth-ключам пользователя из
+//     app_settings (driveFileId) либо из приватного бакета diary-audio
+//     (легаси-путь {user_id}/...), и отправляется в Gemini 3.5 Transcribe
+//     (аудио inline base64).
 //   op: "summarize"  { text, activeExperiments } -> { summary }
 //     Выжимка записи через LLM. Основной провайдер: Groq, модель
 //     openai/gpt-oss-120b (секрет GROQ_API_KEY). Fallback: NVIDIA NIM,
 //     meta/llama-3.3-70b-instruct (секрет NVIDIA_API_KEY).
 //
 // Аутентификация: Supabase JWT пользователя в Authorization header. Для
-// transcribe дополнительно проверяется, что audioPath лежит внутри папки
-// {user_id}/ — чужое аудио прочитать нельзя.
+// легаси-transcribe дополнительно проверяется, что audioPath лежит внутри
+// папки {user_id}/ — чужое аудио прочитать нельзя; в Drive-ветке читается
+// только то, что доступно токену самого пользователя (scope drive.file).
 // Обработанные ошибки возвращаются со статусом 200 и полем error (паттерн ai-chat).
 
 const corsHeaders = {
@@ -180,6 +184,10 @@ type DiarySettings = {
   summaryPrompt: string | null
   geminiKey: string | null
   groqKey: string | null
+  // OAuth Google Drive (хранилище аудио дневника, v0.1.62+).
+  driveClientId: string | null
+  driveClientSecret: string | null
+  driveRefreshToken: string | null
   // Канонические фразы из словаря Voxel (push через diary-dictionary).
   vocabulary: string[]
 }
@@ -189,6 +197,9 @@ const DEFAULT_SETTINGS: DiarySettings = {
   summaryPrompt: null,
   geminiKey: null,
   groqKey: null,
+  driveClientId: null,
+  driveClientSecret: null,
+  driveRefreshToken: null,
   vocabulary: [],
 }
 
@@ -199,22 +210,50 @@ async function loadDiarySettings(req: Request, userId: string): Promise<DiarySet
   if (!supabaseUrl || !anonKey || !authHeader) return { ...DEFAULT_SETTINGS }
   try {
     const res = await fetch(
-      `${supabaseUrl}/rest/v1/app_settings?user_id=eq.${userId}&select=diary_smart_transcription,diary_summary_prompt,diary_gemini_key,diary_groq_key,diary_vocabulary`,
+      `${supabaseUrl}/rest/v1/app_settings?user_id=eq.${userId}&select=diary_smart_transcription,diary_summary_prompt,diary_gemini_key,diary_groq_key,diary_drive_client_id,diary_drive_client_secret,diary_drive_refresh_token,diary_vocabulary`,
       { headers: { Authorization: authHeader, apikey: anonKey } },
     )
     if (!res.ok) return { ...DEFAULT_SETTINGS }
     const rows = await res.json()
     const r = Array.isArray(rows) ? rows[0] : undefined
     if (!r) return { ...DEFAULT_SETTINGS }
+    const trim = (v: unknown): string | null =>
+      typeof v === 'string' && v.trim() ? v.trim() : null
     return {
       smartTranscription: r.diary_smart_transcription !== false,
-      summaryPrompt: typeof r.diary_summary_prompt === 'string' && r.diary_summary_prompt.trim() ? r.diary_summary_prompt.trim() : null,
-      geminiKey: typeof r.diary_gemini_key === 'string' && r.diary_gemini_key.trim() ? r.diary_gemini_key.trim() : null,
-      groqKey: typeof r.diary_groq_key === 'string' && r.diary_groq_key.trim() ? r.diary_groq_key.trim() : null,
+      summaryPrompt: trim(r.diary_summary_prompt),
+      geminiKey: trim(r.diary_gemini_key),
+      groqKey: trim(r.diary_groq_key),
+      driveClientId: trim(r.diary_drive_client_id),
+      driveClientSecret: trim(r.diary_drive_client_secret),
+      driveRefreshToken: trim(r.diary_drive_refresh_token),
       vocabulary: Array.isArray(r.diary_vocabulary) ? r.diary_vocabulary.filter((p: unknown): p is string => typeof p === 'string') : [],
     }
   } catch {
     return { ...DEFAULT_SETTINGS }
+  }
+}
+
+// ===== Google Drive: access token по refresh token пользователя =====
+
+async function driveAccessToken(s: DiarySettings): Promise<string | null> {
+  if (!s.driveClientId || !s.driveClientSecret || !s.driveRefreshToken) return null
+  try {
+    const res = await fetch('https://oauth2.googleapis.com/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: s.driveClientId,
+        client_secret: s.driveClientSecret,
+        refresh_token: s.driveRefreshToken,
+        grant_type: 'refresh_token',
+      }),
+    })
+    if (!res.ok) return null
+    const json = await res.json()
+    return typeof json?.access_token === 'string' ? json.access_token : null
+  } catch {
+    return null
   }
 }
 
@@ -342,38 +381,60 @@ Deno.serve(async (req: Request) => {
     const op = typeof body?.op === 'string' ? body.op : ''
     const settings = await loadDiarySettings(req, userId)
 
-    // ===== op: transcribe — аудио из бакета -> Gemini -> транскрипт =====
+    // ===== op: transcribe — аудио из Drive (или легаси-бакета) -> Gemini =====
     if (op === 'transcribe') {
+      const driveFileId = typeof body?.driveFileId === 'string' ? body.driveFileId.trim() : ''
       const audioPath = typeof body?.audioPath === 'string' ? body.audioPath.trim() : ''
-      if (!audioPath) return reply({ error: 'no-audio-path' }, 400)
-      // Чужое аудио читать нельзя: путь обязан лежать в папке пользователя.
-      if (!audioPath.startsWith(`${userId}/`)) return reply({ error: 'forbidden-path' }, 403)
 
-      const supabaseUrl = Deno.env.get('SUPABASE_URL')
-      const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-      if (!supabaseUrl || !serviceKey) return reply({ error: 'no-service-config' })
+      let bytes: Uint8Array
+      let mimeType: string
+      if (driveFileId) {
+        // v0.1.62+: аудио в Google Drive. Скачиваем по access token самого
+        // пользователя (ключи из его app_settings, scope drive.file) — чужие
+        // файлы его токен прочитать не даст.
+        const token = await driveAccessToken(settings)
+        if (!token) return reply({ error: 'no-drive-config' })
+        const res = await fetch(
+          `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(driveFileId)}?alt=media`,
+          { headers: { Authorization: `Bearer ${token}` } },
+        )
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => '')
+          return reply({ error: 'audio-not-found', detail: `drive http ${res.status}: ${errBody.slice(0, 200)}` })
+        }
+        bytes = new Uint8Array(await res.arrayBuffer())
+        // Нормализуем: Gemini ждёт простой mime без codecs.
+        mimeType = typeof body?.mime === 'string' && body.mime.includes('mp4') ? 'audio/mp4' : 'audio/webm'
+      } else {
+        if (!audioPath) return reply({ error: 'no-audio-path' }, 400)
+        // Легаси: чужое аудио читать нельзя — путь обязан лежать в папке пользователя.
+        if (!audioPath.startsWith(`${userId}/`)) return reply({ error: 'forbidden-path' }, 403)
 
-      // Скачиваем аудио с JWT владельца (RLS-политика «own diary-audio read»):
-      // из edge-сети сервисный ключ до storage не доходит, а JWT владельца
-      // проходит по политике бакета. JWT уже проверен в authUserId.
-      const authHeader = req.headers.get('Authorization') ?? ''
-      const res = await fetch(
-        `${supabaseUrl}/storage/v1/object/diary-audio/${audioPath}`,
-        { headers: { Authorization: authHeader } },
-      )
-      if (!res.ok) {
-        const body = await res.text().catch(() => '')
-        return reply({ error: 'audio-not-found', detail: `storage http ${res.status}: ${body.slice(0, 200)}` })
+        const supabaseUrl = Deno.env.get('SUPABASE_URL')
+        if (!supabaseUrl) return reply({ error: 'no-service-config' })
+
+        // Скачиваем аудио с JWT владельца (RLS-политика «own diary-audio read»):
+        // из edge-сети сервисный ключ до storage не доходит, а JWT владельца
+        // проходит по политике бакета. JWT уже проверен в authUserId.
+        const authHeader = req.headers.get('Authorization') ?? ''
+        const res = await fetch(
+          `${supabaseUrl}/storage/v1/object/diary-audio/${audioPath}`,
+          { headers: { Authorization: authHeader } },
+        )
+        if (!res.ok) {
+          const errBody = await res.text().catch(() => '')
+          return reply({ error: 'audio-not-found', detail: `storage http ${res.status}: ${errBody.slice(0, 200)}` })
+        }
+        bytes = new Uint8Array(await res.arrayBuffer())
+        mimeType = audioPath.endsWith('.mp4') || audioPath.endsWith('.m4a')
+          ? 'audio/mp4'
+          : 'audio/webm'
       }
-      const bytes = new Uint8Array(await res.arrayBuffer())
+
       if (bytes.length === 0) return reply({ error: 'audio-empty' })
       // Inline-лимит Gemini 20 MB: записи дневника (минуты речи) укладываются
       // с запасом, но мусорные большие файлы отсекаем сразу.
       if (bytes.length > 19 * 1024 * 1024) return reply({ error: 'audio-too-large' })
-
-      const mimeType = audioPath.endsWith('.mp4') || audioPath.endsWith('.m4a')
-        ? 'audio/mp4'
-        : 'audio/webm'
 
       const r = await transcribeWithRetry(bytes, mimeType, settings.smartTranscription, settings.geminiKey, settings.vocabulary)
       if (!r.text) return reply({ error: 'transcribe-failed', detail: r.detail })

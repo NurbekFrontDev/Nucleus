@@ -57,8 +57,12 @@ export default function DiarySettings() {
   )
   const [geminiDraft, setGeminiDraft] = useState(() => cached?.geminiKey ?? '')
   const [groqDraft, setGroqDraft] = useState(() => cached?.groqKey ?? '')
+  const [driveIdDraft, setDriveIdDraft] = useState(() => cached?.driveClientId ?? '')
+  const [driveSecretDraft, setDriveSecretDraft] = useState(() => cached?.driveClientSecret ?? '')
+  const [driveTokenDraft, setDriveTokenDraft] = useState(() => cached?.driveRefreshToken ?? '')
   const [savingPrompt, setSavingPrompt] = useState(false)
   const [savingKeys, setSavingKeys] = useState(false)
+  const [savingDrive, setSavingDrive] = useState(false)
   const [togglingSmart, setTogglingSmart] = useState(false)
 
   const applySettings = (s: DiarySettings) => {
@@ -70,6 +74,9 @@ export default function DiarySettings() {
     // реально используемые edge-функцией (тот же приоритет, что в diary-ai).
     setGeminiDraft(s.geminiKey ?? SERVER_DIARY_KEYS.gemini)
     setGroqDraft(s.groqKey ?? SERVER_DIARY_KEYS.groq)
+    setDriveIdDraft(s.driveClientId ?? '')
+    setDriveSecretDraft(s.driveClientSecret ?? '')
+    setDriveTokenDraft(s.driveRefreshToken ?? '')
   }
 
   const reload = async () => {
@@ -230,6 +237,32 @@ export default function DiarySettings() {
     geminiDraft.trim() !== (settings.geminiKey ?? SERVER_DIARY_KEYS.gemini).trim() ||
     groqDraft.trim() !== (settings.groqKey ?? SERVER_DIARY_KEYS.groq).trim()
 
+  // ===== Google Drive (хранилище аудио) =====
+  const saveDrive = async () => {
+    if (!userId || savingDrive) return
+    setSavingDrive(true)
+    try {
+      await saveDiarySettings(userId, {
+        driveClientId: driveIdDraft,
+        driveClientSecret: driveSecretDraft,
+        driveRefreshToken: driveTokenDraft,
+      })
+      log.info('settings', 'Google Drive credentials updated', { configured: !!driveTokenDraft.trim() }, userId)
+      showToast(t('diary.driveSaved'))
+      await reload()
+    } catch {
+      showToast(t('diary.editFail'))
+    } finally {
+      setSavingDrive(false)
+    }
+  }
+
+  const driveDirty =
+    driveIdDraft.trim() !== (settings.driveClientId ?? '').trim() ||
+    driveSecretDraft.trim() !== (settings.driveClientSecret ?? '').trim() ||
+    driveTokenDraft.trim() !== (settings.driveRefreshToken ?? '').trim()
+  const driveConfigured = !!(settings.driveClientId && settings.driveClientSecret && settings.driveRefreshToken)
+
   // Глазик: показать/скрыть содержимое обоих полей ключей.
   const [showKeys, setShowKeys] = useState(false)
 
@@ -370,6 +403,79 @@ export default function DiarySettings() {
             className="rounded-lg border border-neutral-300 px-3.5 py-1.5 text-sm font-medium text-neutral-600 transition hover:bg-neutral-100 disabled:opacity-30 dark:border-neutral-700 dark:text-neutral-300 dark:hover:bg-neutral-800"
           >
             {t('diary.settingsPromptReset')}
+          </button>
+        </div>
+      </section>
+
+      {/* Google Drive: единственное хранилище аудио */}
+      <section className={cardCls}>
+        <h2 className={labelCls}>☁️ {t('diary.driveTitle')}</h2>
+        <p className={hintCls}>{t('diary.driveHint')}</p>
+        <p
+          className={`mt-2 text-xs font-semibold ${
+            driveConfigured
+              ? 'text-emerald-600 dark:text-emerald-400'
+              : 'text-amber-600 dark:text-amber-400'
+          }`}
+        >
+          {driveConfigured ? t('diary.driveConnected') : t('diary.driveNotConnected')}
+        </p>
+        <details className="mt-2">
+          <summary className="cursor-pointer text-xs font-medium text-neutral-500 underline decoration-dotted dark:text-neutral-400">
+            {t('diary.driveHowToTitle')}
+          </summary>
+          <p className={`${hintCls} mt-2 whitespace-pre-line`}>{t('diary.driveHowTo')}</p>
+        </details>
+        <div className="mt-3 flex flex-col gap-3">
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300">
+              {t('diary.driveClientId')}
+            </span>
+            <input
+              type={showKeys ? 'text' : 'password'}
+              value={driveIdDraft}
+              onChange={(e) => setDriveIdDraft(e.target.value)}
+              placeholder="1234567890-abc.apps.googleusercontent.com"
+              autoComplete="off"
+              spellCheck={false}
+              className={inputCls}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300">
+              {t('diary.driveClientSecret')}
+            </span>
+            <input
+              type={showKeys ? 'text' : 'password'}
+              value={driveSecretDraft}
+              onChange={(e) => setDriveSecretDraft(e.target.value)}
+              placeholder="GOCSPX-…"
+              autoComplete="off"
+              spellCheck={false}
+              className={inputCls}
+            />
+          </label>
+          <label className="flex flex-col gap-1.5">
+            <span className="text-xs font-medium text-neutral-600 dark:text-neutral-300">
+              {t('diary.driveRefreshToken')}
+            </span>
+            <input
+              type={showKeys ? 'text' : 'password'}
+              value={driveTokenDraft}
+              onChange={(e) => setDriveTokenDraft(e.target.value)}
+              placeholder="1//0…"
+              autoComplete="off"
+              spellCheck={false}
+              className={inputCls}
+            />
+          </label>
+          <button
+            type="button"
+            onClick={() => void saveDrive()}
+            disabled={!driveDirty || savingDrive}
+            className="self-start rounded-lg bg-neutral-900 px-4 py-1.5 text-sm font-semibold text-white transition hover:bg-neutral-700 disabled:opacity-30 dark:bg-emerald-500 dark:hover:bg-emerald-600"
+          >
+            {savingDrive ? '…' : t('diary.save')}
           </button>
         </div>
       </section>

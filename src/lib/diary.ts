@@ -1,6 +1,10 @@
 // Сервис модуля «Дневник»: записи, пайплайн AI (транскрибация + выжимка),
 // эксперименты, офлайн-очередь. Вечный архив — Second Brain (vaultSync.ts),
-// здесь — рабочее хранилище Supabase и вызовы Edge Function diary-ai.
+// здесь — рабочее хранилище Supabase (только БД метаданных) и вызовы Edge
+// Function diary-ai. Аудио с v0.1.62 живёт в Google Drive (drive.ts) на обоих
+// платформах: ни локальных файлов, ни Supabase Storage. Путь бакета в
+// audio_path остался только у легаси-записей до v0.1.62 — их пайплайн
+// дожимается по прежней ветке.
 //
 // Статусная машина записи: pending → transcribing → summarizing → ready | failed.
 // Офлайн: строка записи уходит через общий офлайн-слой supabase (offlineFetch),
@@ -9,6 +13,7 @@
 
 import { supabase } from './supabase'
 import { isOnline } from './offlineSync'
+import { deleteDriveFile, getDriveConfig, isDriveAudioPath, uploadDiaryAudio } from './drive'
 
 // ===== Типы (ParsedDiarySummary — из Echo, без изменений) =====
 
@@ -231,8 +236,9 @@ export type SendOptions = { createdNow?: Date }
 
 /**
  * Создаёт запись и запускает пайплайн. id генерирует клиент (не сервер):
- * путь аудио и офлайн-кэш строятся вокруг него ещё до ответа сети, и
- * офлайн-очередь не требует маппинга временных id.
+ * офлайн-кэш строится вокруг него ещё до ответа сети, и офлайн-очередь не
+ * требует маппинга временных id. audio_path для голоса появляется позже —
+ * после загрузки в Google Drive туда пишется fileId (см. doContinueEntry).
  */
 async function insertEntry(
   userId: string,
@@ -241,8 +247,6 @@ async function insertEntry(
 ): Promise<DiaryEntry> {
   const id = crypto.randomUUID()
   const created = opts.createdNow ?? new Date()
-  const audioPath =
-    source === 'voice' ? `${userId}/${todayStr()}/${id}.webm` : null
   const row = {
     id,
     user_id: userId,
@@ -253,7 +257,7 @@ async function insertEntry(
     // Текст записи известен сразу (текстовая запись) — едёт в той же строке,
     // чтобы офлайн-вставка была самодостаточной.
     original_text: opts.originalText ?? null,
-    audio_path: audioPath,
+    audio_path: null,
     timezone: clientTimezone(),
     created_at: created.toISOString(),
   }
@@ -345,34 +349,49 @@ async function doContinueEntry(userId: string, entryId: string): Promise<DiaryEn
     // Шаг 1: транскрипт (только голос и только если его ещё нет).
     let original = entry.original_text
     if (!original) {
-      if (entry.source !== 'voice' || !entry.audio_path) {
+      if (entry.source !== 'voice') {
         await supabase.from('diary_entries').update({ status: 'failed' }).eq('id', entry.id)
         return null
       }
       await supabase.from('diary_entries').update({ status: 'transcribing' }).eq('id', entry.id)
 
-      let uploaded = false
-      if (isOnline()) {
+      let transcribeBody: Record<string, unknown>
+      if (isDriveAudioPath(entry.audio_path)) {
+        // Аудио уже в Google Drive (загружено этим или другим устройством).
+        transcribeBody = { op: 'transcribe', driveFileId: entry.audio_path }
+      } else if (entry.audio_path) {
+        // Легаси (до v0.1.62): путь в бакете diary-audio, дожимаем по-старому.
+        let uploaded = false
+        if (isOnline()) {
+          const cached = await audioCacheGet(entry.id)
+          if (cached) uploaded = await uploadAudioClip(entry.audio_path, cached)
+          else uploaded = true // клип уже в бакете (запись с другого устройства)
+        }
+        if (!uploaded) throw new Error('audio-upload-failed')
+        const url = await signedAudioUrl(entry.audio_path)
+        if (!url) throw new Error('signed-url-failed')
+        const audioRes = await fetch(url)
+        if (!audioRes.ok) throw new Error('audio-download-failed')
+        transcribeBody = { op: 'transcribe', audioPath: entry.audio_path }
+      } else {
+        // Основной флоу: загрузка клипа в Google Drive, fileId — в audio_path.
+        if (!isOnline()) throw new Error('audio-upload-failed')
+        const cfg = await getDriveConfig(userId)
+        if (!cfg) throw new Error('drive-not-configured')
         const cached = await audioCacheGet(entry.id)
-        if (cached) uploaded = await uploadAudioClip(entry.audio_path, cached)
-        else uploaded = true // клип уже в бакете (запись с другого устройства)
+        if (!cached) throw new Error('audio-blob-missing')
+        const fileId = await uploadDiaryAudio(cfg, entry, cached)
+        await supabase.from('diary_entries').update({ audio_path: fileId }).eq('id', entry.id)
+        entry.audio_path = fileId
+        transcribeBody = { op: 'transcribe', driveFileId: fileId, mime: cached.type || 'audio/webm' }
       }
-      if (!uploaded) throw new Error('audio-upload-failed')
-
-      const url = await signedAudioUrl(entry.audio_path)
-      if (!url) throw new Error('signed-url-failed')
-      const audioRes = await fetch(url)
-      if (!audioRes.ok) throw new Error('audio-download-failed')
-      const { transcript } = await diaryAi<{ transcript: string }>({
-        op: 'transcribe',
-        audioPath: entry.audio_path,
-      })
+      const { transcript } = await diaryAi<{ transcript: string }>(transcribeBody)
       original = transcript
       await supabase
         .from('diary_entries')
         .update({ original_text: transcript, status: 'summarizing' })
         .eq('id', entry.id)
-      // Транскрипт в бакете, локальный клип больше не нужен.
+      // Аудио в Drive, локальный клип больше не нужен.
       await audioCacheDelete(entry.id)
     } else if (entry.status !== 'summarizing') {
       await supabase.from('diary_entries').update({ status: 'summarizing' }).eq('id', entry.id)
@@ -539,14 +558,20 @@ export async function updateOriginalText(
 }
 
 /**
- * Удаляет запись: строку в БД и аудиоклип в бакете (если был).
- * Вольт-заметку чистит vaultSync.removeEntryFromVault — он знает формат файла.
+ * Удаляет запись: строку в БД и аудиофайл (Drive для новых записей, бакет
+ * diary-audio для легаси до v0.1.62). Вольт-заметку чистит
+ * vaultSync.removeEntryFromVault — он знает формат файла.
  * Аудиокэш IndexedDB тоже подтираем на всякий случай.
  */
 export async function deleteEntry(userId: string, entry: DiaryEntry): Promise<void> {
   await audioCacheDelete(entry.id)
   if (entry.audio_path) {
-    await supabase.storage.from('diary-audio').remove([entry.audio_path]).then(undefined, () => {})
+    if (isDriveAudioPath(entry.audio_path)) {
+      const cfg = await getDriveConfig(userId)
+      if (cfg) await deleteDriveFile(cfg, entry.audio_path).catch(() => {})
+    } else {
+      await supabase.storage.from('diary-audio').remove([entry.audio_path]).then(undefined, () => {})
+    }
   }
   const { error } = await supabase
     .from('diary_entries')

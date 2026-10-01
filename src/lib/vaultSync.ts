@@ -1,8 +1,11 @@
 // Синхронизация дневника в вечный архив Second Brain (только Desktop/Tauri).
 // Формат заметок и алгоритм — план «Дневник — Формат заметок Second Brain»:
 //   F:\SecondBrain\personal\Diary\YYYY\MM\YYYY-MM-DD.md (одна заметка = день),
-//   аудио — personal/Diary/audio/YYYY/MM/YYYY-MM-DD-ЧЧММСС.webm (вне git,
-//   облачный бэкап — Google Drive), выжимка — выше, оригинал — ниже дословно.
+//   выжимка — выше, оригинал — ниже дословно.
+// С v0.1.62 аудио в вольт НЕ скачивается: записи ссылаются на Google Drive
+// через HTML-embed <audio> (Obsidian играет прямую ссылку без локального
+// файла). Легаси-записи до v0.1.62 (аудио в бакете diary-audio) по-прежнему
+// скачиваются в personal/Diary/audio/YYYY/MM/ и вставляются как ![[…]].
 //
 // Блок одной записи начинается скрытым маркером <!-- diary:UUID -->: по нему
 // синк идемпотентен — повторная синхронизация не дублирует запись, а редактирование
@@ -12,6 +15,7 @@
 import { exists, mkdir, readTextFile, writeTextFile, writeFile, remove } from '@tauri-apps/plugin-fs'
 import { supabase } from './supabase'
 import { isDesktop } from './native'
+import { driveDirectUrl, isDriveAudioPath } from './drive'
 import type { DiaryEntry } from './diary'
 
 // Строго ограниченный capability-скоуп в src-tauri/capabilities/default.json.
@@ -93,7 +97,7 @@ function quoteBlock(text: string): string {
     .join('\n')
 }
 
-function buildEntryBlock(entry: DiaryEntry, audioName: string | null): string {
+function buildEntryBlock(entry: DiaryEntry, audioName: string | null, audioUrl: string | null): string {
   const s = entry.summary
   const lines: string[] = []
   lines.push(`<!-- diary:${entry.id} -->`)
@@ -108,7 +112,8 @@ function buildEntryBlock(entry: DiaryEntry, audioName: string | null): string {
   const exp = experimentLine(entry)
   if (exp) lines.push(`**Эксперимент:** ${exp}`)
   lines.push(entry.source === 'voice' ? '**Источник:** голос (транскрибация Gemini)' : '**Источник:** текст')
-  if (audioName) lines.push(`**Аудио:** ![[${audioName}]]`)
+  if (audioUrl) lines.push(`**Аудио:** <audio controls preload="none" src="${audioUrl}"></audio>`)
+  else if (audioName) lines.push(`**Аудио:** ![[${audioName}]]`)
   lines.push('')
   lines.push('> [!quote] Оригинал (дословно, без изменений)')
   lines.push(quoteBlock(entry.original_text ?? ''))
@@ -232,9 +237,9 @@ function touchUpdated(contents: string, entryDate: string): string {
   return contents
 }
 
-/** Скачивает аудио из бакета в вольт; возвращает имя файла или null. */
+/** Скачивает аудио из бакета в вольт (только легаси-записи до v0.1.62); имя или null. */
 async function saveAudio(entry: DiaryEntry): Promise<string | null> {
-  if (entry.source !== 'voice' || !entry.audio_path) return null
+  if (entry.source !== 'voice' || !entry.audio_path || isDriveAudioPath(entry.audio_path)) return null
   const name = audioFileName(entry)
   const dir = audioDirFor(entry.entry_date)
   const full = `${dir}\\${name}`
@@ -262,7 +267,13 @@ async function syncSingleEntry(entry: DiaryEntry): Promise<void> {
   if (!(await exists(dir))) await mkdir(dir, { recursive: true })
 
   const audioName = await saveAudio(entry)
-  const block = buildEntryBlock(entry, audioName)
+  // Новые записи: аудио играет из Google Drive по прямой ссылке (без локальной
+  // копии). Легаси: локальный файл в audio/YYYY/MM + ![[…]]-embed.
+  const audioUrl =
+    !audioName && entry.source === 'voice' && isDriveAudioPath(entry.audio_path)
+      ? driveDirectUrl(entry.audio_path)
+      : null
+  const block = buildEntryBlock(entry, audioName, audioUrl)
 
   if (await exists(path)) {
     const current = await readTextFile(path)
@@ -322,9 +333,9 @@ export async function removeEntryFromVault(entry: DiaryEntry): Promise<boolean> 
   }
 }
 
-/** Стирает аудиофайл записи из папки вольта (best-effort). */
+/** Стирает аудиофайл записи из папки вольта (best-effort; только легаси — Drive-аудио локально не живёт). */
 async function removeVaultAudio(entry: DiaryEntry): Promise<void> {
-  if (entry.source !== 'voice') return
+  if (entry.source !== 'voice' || isDriveAudioPath(entry.audio_path)) return
   const name = audioFileName(entry)
   const full = `${audioDirFor(entry.entry_date)}\\${name}`
   try {

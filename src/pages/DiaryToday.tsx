@@ -31,6 +31,8 @@ import {
   stopRecording,
 } from '../lib/recorder'
 import { isVaultSyncAvailable, removeEntryFromVault, syncVault } from '../lib/vaultSync'
+import { driveConfigFrom } from '../lib/drive'
+import type { DiarySettings } from '../lib/diarySettings'
 import { onSyncEvent } from '../lib/realtimeSync'
 import { readCache, writeCache } from '../lib/offlineCache'
 import { log } from '../lib/logger'
@@ -285,6 +287,15 @@ export default function DiaryToday() {
     }
     if (!isRecordingSupported()) {
       showToast(t('diary.micUnavailable'))
+      return
+    }
+    // Аудио с v0.1.62 живёт только в Google Drive: без ключей запись не
+    // начинаем, чтобы клип не пропал. Кэш настроек — offline-безопасно (при
+    // отсутствии кэша запись не блокируем, пайплайн сообщит точнее).
+    const cachedSettings = userId ? readCache<DiarySettings>(`diary:settings:${userId}`) : null
+    if (cachedSettings && !driveConfigFrom(cachedSettings)) {
+      showToast(t('diary.driveNotConfigured'))
+      log.warn('diary', 'Voice recording blocked: Google Drive not configured', {}, userId)
       return
     }
     try {
