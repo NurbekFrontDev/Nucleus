@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useLang } from '../lib/i18n'
-import { entryTimeHM, type DiaryEntry } from '../lib/diary'
+import { entryTimeHM, getEntryAudioUrl, type DiaryEntry } from '../lib/diary'
 import { log } from '../lib/logger'
 import ConfirmDialog from './ConfirmDialog'
 
@@ -10,6 +10,46 @@ import ConfirmDialog from './ConfirmDialog'
 // ✏️/🗑 — общий стиль приложения, как в «Моих делах»). Редактирование
 // перегоняет выжимку заново — см. saveEditedEntry. Удаление подтверждается
 // фирменной модалкой ConfirmDialog (никаких window.confirm).
+
+/** Плеер голосовой записи: Drive-стриминг (новые) или подписанный URL (легаси). */
+function EntryAudio({ entry }: { entry: DiaryEntry }) {
+  const [url, setUrl] = useState<string | null>(null)
+  useEffect(() => {
+    let active = true
+    getEntryAudioUrl(entry)
+      .then((u) => {
+        if (active) setUrl(u)
+      })
+      .catch(() => {})
+    return () => {
+      active = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry.id, entry.audio_path])
+  if (!url) return null
+  return (
+    <audio
+      controls
+      preload="metadata"
+      src={url}
+      className="mt-3 h-10 w-full"
+      aria-label="Audio"
+      onLoadedMetadata={(e) => {
+        // Старые записи (до патча заголовка webm) без длительности:
+        // бесконечный seek заставляет Chromium вычислить её из файла.
+        const a = e.currentTarget
+        if (a.duration === Infinity || Number.isNaN(a.duration)) {
+          const prev = a.currentTime
+          a.currentTime = 1e101
+          a.ontimeupdate = () => {
+            a.ontimeupdate = null
+            a.currentTime = prev
+          }
+        }
+      }}
+    />
+  )
+}
 
 function MoodEmoji({ score }: { score: number }) {
   const clamped = Math.max(1, Math.min(10, Math.round(score)))
@@ -252,6 +292,9 @@ export default function DiaryEntryCard({
           </div>
 
           <ExperimentBadge entry={entry} />
+
+          {/* Плеер голосовой записи (Drive-стриминг) — и в «Сегодня», и в «Истории» */}
+          <EntryAudio entry={entry} />
 
           {/* Оригинал — свёрнут, дословно */}
           {entry.original_text && (

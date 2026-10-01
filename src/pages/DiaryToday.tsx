@@ -243,7 +243,7 @@ export default function DiaryToday() {
   }, [recording])
 
   const finishRecording = useCallback(
-    async (clip: { blob: Blob; ext: string }) => {
+    async (clip: { blob: Blob; ext: string; durationMs?: number }) => {
       if (!userId) return
       setRecording(false)
       setMicDenied(false)

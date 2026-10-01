@@ -11,6 +11,7 @@
 // копии. ID файла — 33+ случайных символа, сама папка Drive остаётся приватной.
 
 import { loadDiarySettings, type DiarySettings } from './diarySettings'
+import { SUPABASE_URL } from './supabase'
 import { log } from './logger'
 
 const TOKEN_URL = 'https://oauth2.googleapis.com/token'
@@ -189,9 +190,15 @@ export function driveAudioName(createdAt: string, timezone: string | null | unde
   return `${p.year}-${p.month}-${p.day}-${p.hour}${p.minute}${p.second}.${ext}`
 }
 
-/** Прямая ссылка для <audio> в Obsidian (публичный файл, без предупреждений). */
-export function driveDirectUrl(fileId: string): string {
-  return `https://drive.usercontent.google.com/download?id=${encodeURIComponent(fileId)}&export=download&confirm=t`
+/**
+ * Ссылка для <audio> в Obsidian и в карточках Nucleus — через наш
+ * стриминг-прокси diary-audio-stream. Прямые ссылки Drive непригодны для
+ * Chromium: тот отдаёт application/octet-stream + nosniff + attachment,
+ * и медиаплеер отказывается играть (0:00/0:00). Прокси отдаёт тот же
+ * публичный файл с правильным Content-Type и поддержкой Range.
+ */
+export function driveStreamUrl(fileId: string): string {
+  return `${SUPABASE_URL}/functions/v1/diary-audio-stream?id=${encodeURIComponent(fileId)}`
 }
 
 /** Открывает файл «всем, у кого есть ссылка» (reader). Без этого Obsidian не проиграет аудио. */

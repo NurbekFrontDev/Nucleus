@@ -14,7 +14,8 @@
 import { supabase } from './supabase'
 import { isOnline } from './offlineSync'
 import { log } from './logger'
-import { deleteDriveFile, driveAudioName, getDriveConfig, isDriveAudioPath, uploadDiaryAudio } from './drive'
+import fixWebmDuration from 'fix-webm-duration'
+import { deleteDriveFile, driveStreamUrl, driveAudioName, getDriveConfig, isDriveAudioPath, uploadDiaryAudio } from './drive'
 
 // ===== Типы (ParsedDiarySummary — из Echo, без изменений) =====
 
@@ -288,6 +289,22 @@ async function insertEntry(
 }
 
 /**
+ * Ссылка на аудио записи для плеера в карточках (Сегодня/История).
+ * Новые записи: стриминг-прокси из Drive (правильный Content-Type для
+ * Chromium). Легаси до v0.1.62: подписанный URL приватного бакета на час.
+ */
+export async function getEntryAudioUrl(entry: DiaryEntry): Promise<string | null> {
+  if (entry.source !== 'voice' || !entry.audio_path) return null
+  if (isDriveAudioPath(entry.audio_path)) return driveStreamUrl(entry.audio_path)
+  try {
+    const { data } = await supabase.storage.from('diary-audio').createSignedUrl(entry.audio_path, 3600)
+    return data?.signedUrl ?? null
+  } catch {
+    return null
+  }
+}
+
+/**
  * Текстовая запись: оригинал уходит вместе со строкой (одна вставка, офлайн —
  * через очередь общего офлайн-слоя). Пайплайн не запускается здесь — экран
  * сам вызывает runEntryPipeline, чтобы узнать о завершении и перерисовать
@@ -303,14 +320,24 @@ export async function sendTextEntry(
 
 /**
  * Голосовая запись: клип кэшируется локально сразу (переживёт закрытие
- * приложения без сети), дальше — обычный пайплайн.
+ * приложения без сети), дальше — обычный пайплайн. Для webm в заголовок
+ * вписывается реальная длительность (MediaRecorder её не пишет — плееры
+ * показывали 0:00/Infinity и ломаный прогресс-бар).
  */
 export async function sendVoiceEntry(
   userId: string,
-  clip: { blob: Blob; ext: string },
+  clip: { blob: Blob; ext: string; durationMs?: number },
 ): Promise<{ entry: DiaryEntry; done: boolean }> {
+  let blob = clip.blob
+  if (clip.ext === 'webm' && typeof clip.durationMs === 'number' && clip.durationMs > 0) {
+    try {
+      blob = await fixWebmDuration(blob, clip.durationMs)
+    } catch (e) {
+      log.warn('diary', `webm duration patch failed, uploading as-is: ${String((e as Error)?.message ?? e)}`, {}, userId)
+    }
+  }
   const entry = await insertEntry(userId, 'voice')
-  await audioCachePut(entry.id, clip.blob)
+  await audioCachePut(entry.id, blob)
   return { entry, done: false }
 }
 

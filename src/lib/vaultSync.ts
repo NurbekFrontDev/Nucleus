@@ -15,7 +15,7 @@
 import { exists, mkdir, readTextFile, writeTextFile, writeFile, remove } from '@tauri-apps/plugin-fs'
 import { supabase } from './supabase'
 import { isDesktop } from './native'
-import { driveDirectUrl, isDriveAudioPath } from './drive'
+import { driveStreamUrl, isDriveAudioPath } from './drive'
 import type { DiaryEntry } from './diary'
 
 // Строго ограниченный capability-скоуп в src-tauri/capabilities/default.json.
@@ -112,7 +112,7 @@ function buildEntryBlock(entry: DiaryEntry, audioName: string | null, audioUrl: 
   const exp = experimentLine(entry)
   if (exp) lines.push(`**Эксперимент:** ${exp}`)
   lines.push(entry.source === 'voice' ? '**Источник:** голос (транскрибация Gemini)' : '**Источник:** текст')
-  if (audioUrl) lines.push(`**Аудио:** <audio controls preload="none" src="${audioUrl}"></audio>`)
+  if (audioUrl) lines.push(`**Аудио:** <audio controls preload="metadata" src="${audioUrl}"></audio>`)
   else if (audioName) lines.push(`**Аудио:** ![[${audioName}]]`)
   lines.push('')
   lines.push('> [!quote] Оригинал (дословно, без изменений)')
@@ -271,7 +271,7 @@ async function syncSingleEntry(entry: DiaryEntry): Promise<void> {
   // копии). Легаси: локальный файл в audio/YYYY/MM + ![[…]]-embed.
   const audioUrl =
     !audioName && entry.source === 'voice' && isDriveAudioPath(entry.audio_path)
-      ? driveDirectUrl(entry.audio_path)
+      ? driveStreamUrl(entry.audio_path)
       : null
   const block = buildEntryBlock(entry, audioName, audioUrl)
 

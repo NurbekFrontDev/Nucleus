@@ -7,6 +7,9 @@ import { flushOfflineQueue, offlineFetch } from './offlineSync'
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL as string
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY as string
 
+/** Базовый URL проекта (для ссылок на Edge Functions вне supabase-js). */
+export const SUPABASE_URL = supabaseUrl
+
 if (!supabaseUrl || !supabaseAnonKey) {
   throw new Error(
     'Не заданы переменные окружения VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY. Проверь файл .env в корне проекта.',
