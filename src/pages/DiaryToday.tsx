@@ -412,8 +412,23 @@ export default function DiaryToday() {
     const el = inputRef.current
     if (!el) return
     el.style.height = 'auto'
-    const fresh = Math.max(120, Math.floor(window.innerHeight - 240))
-    if (inputCapRef.current === 0 || fresh > inputCapRef.current) inputCapRef.current = fresh
+    // Потолок измеряем по факту, а не константой: высота экрана минус шапка
+    // минус вся обвязка композера (кнопки, отступы, зона пузыря ассистента).
+    // Раньше на телефоне константа давала композер выше доступного места —
+    // колонка переполняла main, main начинал скроллиться, и фон «ехал» под
+    // заморозкой. Замер гарантирует: шапка + композер ≤ экрана.
+    const composer = el.closest<HTMLElement>('[data-composer]')
+    const main = el.closest<HTMLElement>('main')
+    const header = document.querySelector<HTMLElement>('[data-diary-header]')
+    let base = 150
+    if (composer) base = composer.offsetHeight - el.offsetHeight
+    let avail = (main?.clientHeight ?? window.innerHeight) - (header?.offsetHeight ?? 0) - base
+    if (main) {
+      const cs = getComputedStyle(main)
+      avail -= parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom)
+    }
+    const cap = Math.max(120, Math.floor(avail))
+    if (inputCapRef.current === 0 || cap > inputCapRef.current) inputCapRef.current = cap
     el.style.height = Math.min(el.scrollHeight, inputCapRef.current) + 'px'
     setInputExpanded(el.scrollHeight > inputCapRef.current)
   }, [])
@@ -427,7 +442,10 @@ export default function DiaryToday() {
   return (
     <div className="flex h-full flex-col">
       {/* Шапка экрана: закреплена сверху (название, дата и статус вольта) */}
-      <div className="sticky top-0 z-20 -mx-4 mb-3 shrink-0 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85">
+      <div
+        data-diary-header
+        className="sticky top-0 z-20 -mx-4 mb-3 shrink-0 border-b border-neutral-200/70 bg-white/85 px-4 py-3 backdrop-blur dark:border-neutral-800/70 dark:bg-neutral-950/85"
+      >
         <div className="flex items-baseline justify-between">
           <h1 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">
             📓 {t('mod.diary')}
@@ -485,8 +503,13 @@ export default function DiaryToday() {
         </div>
       </div>
 
-      {/* Ввод: текст + mic */}
-      <div className="sticky bottom-0 -mx-4 border-t border-neutral-200 bg-white/95 px-4 pb-[env(safe-area-inset-bottom)] pt-3 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95">
+      {/* Ввод: текст + mic. На мобильном под полем оставлена зона пузыря
+          ассистента (bottom-28 right-4): кнопки записи/отправки стоят чуть
+          ВЫШЕ пузыря и никогда с ним не пересекаются. */}
+      <div
+        data-composer
+        className="sticky bottom-0 -mx-4 border-t border-neutral-200 bg-white/95 px-4 pb-[calc(env(safe-area-inset-bottom)+6.5rem)] pt-3 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/95 md:pb-3"
+      >
         {micDenied && (
           <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-3.5 py-2.5 dark:border-amber-900/60 dark:bg-amber-950/30">
             <span className="text-xs leading-snug text-amber-800 dark:text-amber-200">

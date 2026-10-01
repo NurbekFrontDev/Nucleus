@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { useLang } from '../lib/i18n'
 import type { DiaryEntry, DiaryExperiment, ExperimentPatch } from '../lib/diary'
 import ConfirmDialog from './ConfirmDialog'
+import DatePicker from './DatePicker'
 
 // Блок прогресса экспериментов/челленджей: название, день X из Y, серия
 // успехов, последний совет коуча. Прогресс считается по готовым записям,
@@ -112,12 +113,8 @@ function ExperimentEditForm({
           <span className="text-xs font-medium text-neutral-500 dark:text-neutral-400">
             {t('diary.expStartLabel')}
           </span>
-          <input
-            type="date"
-            value={startedOn}
-            onChange={(e) => setStartedOn(e.target.value)}
-            className={inputCls}
-          />
+          {/* Календарь в общем стиле приложения (никаких дефолтных <input type=date>) */}
+          <DatePicker value={startedOn} onChange={setStartedOn} placement="top" />
         </label>
       </div>
       <label className="flex flex-col gap-1">
@@ -264,6 +261,12 @@ export default function DiaryExperiments({
                       )}
                     </span>
                   </div>
+                  {/* Критерии эксперимента — видны прямо в карточке */}
+                  {experiment.criteria && (
+                    <p className="mt-1.5 text-xs leading-relaxed text-neutral-500 dark:text-neutral-400">
+                      📋 {experiment.criteria}
+                    </p>
+                  )}
                   {pct !== null && (
                     <div className="mt-2 h-1.5 w-full overflow-hidden rounded-full bg-neutral-100 dark:bg-neutral-800">
                       <div
