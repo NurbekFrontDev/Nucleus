@@ -39,7 +39,7 @@ import { readCache, writeCache } from '../lib/offlineCache'
 import { log } from '../lib/logger'
 import DiaryEntryCard from '../components/DiaryEntryCard'
 import DiaryExperiments from '../components/DiaryExperiments'
-import VoiceRecordingCapsule from '../components/VoiceRecordingCapsule'
+import VoiceWaveform, { type MicIssue } from '../components/VoiceWaveform'
 
 // Экран «Сегодня»: чат-подобная лента записей дня + ввод текста/голоса.
 // Главный жест — одна кнопка: нажал mic → сказал → пайплайн сам дотранскрибирует,
@@ -61,6 +61,13 @@ function fmtDate(lang: string, d: Date = new Date()): string {
     month: 'long',
     year: 'numeric',
   })
+}
+
+function fmtTimer(ms: number): string {
+  const total = Math.floor(ms / 1000)
+  const m = String(Math.floor(total / 60)).padStart(2, '0')
+  const s = String(total % 60).padStart(2, '0')
+  return `${m}:${s}`
 }
 
 export default function DiaryToday() {
@@ -87,6 +94,7 @@ export default function DiaryToday() {
   const [elapsed, setElapsed] = useState(0)
   const [micDenied, setMicDenied] = useState(false)
   const [micNotFound, setMicNotFound] = useState(false)
+  const [micIssue, setMicIssue] = useState<MicIssue>(null)
   // Поле ввода развернулось до предела (длинная диктовка): фон замораживаем,
   // чтобы скролл внутри/снаружи поля не двигал ленту за ним.
   const [inputExpanded, setInputExpanded] = useState(false)
@@ -244,6 +252,7 @@ export default function DiaryToday() {
       setRecording(false)
       setMicDenied(false)
       setMicNotFound(false)
+      setMicIssue(null)
       try {
         log.info('diary', 'Voice entry recorded', { bytes: clip.blob.size, ext: clip.ext }, userId)
         const { entry } = await sendVoiceEntry(userId, clip)
@@ -268,6 +277,7 @@ export default function DiaryToday() {
     cancelRecording()
     setRecording(false)
     setMicNotFound(false)
+    setMicIssue(null)
     setElapsed(0)
     log.info('diary', 'Voice recording cancelled', {}, userId)
   }, [userId])
@@ -311,6 +321,7 @@ export default function DiaryToday() {
       setRecording(true)
       setMicDenied(false)
       setMicNotFound(false)
+      setMicIssue(null)
     } catch (e) {
       const code = (e as Error)?.message
       if (code === 'mic-denied') {
@@ -574,13 +585,51 @@ export default function DiaryToday() {
             </button>
           </div>
         )}
+        {micIssue && (
+          <div className="mb-3 flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50/80 px-3.5 py-2.5 dark:border-amber-900/60 dark:bg-amber-950/30">
+            <span className="text-xs leading-snug text-amber-800 dark:text-amber-200">
+              ⚠️{' '}
+              {micIssue === 'muted'
+                ? t('diary.micHardwareMuted')
+                : micIssue === 'disconnected'
+                  ? t('diary.micDisconnected')
+                  : t('diary.micNoAudio')}
+            </span>
+            <button
+              type="button"
+              onClick={() => setMicIssue(null)}
+              className="shrink-0 rounded-lg bg-amber-500 px-3 py-1 text-xs font-semibold text-white transition hover:bg-amber-600"
+            >
+              OK
+            </button>
+          </div>
+        )}
         {micActive ? (
-          <div className="flex justify-center pb-3 pt-1">
-            <VoiceRecordingCapsule
-              elapsedMs={elapsed}
-              onCancel={cancelRecordingNow}
-              onConfirm={() => void toggleMic()}
-            />
+          <div className="flex flex-wrap items-center justify-center gap-2 pb-3">
+            <div className="flex h-11 items-center gap-2.5 rounded-xl border border-neutral-200 bg-neutral-50 px-3.5 py-2 dark:border-neutral-800 dark:bg-neutral-900">
+              <span className="inline-block h-2.5 w-2.5 shrink-0 animate-pulse rounded-full bg-red-500" />
+              <span className="font-mono text-sm font-medium text-neutral-700 dark:text-neutral-200">
+                {t('diary.recording', { time: fmtTimer(elapsed) })}
+              </span>
+              <div className="mx-1 h-4 w-px bg-neutral-300 dark:bg-neutral-700" />
+              <VoiceWaveform onIssueChange={setMicIssue} />
+            </div>
+
+            <button
+              type="button"
+              onClick={cancelRecordingNow}
+              title={t('diary.micCancel')}
+              className="flex h-11 items-center gap-2 rounded-xl border border-neutral-300 px-4 text-sm font-medium text-neutral-600 transition hover:border-red-300 hover:bg-red-50 hover:text-red-600 dark:border-neutral-700 dark:text-neutral-300 dark:hover:border-red-900 dark:hover:bg-red-950/30 dark:hover:text-red-400 active:scale-95"
+            >
+              ✕ {t('diary.micCancel')}
+            </button>
+            <button
+              type="button"
+              onClick={() => void toggleMic()}
+              className="flex h-11 items-center gap-2 rounded-xl bg-red-500 px-5 text-sm font-semibold text-white transition hover:bg-red-600 active:scale-95"
+            >
+              ⏹ {t('diary.micStop')}
+            </button>
           </div>
         ) : (
           <div className="flex items-end gap-2 pb-3">
