@@ -1823,6 +1823,7 @@ export type ItemInput = {
 
 // Загружает все НЕ архивированные дела пользователя (для списка «Мои дела»).
 export async function loadAllItems(userId: string): Promise<PlannerItem[]> {
+  const cacheKey = `planitems:${userId}`
   // Авто-очистка дубликатов, созданных старой версией шаблонов:
   // Если есть разовое дело (repeat_rule='none'), у которого название совпадает с
   // существующей активной повторяющейся привычкой/делом (repeat_rule!='none'):
@@ -1833,7 +1834,7 @@ export async function loadAllItems(userId: string): Promise<PlannerItem[]> {
       .select('id, title, repeat_rule, archived')
       .eq('user_id', userId)
       .eq('archived', false)
-  if (allItems && allItems.length > 0) {
+    if (allItems && allItems.length > 0) {
       const recurringTitles = new Set(
         allItems
           .filter((i) => i.repeat_rule && i.repeat_rule !== 'none')
@@ -1857,52 +1858,73 @@ export async function loadAllItems(userId: string): Promise<PlannerItem[]> {
     console.warn('Deduplication cleanup error:', e)
   }
 
-  const { data, error } = await safePlannerItemsQuery((cols) =>
-    supabase
-      .from('planner_items')
-      .select(cols)
-      .eq('user_id', userId)
-      .eq('archived', false)
-      .order('sort_order', { ascending: true })
-      .order('created_at', { ascending: true }),
-  )
-  if (error) throw error
-  const loaded = (data ?? []) as unknown as PlannerItem[]
-  for (const it of loaded) {
-    it.steps = parseItemSteps(it)
+  try {
+    const { data, error } = await safePlannerItemsQuery((cols) =>
+      supabase
+        .from('planner_items')
+        .select(cols)
+        .eq('user_id', userId)
+        .eq('archived', false)
+        .order('sort_order', { ascending: true })
+        .order('created_at', { ascending: true }),
+    )
+    if (error) {
+      const cached = readCache<PlannerItem[]>(cacheKey)
+      if (cached) return cached
+      throw error
+    }
+    const loaded = (data ?? []) as unknown as PlannerItem[]
+    for (const it of loaded) {
+      it.steps = parseItemSteps(it)
+    }
+    writeCache(cacheKey, loaded)
+    return loaded
+  } catch (err) {
+    const cached = readCache<PlannerItem[]>(cacheKey)
+    if (cached) return cached
+    throw err
   }
-  return loaded
 }
 
 // Загружает вручную заархивированные дела (подвкладка «Архив» в «Мои дела»).
 // Авто-архив (выполненные разовые дела, дубликаты) имеет archived_at=NULL
 // и сюда не попадает — он невидим, как и раньше.
 export async function loadArchivedItems(userId: string): Promise<PlannerItem[]> {
-  if (!hasArchivedAtColumn) return []
-  const { data, error } = await safePlannerItemsQuery((cols) =>
-    supabase
-      .from('planner_items')
-      .select(cols)
-      .eq('user_id', userId)
-      .eq('archived', true)
-      .not('archived_at', 'is', null)
-      .order('archived_at', { ascending: false })
-      .order('created_at', { ascending: false }),
-  )
-  if (error) {
-    // Миграция с archived_at ещё не выполнена — архива просто ещё нет.
-    const msg = String((error as any)?.message || '')
-    if (msg.includes('archived_at')) {
-      hasArchivedAtColumn = false
-      return []
+  const cacheKey = `planarchived:${userId}`
+  if (!hasArchivedAtColumn) return readCache<PlannerItem[]>(cacheKey) ?? []
+  try {
+    const { data, error } = await safePlannerItemsQuery((cols) =>
+      supabase
+        .from('planner_items')
+        .select(cols)
+        .eq('user_id', userId)
+        .eq('archived', true)
+        .not('archived_at', 'is', null)
+        .order('archived_at', { ascending: false })
+        .order('created_at', { ascending: false }),
+    )
+    if (error) {
+      // Миграция с archived_at ещё не выполнена — архива просто ещё нет.
+      const msg = String((error as any)?.message || '')
+      if (msg.includes('archived_at')) {
+        hasArchivedAtColumn = false
+        return []
+      }
+      const cached = readCache<PlannerItem[]>(cacheKey)
+      if (cached) return cached
+      throw error
     }
-    throw error
+    const loaded = (data ?? []) as unknown as PlannerItem[]
+    for (const it of loaded) {
+      it.steps = parseItemSteps(it)
+    }
+    writeCache(cacheKey, loaded)
+    return loaded
+  } catch (err) {
+    const cached = readCache<PlannerItem[]>(cacheKey)
+    if (cached) return cached
+    throw err
   }
-  const loaded = (data ?? []) as unknown as PlannerItem[]
-  for (const it of loaded) {
-    it.steps = parseItemSteps(it)
-  }
-  return loaded
 }
 
 // Положить дело в архив вручную (кнопка корзины в «Мои дела»).
@@ -1913,6 +1935,18 @@ export async function archiveItemFromToday(
   id: string,
   dateStr: string = todayStr(),
 ): Promise<void> {
+  const activeKey = `planitems:${userId}`
+  const archKey = `planarchived:${userId}`
+  const cachedActive = readCache<PlannerItem[]>(activeKey)
+  const cachedArch = readCache<PlannerItem[]>(archKey) ?? []
+  if (cachedActive) {
+    const it = cachedActive.find((x) => x.id === id)
+    if (it) {
+      writeCache(activeKey, cachedActive.filter((x) => x.id !== id))
+      writeCache(archKey, [{ ...it, archived: true, archived_at: dateStr }, ...cachedArch.filter((x) => x.id !== id)])
+    }
+  }
+
   const { error } = await supabase
     .from('planner_items')
     .update({ archived: true, archived_at: dateStr })
@@ -1931,6 +1965,18 @@ export async function archiveItemFromToday(
 
 // Вернуть дело из архива в активный список «Мои дела».
 export async function restoreItemFromArchive(userId: string, id: string): Promise<void> {
+  const activeKey = `planitems:${userId}`
+  const archKey = `planarchived:${userId}`
+  const cachedActive = readCache<PlannerItem[]>(activeKey) ?? []
+  const cachedArch = readCache<PlannerItem[]>(archKey)
+  if (cachedArch) {
+    const it = cachedArch.find((x) => x.id === id)
+    if (it) {
+      writeCache(archKey, cachedArch.filter((x) => x.id !== id))
+      writeCache(activeKey, [{ ...it, archived: false, archived_at: null }, ...cachedActive.filter((x) => x.id !== id)])
+    }
+  }
+
   const { error } = await supabase
     .from('planner_items')
     .update({ archived: false, archived_at: null })
@@ -2004,6 +2050,11 @@ export async function createItem(userId: string, input: ItemInput): Promise<Plan
     item.steps = input.steps
     void persistItemStepsToCloud(userId, item.id, input.steps)
   }
+  const activeKey = `planitems:${userId}`
+  const cachedActive = readCache<PlannerItem[]>(activeKey)
+  if (cachedActive) {
+    writeCache(activeKey, [...cachedActive.filter((x) => x.id !== item.id), item])
+  }
   return item
 }
 
@@ -2075,6 +2126,11 @@ export async function updateItem(
     setLocalItemSteps(id, input.steps)
     item.steps = input.steps
     void persistItemStepsToCloud(userId, id, input.steps)
+  }
+  const activeKey = `planitems:${userId}`
+  const cachedActive = readCache<PlannerItem[]>(activeKey)
+  if (cachedActive) {
+    writeCache(activeKey, cachedActive.map((i) => (i.id === id ? item : i)))
   }
   return item
 }
@@ -2162,6 +2218,11 @@ export async function freezePastDays(userId: string, item: PlannerItem): Promise
 // Мягко удаляет дело (archived=true): оно пропадает из списков, но отметки
 // о выполнении в planner_logs остаются для истории и статистики.
 export async function archiveItem(userId: string, id: string): Promise<void> {
+  const activeKey = `planitems:${userId}`
+  const cachedActive = readCache<PlannerItem[]>(activeKey)
+  if (cachedActive) {
+    writeCache(activeKey, cachedActive.filter((x) => x.id !== id))
+  }
   const { error } = await supabase
     .from('planner_items')
     .update({ archived: true })

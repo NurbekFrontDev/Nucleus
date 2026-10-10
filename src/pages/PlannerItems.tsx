@@ -18,6 +18,7 @@ import {
   endTimeFromDuration,
   durationBetweenTimes,
   formatDuration,
+  todayStr,
   addDays,
   PRIORITY_DOT,
   getHiddenStatus,
@@ -91,8 +92,37 @@ const emptyForm: FormState = {
 export default function PlannerItems() {
   const { user } = useAuth()
   const { t, lang } = useLang()
-  const [items, setItems] = useState<PlannerItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const tabStorageKey = user ? `nucleus:planitems:tab:${user.id}` : 'nucleus:planitems:tab'
+  const [tab, setTabState] = useState<'tasks' | 'archive'>(() => {
+    try {
+      const saved = localStorage.getItem(user ? `nucleus:planitems:tab:${user.id}` : 'nucleus:planitems:tab')
+      return saved === 'archive' || saved === 'tasks' ? saved : 'tasks'
+    } catch {
+      return 'tasks'
+    }
+  })
+
+  const setTab = (nextTab: 'tasks' | 'archive') => {
+    setTabState(nextTab)
+    try {
+      localStorage.setItem(tabStorageKey, nextTab)
+    } catch {}
+  }
+
+  const [items, setItems] = useState<PlannerItem[]>(() => {
+    if (!user) return []
+    return readCache<PlannerItem[]>(`planitems:${user.id}`) ?? []
+  })
+  const [archivedList, setArchivedList] = useState<PlannerItem[]>(() => {
+    if (!user) return []
+    return readCache<PlannerItem[]>(`planarchived:${user.id}`) ?? []
+  })
+  const [loading, setLoading] = useState<boolean>(() => {
+    if (!user) return true
+    const cItems = readCache<PlannerItem[]>(`planitems:${user.id}`)
+    const cArch = readCache<PlannerItem[]>(`planarchived:${user.id}`)
+    return !cItems && !cArch
+  })
   const [error, setError] = useState('')
   const [showForm, setShowForm] = useState(false)
   const [editId, setEditId] = useState<string | null>(null)
@@ -101,9 +131,6 @@ export default function PlannerItems() {
   const [newStepText, setNewStepText] = useState('')
   const [saving, setSaving] = useState(false)
   const [delItem, setDelItem] = useState<PlannerItem | null>(null)
-  // Подвкладки «Мои дела»: Задачи (активные) и Архив (вручную заархивированные).
-  const [tab, setTab] = useState<'tasks' | 'archive'>('tasks')
-  const [archivedList, setArchivedList] = useState<PlannerItem[]>([])
   // Дело, у которого открыто выпадающее меню глазика (варианты скрытия).
   const [hideMenuAnchor, setHideMenuAnchor] = useState<{ id: string; el: HTMLElement } | null>(null)
 
@@ -142,6 +169,7 @@ export default function PlannerItems() {
   const persistOrder = async (ordered: PlannerItem[]) => {
     if (!user) return
     try {
+      writeCache(`planitems:${user.id}`, ordered)
       await saveItemsOrder(user.id, ordered.map((i) => i.id))
     } catch (e) {
       setError((e as Error).message)
@@ -210,6 +238,7 @@ export default function PlannerItems() {
         const [moved] = next.splice(d.fromIndex, 1)
         next.splice(d.overIndex, 0, moved)
         setItems(next)
+        if (user) writeCache(`planitems:${user.id}`, next)
         void persistOrder(next)
       }
       dragRef.current = null
@@ -260,11 +289,17 @@ export default function PlannerItems() {
 
   const loadAll = async () => {
     if (!user) return
-    // Мгновенно показываем кэш (без спиннера и без интернета), сеть обновляет в фоне.
-    const ck = `planitems:${user.id}`
-    const cached = readCache<PlannerItem[]>(ck)
-    if (cached) {
-      setItems(cached)
+    const ckItems = `planitems:${user.id}`
+    const ckArch = `planarchived:${user.id}`
+    const cachedItems = readCache<PlannerItem[]>(ckItems)
+    const cachedArch = readCache<PlannerItem[]>(ckArch)
+    if (cachedItems && cachedItems.length > 0 && items.length === 0) {
+      setItems(cachedItems)
+    }
+    if (cachedArch && cachedArch.length > 0 && archivedList.length === 0) {
+      setArchivedList(cachedArch)
+    }
+    if (cachedItems || cachedArch) {
       setLoading(false)
     } else {
       setLoading(true)
@@ -276,18 +311,34 @@ export default function PlannerItems() {
       ])
       setItems(list)
       setArchivedList(archived)
-      writeCache(ck, list)
+      writeCache(ckItems, list)
+      writeCache(ckArch, archived)
+      setError('')
     } catch (e) {
-      setError((e as Error).message)
+      if (!cachedItems && !cachedArch) {
+        setError((e as Error).message)
+      }
     } finally {
       setLoading(false)
     }
   }
 
   useEffect(() => {
-    loadAll()
+    if (!user) return
+    const ckItems = `planitems:${user.id}`
+    const ckArch = `planarchived:${user.id}`
+    const cachedItems = readCache<PlannerItem[]>(ckItems)
+    const cachedArch = readCache<PlannerItem[]>(ckArch)
+    if (cachedItems) setItems(cachedItems)
+    if (cachedArch) setArchivedList(cachedArch)
+    if (cachedItems || cachedArch) setLoading(false)
+    try {
+      const saved = localStorage.getItem(`nucleus:planitems:tab:${user.id}`)
+      if (saved === 'archive' || saved === 'tasks') setTabState(saved)
+    } catch {}
+    void loadAll()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user])
+  }, [user?.id])
 
   // Мгновенная синхронизация дел
   useEffect(() => {
@@ -297,7 +348,7 @@ export default function PlannerItems() {
     })
     return unsub
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user])
+  }, [user?.id])
 
   const openAdd = () => {
     setEditId(null)
@@ -454,18 +505,24 @@ export default function PlannerItems() {
         steps: form.steps,
       }
       if (editId) {
-        await updateItem(user.id, editId, input)
+        const updated = await updateItem(user.id, editId, input)
+        const nextItems = items.map((i) => (i.id === editId ? updated : i))
+        setItems(nextItems)
+        writeCache(`planitems:${user.id}`, nextItems)
         try {
           localStorage.setItem(`nucleus:durationUnit:${editId}`, durationUnit)
         } catch {}
       } else {
         const created = await createItem(user.id, input)
+        const nextItems = [created, ...items]
+        setItems(nextItems)
+        writeCache(`planitems:${user.id}`, nextItems)
         try {
           localStorage.setItem(`nucleus:durationUnit:${created.id}`, durationUnit)
         } catch {}
       }
       cancel()
-      await loadAll()
+      void loadAll()
     } catch (e) {
       setError((e as Error).message || t('common.saveFailed'))
     } finally {
@@ -473,26 +530,70 @@ export default function PlannerItems() {
     }
   }
 
-  // Кнопка корзины теперь отправляет дело в АРХИВ (не удаляет): со дня архивации
+  // Кнопка корзины отправляет дело в АРХИВ (Local-first): со дня архивации
   // дело исчезает из «Сегодня» и будущих дней, прошлые дни остаются в истории.
   const confirmDelete = async () => {
     if (!user || !delItem) return
+    const target = delItem
+    const dateToday = todayStr()
+    setDelItem(null)
+
+    // Local-first: мгновенно обновляем интерфейс и кэш
+    const prevItems = items
+    const prevArchived = archivedList
+    const nextItems = items.filter((i) => i.id !== target.id)
+    const nextArchivedItem: PlannerItem = {
+      ...target,
+      archived: true,
+      archived_at: dateToday,
+    }
+    const nextArchived = [nextArchivedItem, ...archivedList.filter((i) => i.id !== target.id)]
+
+    setItems(nextItems)
+    setArchivedList(nextArchived)
+    writeCache(`planitems:${user.id}`, nextItems)
+    writeCache(`planarchived:${user.id}`, nextArchived)
+
     try {
-      await archiveItemFromToday(user.id, delItem.id)
-      setDelItem(null)
-      await loadAll()
+      await archiveItemFromToday(user.id, target.id, dateToday)
     } catch (e) {
+      // Откат при сбое сети
+      setItems(prevItems)
+      setArchivedList(prevArchived)
+      writeCache(`planitems:${user.id}`, prevItems)
+      writeCache(`planarchived:${user.id}`, prevArchived)
       setError((e as Error).message)
     }
   }
 
-  // Вернуть дело из архива в активный список.
+  // Вернуть дело из архива в активный список (Local-first).
   const confirmRestore = async (it: PlannerItem) => {
     if (!user) return
+
+    // Local-first: мгновенно обновляем интерфейс и кэш
+    const prevItems = items
+    const prevArchived = archivedList
+    const nextArchived = archivedList.filter((i) => i.id !== it.id)
+    const restoredItem: PlannerItem = {
+      ...it,
+      archived: false,
+      archived_at: null,
+    }
+    const nextItems = [restoredItem, ...items.filter((i) => i.id !== it.id)]
+
+    setArchivedList(nextArchived)
+    setItems(nextItems)
+    writeCache(`planitems:${user.id}`, nextItems)
+    writeCache(`planarchived:${user.id}`, nextArchived)
+
     try {
       await restoreItemFromArchive(user.id, it.id)
-      await loadAll()
     } catch (e) {
+      // Откат при сбое сети
+      setArchivedList(prevArchived)
+      setItems(prevItems)
+      writeCache(`planitems:${user.id}`, prevItems)
+      writeCache(`planarchived:${user.id}`, prevArchived)
       setError((e as Error).message)
     }
   }
@@ -1096,7 +1197,9 @@ export default function PlannerItems() {
 
       {tab === 'archive' ? (
         <div className="flex flex-col gap-2">
-          {archivedList.length === 0 ? (
+          {loading && archivedList.length === 0 ? (
+            <p className="text-sm text-neutral-500 dark:text-neutral-400">{t('common.loading')}</p>
+          ) : archivedList.length === 0 ? (
             <p className="rounded-xl border border-dashed border-neutral-300 p-6 text-center text-sm text-neutral-500 dark:border-neutral-700 dark:text-neutral-400">
               {t('items.archiveEmpty')}
             </p>
