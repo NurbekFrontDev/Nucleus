@@ -44,15 +44,31 @@ export function isRecordingSupported(): boolean {
   )
 }
 
+/** Активный аудиопоток текущей записи (для Web Audio API / визуализатора волн). */
+export function getActiveAudioStream(): MediaStream | null {
+  return active ? active.stream : null
+}
+
+/** Проверяет наличие подключённых устройств ввода звука в системе. */
+export async function hasAudioInputDevice(): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.mediaDevices?.enumerateDevices) return true
+  try {
+    const devices = await navigator.mediaDevices.enumerateDevices()
+    return devices.some((d) => d.kind === 'audioinput')
+  } catch {
+    return true
+  }
+}
+
 /** Сколько идёт текущая запись (мс); 0 — если запись не активна. */
 export function recordingElapsedMs(): number {
   return active ? Date.now() - active.startedAt : 0
 }
 
 /**
- * Стартует запись. Бросает Error с кодом 'mic-denied' (нет разрешения) или
- * 'mic-unavailable' (нет микрофона/API). onAutoStop срабатывает при
- * достижении лимита 15 минут — результат приходит в колбэк.
+ * Стартует запись. Бросает Error с кодом 'mic-denied' (нет разрешения),
+ * 'mic-not-found' (нет микрофона) или 'mic-unavailable' (нет API/ошибка).
+ * onAutoStop срабатывает при достижении лимита 15 минут — результат приходит в колбэк.
  */
 export async function startRecording(onAutoStop?: (r: RecordResult) => void): Promise<void> {
   if (active) return
@@ -65,6 +81,9 @@ export async function startRecording(onAutoStop?: (r: RecordResult) => void): Pr
     const name = (e as DOMException)?.name ?? ''
     if (name === 'NotAllowedError' || name === 'SecurityError') {
       throw new Error('mic-denied', { cause: e })
+    }
+    if (name === 'NotFoundError' || name === 'DevicesNotFoundError') {
+      throw new Error('mic-not-found', { cause: e })
     }
     throw new Error('mic-unavailable', { cause: e })
   }
